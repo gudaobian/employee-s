@@ -423,28 +423,51 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
     try {
       const startTime = Date.now();
 
-      // 使用Socket.IO emit发送事件
-      this.socket!.emit(event, data, (response: any) => {
-        const duration = Date.now() - startTime;
+      // 计算数据大小
+      let dataSize = 0;
+      try {
+        dataSize = JSON.stringify(data).length;
+      } catch {
+        dataSize = data?.buffer?.length || 0;
+      }
 
-        if (response && response.success) {
-          console.log(`[WEBSOCKET] ✅ Upload SUCCESS: ${event}`, {
-            duration: `${duration}ms`,
-            dataSize: JSON.stringify(data).length,
-            response: response.message || 'OK'
-          });
-        } else {
-          console.error(`[WEBSOCKET] ❌ Upload FAILED: ${event}`, {
-            duration: `${duration}ms`,
-            error: response?.error || 'Unknown error',
-            message: response?.message,
-            success: response?.success
-          });
-        }
+      console.log(`[WEBSOCKET] Sending ${event} (${Math.round(dataSize / 1024)} KB)`);
+
+      // 使用 Promise 包装以支持超时和错误处理
+      await new Promise<void>((resolve, reject) => {
+        // 设置超时: 截图15秒，其他5秒
+        const timeout = event === 'client:screenshot' ? 15000 : 5000;
+        const timeoutId = setTimeout(() => {
+          reject(new Error(`Upload timeout after ${timeout}ms`));
+        }, timeout);
+
+        // 使用Socket.IO emit发送事件
+        this.socket!.emit(event, data, (response: any) => {
+          clearTimeout(timeoutId);
+          const duration = Date.now() - startTime;
+
+          if (response && response.success) {
+            console.log(`[WEBSOCKET] ✅ Upload SUCCESS: ${event}`, {
+              duration: `${duration}ms`,
+              dataSize: `${Math.round(dataSize / 1024)} KB`,
+              response: response.message || 'OK'
+            });
+            resolve();
+          } else {
+            const errorMsg = response?.error || response?.message || 'Unknown error';
+            console.error(`[WEBSOCKET] ❌ Upload FAILED: ${event}`, {
+              duration: `${duration}ms`,
+              dataSize: `${Math.round(dataSize / 1024)} KB`,
+              error: errorMsg,
+              details: response?.details || response?.data,
+              success: response?.success
+            });
+            reject(new Error(`Server error: ${errorMsg}`));
+          }
+        });
       });
 
       this.stats.messagesSent++;
-      console.log(`[WEBSOCKET] Socket.IO event sent: ${event}`);
 
     } catch (error: any) {
       console.error(`[WEBSOCKET] ❌ Failed to send Socket.IO event ${event}:`, {

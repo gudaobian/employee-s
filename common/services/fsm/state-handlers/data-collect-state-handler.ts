@@ -1322,8 +1322,19 @@ export class DataCollectStateHandler extends BaseStateHandler {
             // 使用WebSocket服务的sendScreenshotData方法
             // 注意: 服务器期望字段名为 buffer 和 timestamp
             // deviceId 不需要发送，服务器从 socket session 中自动获取
+
+            // 🔧 关键修复: 将 Buffer 转换为 Base64 字符串
+            // Socket.IO 不能直接传输 Buffer，需要转换为字符串
+            const bufferBase64 = screenshotResult.data instanceof Buffer
+              ? screenshotResult.data.toString('base64')
+              : screenshotResult.data;
+
+            const dataSize = screenshotResult.data.length;
+            const base64Size = bufferBase64.length;
+            logger.info(`[DATA_COLLECT] 截图数据转换: Buffer(${dataSize} bytes) → Base64(${base64Size} chars)`);
+
             await this.websocketService.sendScreenshotData({
-              buffer: screenshotResult.data,  // 字段名必须是 buffer
+              buffer: bufferBase64,  // Base64 编码的字符串
               timestamp: screenshotResult.timestamp
             });
             logger.info('[DATA_COLLECT] ✅ 截图数据已通过WebSocket服务上传');
