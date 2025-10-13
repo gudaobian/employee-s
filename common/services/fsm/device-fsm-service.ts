@@ -297,6 +297,66 @@ export class DeviceFSMService extends EventEmitter implements IDeviceFSMService 
     });
 
     console.log(`[FSM] State transition: ${oldState} → ${newState}${reason ? ` (${reason})` : ''}`);
+
+    // 输出状态诊断信息
+    this.logStateDiagnostics(newState);
+  }
+
+  /**
+   * 输出状态诊断信息
+   */
+  private logStateDiagnostics(state: DeviceState): void {
+    const stateNames: Record<DeviceState, string> = {
+      [DeviceState.INIT]: '初始化',
+      [DeviceState.HEARTBEAT]: '心跳连接',
+      [DeviceState.REGISTER]: '设备注册',
+      [DeviceState.BIND_CHECK]: '绑定检查',
+      [DeviceState.WS_CHECK]: 'WebSocket连接',
+      [DeviceState.CONFIG_FETCH]: '配置获取',
+      [DeviceState.DATA_COLLECT]: '✅ 在线 - 数据收集中',
+      [DeviceState.UNBOUND]: '⚠️ 设备未绑定',
+      [DeviceState.DISCONNECT]: '❌ 断开连接',
+      [DeviceState.ERROR]: '❌ 错误状态'
+    };
+
+    const stateExplanations: Record<DeviceState, string> = {
+      [DeviceState.INIT]: '正在初始化客户端...',
+      [DeviceState.HEARTBEAT]: '正在连接服务器...',
+      [DeviceState.REGISTER]: '正在注册设备到服务器...',
+      [DeviceState.BIND_CHECK]: '正在检查设备是否已绑定员工...',
+      [DeviceState.WS_CHECK]: '正在建立实时通信通道...',
+      [DeviceState.CONFIG_FETCH]: '正在获取监控配置...',
+      [DeviceState.DATA_COLLECT]: '✅ 客户端已上线，正在收集监控数据',
+      [DeviceState.UNBOUND]: '⚠️ 设备未绑定到员工账户，等待管理员绑定',
+      [DeviceState.DISCONNECT]: '❌ 与服务器断开连接，正在重连...',
+      [DeviceState.ERROR]: '❌ 发生错误，正在尝试恢复...'
+    };
+
+    console.log('='.repeat(60));
+    console.log(`📊 当前状态: ${stateNames[state]}`);
+    console.log(`💬 说明: ${stateExplanations[state]}`);
+    console.log(`⏱️  状态持续时间: ${this.getStateDuration()}秒`);
+
+    // 如果是DATA_COLLECT状态，表示已上线
+    if (state === DeviceState.DATA_COLLECT) {
+      console.log('🎉 客户端已成功上线！');
+    } else if (state === DeviceState.UNBOUND) {
+      console.log('⚠️  请登录 Web 控制台将此设备绑定到员工账户');
+    } else if (state === DeviceState.DISCONNECT || state === DeviceState.ERROR) {
+      console.log('🔧 故障排查建议:');
+      console.log('   1. 检查网络连接');
+      console.log('   2. 确认服务器地址正确');
+      console.log('   3. 检查防火墙设置');
+    }
+
+    console.log('='.repeat(60));
+  }
+
+  /**
+   * 获取当前状态持续时间（秒）
+   */
+  private getStateDuration(): number {
+    return Math.floor((Date.now() - this.stateStartTime.getTime()) / 1000);
   }
 
   private isValidTransition(from: DeviceState, to: DeviceState): boolean {

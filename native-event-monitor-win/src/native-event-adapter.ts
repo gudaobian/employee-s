@@ -96,12 +96,36 @@ class WindowsNativeEventAdapter {
   async startMonitoring(): Promise<boolean> {
     try {
       if (this.nativeModule.startMonitoring) {
+        console.log('[NativeEventAdapter] Calling native startMonitoring()...');
         this.nativeModule.startMonitoring();
+
+        // Verify hooks were installed successfully
+        const counts = this.nativeModule.getEventCounts ? this.nativeModule.getEventCounts() : null;
+        if (counts) {
+          console.log('[NativeEventAdapter] Hook status:', {
+            keyboardHook: counts.keyboardHookInstalled ? '✅' : '❌',
+            mouseHook: counts.mouseHookInstalled ? '✅' : '❌',
+            isMonitoring: counts.isMonitoring
+          });
+
+          if (!counts.keyboardHookInstalled || !counts.mouseHookInstalled) {
+            console.error('[NativeEventAdapter] ⚠️ Hook 安装失败 - 可能需要管理员权限');
+            console.error('[NativeEventAdapter] 解决方案: 请右键以管理员身份运行应用程序');
+            return false;
+          }
+        }
+
+        console.log('[NativeEventAdapter] ✅ Native monitoring started successfully');
         return true;
       }
+      console.warn('[NativeEventAdapter] startMonitoring method not available');
       return false;
     } catch (error) {
-      console.error('Failed to start monitoring:', error);
+      console.error('[NativeEventAdapter] ❌ Failed to start monitoring:', error);
+      console.error('[NativeEventAdapter] 错误详情:', error instanceof Error ? error.message : String(error));
+      if (error instanceof Error && error.stack) {
+        console.error('[NativeEventAdapter] 堆栈跟踪:', error.stack);
+      }
       return false;
     }
   }

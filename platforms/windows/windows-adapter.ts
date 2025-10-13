@@ -405,12 +405,24 @@ Windows 截屏权限指导：
     
     // 启动原生事件监控
     if (this.nativeEventAdapter && this.nativeEventAdapter.isAvailable()) {
+      logger.info('🔄 正在启动 Windows 原生事件监控...');
       const started = await this.nativeEventAdapter.startMonitoring();
       if (started) {
         logger.info('✅ Windows原生事件监控已启动');
+        // 验证监控状态
+        const counts = await this.nativeEventAdapter.getEventCounts();
+        logger.info(`📊 监控状态: 键盘Hook=${counts.keyboardHookInstalled ? '✅' : '❌'}, 鼠标Hook=${counts.mouseHookInstalled ? '✅' : '❌'}`);
       } else {
-        logger.warn('⚠️ Windows原生事件监控启动失败，使用推断模式');
+        logger.warn('⚠️ Windows原生事件监控启动失败');
+        logger.warn('💡 可能的原因:');
+        logger.warn('   1. 应用程序需要管理员权限 (Windows Hook 需要提升权限)');
+        logger.warn('   2. 被杀毒软件拦截');
+        logger.warn('   3. 系统安全策略限制');
+        logger.warn('📝 解决方案: 请右键点击应用程序图标，选择"以管理员身份运行"');
+        logger.warn('⚙️ 当前使用推断模式继续运行 (功能受限)');
       }
+    } else {
+      logger.warn('⚠️ Windows原生事件监控模块不可用，使用推断模式');
     }
     
     // 每5秒采集一次活动数据
