@@ -1349,7 +1349,8 @@ export class DataCollectStateHandler extends BaseStateHandler {
 
             await this.websocketService.sendScreenshotData({
               buffer: bufferBase64,  // Base64 编码的字符串
-              timestamp: screenshotResult.timestamp
+              timestamp: screenshotResult.timestamp,
+              fileSize: dataSize  // 原始 Buffer 字节大小（不是 Base64 长度）
             });
             logger.info('[DATA_COLLECT] ✅ 截图数据已通过WebSocket服务上传');
             this.emitEvent('screenshot-uploaded', screenshotResult);
