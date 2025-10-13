@@ -1,0 +1,290 @@
+name: Precompile Windows Native Module
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'native-event-monitor-win/**'
+      - 'scripts/precompile-windows-native.js'
+      # 移除 workflow 文件触发，避免重复构建
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'native-event-monitor-win/**'
+      - 'scripts/precompile-windows-native.js'
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if no changes detected'
+        required: false
+        default: 'false'
+
+jobs:
+  precompile-windows:
+    name: Precompile for Windows
+    runs-on: windows-latest
+    
+    strategy:
+      matrix:
+        arch: [x64]
+        node_version: [18]  # Only Node.js 18 to match Electron 25
+        
+    env:
+      ELECTRON_CACHE: ~/.cache/electron
+      ELECTRON_BUILDER_CACHE: ~/.cache/electron-builder
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ matrix.node_version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node_version }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Setup Visual Studio Build Tools
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Cache native module build
+        uses: actions/cache@v4
+        with:
+          path: |
+            native-event-monitor-win/build
+            native-event-monitor-win/node_modules
+            ~/.npm
+          key: windows-native-v2-${{ matrix.arch }}-node${{ matrix.node_version }}-${{ hashFiles('native-event-monitor-win/package.json', 'native-event-monitor-win/binding.gyp', 'native-event-monitor-win/src/**/*.cpp', 'native-event-monitor-win/src/**/*.h') }}
+          restore-keys: |
+            windows-native-v2-${{ matrix.arch }}-node${{ matrix.node_version }}-
+
+      - name: Install dependencies
+        run: |
+          cd native-event-monitor-win
+          npm install
+        
+      - name: Run precompilation script
+        run: |
+          node scripts/precompile-windows-native.js
+        env:
+          NODE_ENV: production
+          
+      - name: Verify precompiled module
+        run: |
+          cd native-event-monitor-win
+          node verify-installation.js
+          
+      - name: Create build info
+        run: |
+          echo "BUILD_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
+          echo "COMMIT_SHA=${{ github.sha }}" >> $GITHUB_ENV
+          echo "NODE_VERSION=${{ matrix.node_version }}" >> $GITHUB_ENV
+          echo "ARCH=${{ matrix.arch }}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Package precompiled artifacts
+        run: |
+          $artifactName = "windows-native-module-node${{ matrix.node_version }}-${{ matrix.arch }}"
+          $artifactPath = "artifacts/$artifactName"
+
+          New-Item -ItemType Directory -Force -Path $artifactPath
+
+          # Copy precompiled files
+          Copy-Item -Path "native-event-monitor-win/precompiled/*" -Destination $artifactPath -Recurse -Force
+
+          # Create artifact info
+          $runnerOS = '${{ runner.os }}'
+          $workflowName = '${{ github.workflow }}'
+          $runId = '${{ github.run_id }}'
+
+          $buildInfo = @{
+              buildTime = $env:BUILD_TIME
+              commitSha = $env:COMMIT_SHA
+              nodeVersion = $env:NODE_VERSION
+              arch = $env:ARCH
+              platform = "win32"
+              runner = $runnerOS
+              workflow = $workflowName
+              runId = $runId
+          } | ConvertTo-Json -Depth 3
+
+          $buildInfo | Out-File -FilePath "$artifactPath/artifact-info.json" -Encoding UTF8
+
+          # List contents for verification
+          Write-Host "Artifact contents:"
+          Get-ChildItem -Path $artifactPath -Recurse | ForEach-Object {
+              $relativePath = $_.FullName.Substring($artifactPath.Length + 1)
+              if ($_.PSIsContainer) {
+                  $size = "[DIR]"
+              } else {
+                  $sizeKB = [math]::Round($_.Length / 1KB, 2)
+                  $size = "$sizeKB KB"
+              }
+              Write-Host "   $relativePath - $size"
+          }
+        shell: powershell
+
+      - name: Upload precompiled artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-module-node${{ matrix.node_version }}-${{ matrix.arch }}
+          path: artifacts/windows-native-module-node${{ matrix.node_version }}-${{ matrix.arch }}/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-node${{ matrix.node_version }}-${{ matrix.arch }}
+          path: |
+            native-event-monitor-win/build/config.gypi
+            native-event-monitor-win/build/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+  create-release-package:
+    name: Create Release Package
+    runs-on: ubuntu-latest
+    needs: precompile-windows
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-artifacts
+
+      - name: Create release package
+        run: |
+          mkdir -p release-package/precompiled-modules
+          
+          # Combine all precompiled modules
+          for artifact_dir in downloaded-artifacts/windows-native-module-*; do
+            if [ -d "$artifact_dir" ]; then
+              artifact_name=$(basename "$artifact_dir")
+              echo "📦 Processing artifact: $artifact_name"
+              
+              # Create directory structure
+              mkdir -p "release-package/precompiled-modules/$artifact_name"
+              cp -r "$artifact_dir"/* "release-package/precompiled-modules/$artifact_name/"
+              
+              # Verify module
+              if [ -f "release-package/precompiled-modules/$artifact_name/event_monitor.node" ]; then
+                echo "✅ Native module found in $artifact_name"
+              else
+                echo "❌ Native module missing in $artifact_name"
+                exit 1
+              fi
+            fi
+          done
+          
+          # Create master manifest
+          cat > release-package/precompiled-modules/manifest.json << EOF
+          {
+            "version": "1.0.0",
+            "created": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "commit": "${{ github.sha }}",
+            "workflow_run": "${{ github.run_id }}",
+            "modules": [
+              $(find release-package/precompiled-modules -name "artifact-info.json" -exec cat {} \; | paste -sd, -)
+            ]
+          }
+          EOF
+          
+          # Create README
+          cat > release-package/README.md << 'EOF'
+          # 预编译Windows原生模块包
+          
+          此包包含为不同Node.js版本预编译的Windows原生事件监控模块。
+          
+          ## 使用方法
+          
+          1. 选择与目标环境匹配的模块版本
+          2. 将对应的 `event_monitor.node` 文件复制到应用程序目录
+          3. 使用 `loader.js` 加载预编译模块
+          
+          ## 模块版本
+          
+          - `windows-native-module-node18-x64/`: Node.js 18 x64版本
+          - `windows-native-module-node20-x64/`: Node.js 20 x64版本
+          
+          ## 验证
+          
+          每个模块目录包含：
+          - `event_monitor.node`: 编译后的原生模块
+          - `loader.js`: 模块加载器
+          - `build-metadata.json`: 构建信息
+          - `artifact-info.json`: 工件信息
+          EOF
+          
+          echo "📋 Release package created:"
+          find release-package -type f -exec ls -lh {} \; | awk '{print $9 " - " $5}'
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: precompiled-windows-native-release
+          path: release-package/
+          retention-days: 90
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-package/precompiled-modules/**/*.node
+            release-package/manifest.json
+            release-package/README.md
+          body: |
+            ## 预编译Windows原生模块
+            
+            此版本包含以下预编译的Windows原生模块：
+            
+            - ✅ Node.js 18 (x64)
+            - ✅ Node.js 20 (x64)
+            
+            ### 使用说明
+            
+            1. 下载对应Node.js版本的 `event_monitor.node` 文件
+            2. 将文件放置在应用程序的原生模块目录
+            3. 使用提供的加载器加载模块
+            
+            ### 构建信息
+            
+            - 构建时间: ${{ env.BUILD_TIME }}
+            - 提交哈希: ${{ github.sha }}
+            - 工作流: ${{ github.run_id }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify-completion:
+    name: Notify Completion
+    runs-on: ubuntu-latest
+    needs: [precompile-windows, create-release-package]
+    if: always()
+    
+    steps:
+      - name: Notify success
+        if: needs.precompile-windows.result == 'success'
+        run: |
+          echo "🎉 Windows原生模块预编译成功完成!"
+          echo "✅ 所有目标平台编译成功"
+          echo "📦 预编译包已创建并上传"
+          
+      - name: Notify failure
+        if: needs.precompile-windows.result == 'failure'
+        run: |
+          echo "❌ Windows原生模块预编译失败"
+          echo "🔧 请检查构建日志以获取详细错误信息"
+          exit 1

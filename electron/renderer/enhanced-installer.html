@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>启用完整Windows功能</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+
+        .icon {
+            font-size: 72px;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #2d3748;
+        }
+
+        .subtitle {
+            font-size: 16px;
+            color: #718096;
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+
+        .status-section {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 1px solid #e2e8f0;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .status-icon {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+
+        .status-text {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .status-available { color: #38a169; }
+        .status-missing { color: #e53e3e; }
+
+        .main-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px;
+            min-width: 200px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .main-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .main-button:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .secondary-button {
+            background: transparent;
+            color: #667eea;
+            border: 2px solid #667eea;
+            padding: 14px 28px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        .secondary-button:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .progress-section {
+            display: none;
+            margin: 20px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 14px;
+            color: #4a5568;
+            margin: 10px 0;
+        }
+
+        .log-section {
+            display: none;
+            background: #1a202c;
+            color: #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: left;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .success-section {
+            display: none;
+            background: #f0fff4;
+            border: 2px solid #38a169;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .success-icon {
+            color: #38a169;
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .error-section {
+            display: none;
+            background: #fed7d7;
+            border: 2px solid #e53e3e;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .error-icon {
+            color: #e53e3e;
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .info-box {
+            background: #bee3f8;
+            border-left: 4px solid #3182ce;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .info-box p {
+            margin: 5px 0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                margin: 20px;
+                padding: 30px 20px;
+            }
+            
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🚀</div>
+        <h1>启用完整Windows功能</h1>
+        <p class="subtitle">一键安装Windows原生事件监控模块，解决键盘鼠标检测为0的问题</p>
+
+        <!-- 系统检查状态 -->
+        <div class="status-section">
+            <h3 style="margin-bottom: 15px; color: #2d3748;">系统环境检查</h3>
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="status-icon" id="node-icon">⏳</span>
+                    <span class="status-text">Node.js</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-icon" id="npm-icon">⏳</span>
+                    <span class="status-text">NPM</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-icon" id="python-icon">⏳</span>
+                    <span class="status-text">Python</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-icon" id="native-icon">⏳</span>
+                    <span class="status-text">原生模块</span>
+                </div>
+            </div>
+            <div id="system-summary" class="progress-text">正在检查系统环境...</div>
+        </div>
+
+        <!-- 安装进度 -->
+        <div class="progress-section" id="progress-section">
+            <h3 style="margin-bottom: 15px; color: #2d3748;">安装进度</h3>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <div class="progress-text" id="progress-text">准备安装...</div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="button-section">
+            <button class="main-button" id="install-button" onclick="startInstallation()">
+                <span id="install-text">🔧 一键安装完整功能</span>
+            </button>
+            <br>
+            <button class="secondary-button" onclick="showManualGuide()">📖 查看手动安装指南</button>
+            <button class="secondary-button" onclick="window.close()">❌ 稍后安装</button>
+        </div>
+
+        <!-- 成功界面 -->
+        <div class="success-section" id="success-section">
+            <div class="success-icon">✅</div>
+            <h3 style="color: #38a169; margin-bottom: 10px;">安装成功！</h3>
+            <p style="margin-bottom: 15px;">Windows原生事件监控模块已成功安装。</p>
+            <button class="main-button" onclick="restartApplication()">
+                🔄 重启应用启用完整功能
+            </button>
+        </div>
+
+        <!-- 错误界面 -->
+        <div class="error-section" id="error-section">
+            <div class="error-icon">❌</div>
+            <h3 style="color: #e53e3e; margin-bottom: 10px;">安装失败</h3>
+            <p id="error-message" style="margin-bottom: 15px;">安装过程中发生错误</p>
+            <div id="error-suggestion" class="info-box" style="display: none;">
+                <p><strong>建议解决方案：</strong></p>
+                <p id="suggestion-text"></p>
+            </div>
+            <button class="main-button" onclick="retryInstallation()">🔄 重试安装</button>
+            <button class="secondary-button" onclick="showManualGuide()">📖 手动安装指南</button>
+        </div>
+
+        <!-- 安装日志 -->
+        <div class="log-section" id="log-section">
+            <div style="margin-bottom: 10px; color: #a0aec0;">安装日志：</div>
+            <div id="log-content"></div>
+        </div>
+
+        <!-- 信息提示 -->
+        <div class="info-box">
+            <p><strong>💡 什么是Windows原生事件监控？</strong></p>
+            <p>• 真实检测键盘按键和鼠标点击事件（不再显示0）</p>
+            <p>• 精确的空闲时间计算</p>
+            <p>• 更高的监控精度和性能</p>
+        </div>
+    </div>
+
+    <script>
+        let installationInProgress = false;
+        let systemStatus = {
+            hasNode: false,
+            hasNPM: false,
+            hasPython: false,
+            hasNativeModule: false,
+            canAutoInstall: false
+        };
+
+        // 页面加载时检查系统状态
+        window.addEventListener('DOMContentLoaded', () => {
+            checkSystemStatus();
+        });
+
+        // 检查系统状态
+        async function checkSystemStatus() {
+            try {
+                const status = await window.electronAPI.nativeModule.checkStatus();
+                systemStatus = status;
+                updateStatusDisplay();
+            } catch (error) {
+                console.error('检查系统状态失败:', error);
+                document.getElementById('system-summary').textContent = '系统检查失败';
+            }
+        }
+
+        // 更新状态显示
+        function updateStatusDisplay() {
+            const icons = {
+                node: document.getElementById('node-icon'),
+                npm: document.getElementById('npm-icon'),
+                python: document.getElementById('python-icon'),
+                native: document.getElementById('native-icon')
+            };
+
+            // 更新各项状态
+            icons.node.textContent = systemStatus.hasNodejs ? '✅' : '❌';
+            icons.node.className = systemStatus.hasNodejs ? 'status-icon status-available' : 'status-icon status-missing';
+
+            icons.npm.textContent = systemStatus.hasNPM ? '✅' : '❌';
+            icons.npm.className = systemStatus.hasNPM ? 'status-icon status-available' : 'status-icon status-missing';
+
+            icons.python.textContent = systemStatus.hasPython ? '✅' : '⚠️';
+            icons.python.className = systemStatus.hasPython ? 'status-icon status-available' : 'status-icon status-missing';
+
+            icons.native.textContent = systemStatus.isAvailable ? '✅' : '❌';
+            icons.native.className = systemStatus.isAvailable ? 'status-icon status-available' : 'status-icon status-missing';
+
+            // 更新总结信息
+            const summary = document.getElementById('system-summary');
+            if (systemStatus.isAvailable) {
+                summary.textContent = '✅ 原生模块已安装，无需额外操作';
+                summary.style.color = '#38a169';
+                document.getElementById('install-button').disabled = true;
+                document.getElementById('install-text').textContent = '✅ 原生模块已可用';
+            } else if (systemStatus.canAutoInstall) {
+                summary.textContent = '🚀 系统环境就绪，可以自动安装';
+                summary.style.color = '#3182ce';
+            } else {
+                const missing = [];
+                if (!systemStatus.hasNodejs) missing.push('Node.js');
+                if (!systemStatus.hasNPM) missing.push('NPM');
+                
+                summary.textContent = `❌ 缺少必要环境: ${missing.join(', ')}`;
+                summary.style.color = '#e53e3e';
+                document.getElementById('install-button').disabled = true;
+                document.getElementById('install-text').textContent = '⚠️ 环境不完整，无法自动安装';
+            }
+        }
+
+        // 开始安装
+        async function startInstallation() {
+            if (installationInProgress) return;
+            
+            installationInProgress = true;
+            showProgress();
+            
+            try {
+                // 监听安装进度更新
+                window.electronAPI.onInstallProgress((progress) => {
+                    updateProgress(progress.progress, progress.message);
+                    addLog(progress.message);
+                });
+
+                const result = await window.electronAPI.nativeModule.install();
+                
+                if (result.success) {
+                    showSuccess(result.needsRestart);
+                } else {
+                    showError(result.message, result.suggestion);
+                }
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                installationInProgress = false;
+            }
+        }
+
+        // 显示进度
+        function showProgress() {
+            document.querySelector('.status-section').style.display = 'none';
+            document.querySelector('.button-section').style.display = 'none';
+            document.getElementById('progress-section').style.display = 'block';
+            document.getElementById('log-section').style.display = 'block';
+            
+            // 按钮显示进度状态
+            const button = document.getElementById('install-button');
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner"></span>正在安装...';
+        }
+
+        // 更新进度
+        function updateProgress(progress, message) {
+            document.getElementById('progress-fill').style.width = progress + '%';
+            document.getElementById('progress-text').textContent = message;
+        }
+
+        // 添加日志
+        function addLog(message) {
+            const logContent = document.getElementById('log-content');
+            const timestamp = new Date().toLocaleTimeString();
+            logContent.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+
+        // 显示成功
+        function showSuccess(needsRestart = true) {
+            document.getElementById('progress-section').style.display = 'none';
+            document.getElementById('log-section').style.display = 'none';
+            document.getElementById('success-section').style.display = 'block';
+            
+            if (!needsRestart) {
+                document.querySelector('#success-section button').textContent = '✅ 安装完成';
+                document.querySelector('#success-section button').onclick = () => window.close();
+            }
+        }
+
+        // 显示错误
+        function showError(message, suggestion = null) {
+            document.getElementById('progress-section').style.display = 'none';
+            document.getElementById('error-section').style.display = 'block';
+            document.getElementById('error-message').textContent = message;
+            
+            if (suggestion) {
+                document.getElementById('error-suggestion').style.display = 'block';
+                document.getElementById('suggestion-text').textContent = suggestion;
+            }
+            
+            // 重置按钮
+            const button = document.getElementById('install-button');
+            button.disabled = false;
+            button.innerHTML = '<span id="install-text">🔧 一键安装完整功能</span>';
+        }
+
+        // 重试安装
+        function retryInstallation() {
+            document.getElementById('error-section').style.display = 'none';
+            document.querySelector('.status-section').style.display = 'block';
+            document.querySelector('.button-section').style.display = 'block';
+            
+            // 重新检查系统状态
+            checkSystemStatus();
+        }
+
+        // 重启应用程序
+        async function restartApplication() {
+            try {
+                await window.electronAPI.nativeModule.restartApp();
+            } catch (error) {
+                console.error('重启应用失败:', error);
+                alert('重启失败，请手动重启应用程序');
+            }
+        }
+
+        // 显示手动安装指南
+        function showManualGuide() {
+            const guide = `
+手动安装步骤：
+
+1. 以管理员身份打开PowerShell
+2. 导航到应用程序目录:
+   cd "C:\\Program Files\\Employee Monitor"
+   
+3. 进入原生模块目录:
+   cd native-event-monitor-win
+   
+4. 安装依赖:
+   npm install
+   
+5. 编译原生模块:
+   npm run build
+   
+6. 重启应用程序
+
+如需帮助，请查看 WINDOWS_QUICK_START.md 文件。
+            `;
+            
+            alert(guide);
+        }
+
+        // 错误处理
+        window.addEventListener('error', (event) => {
+            console.error('页面错误:', event.error);
+            addLog(`错误: ${event.error.message}`);
+        });
+    </script>
+</body>
+</html>

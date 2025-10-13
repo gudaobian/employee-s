@@ -1,0 +1,65 @@
+# 排除不必要的文件和目录
+
+# 开发工具和配置
+.github/
+.claude/
+.dockerignore
+.npmrc
+tsconfig.json
+pnpm-workspace.yaml
+Dockerfile
+
+# 文档
+README.md
+docs/
+claudedocs/
+CLAUDE.md
+
+# 日志文件
+*.log
+app.log
+test-app.log
+final-test.log
+
+# 测试和调试文件
+test-*.js
+debug-*.js
+socketio-*.js
+*-server.js
+enhanced-server.js
+minimal-server.js
+real-socketio-server.js
+simple-server.js
+simple-socketio-server.js
+employee-monitor-config.json
+
+# 开发脚本和工具
+scripts/
+fix-package-links.js
+
+# 缓存和临时文件
+cache/
+.npm-cache/
+build/
+
+# 源码目录（已编译到dist）
+src/
+common/
+main/
+platforms/
+
+# 配置文件
+electron-builder-win.yml
+
+# 类型定义
+types/
+
+# 不必要的原生模块源码（保留编译后的.node文件）
+native-event-monitor/src/
+native-event-monitor/binding.gyp
+native-event-monitor/package.json
+native-event-monitor/node_modules/
+native-event-monitor-win/src/
+native-event-monitor-win/binding.gyp
+native-event-monitor-win/package.json
+native-event-monitor-win/node_modules/

@@ -1,0 +1,4 @@
+ignoredBuiltDependencies:
+  - active-win
+  - electron
+  - iohook

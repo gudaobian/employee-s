@@ -1,0 +1,160 @@
+name: Build with No Cache (Clean Build)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v2.2.2)'
+        required: true
+        default: 'v2.2.2'
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '18'  # Must match Electron 25's internal Node.js version
+
+jobs:
+  clean-build:
+    name: Clean Build (No Cache)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Setup Visual Studio Build Tools
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Verify Node.js version
+        run: |
+          node --version
+          npm --version
+          Write-Host "Expected Node.js 18.x for Electron 25 compatibility"
+
+      - name: Clean all caches
+        run: |
+          Write-Host "🧹 Cleaning all build artifacts and caches..."
+          if (Test-Path "node_modules") { Remove-Item "node_modules" -Recurse -Force }
+          if (Test-Path "package-lock.json") { Remove-Item "package-lock.json" -Force }
+          if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
+          if (Test-Path "native-event-monitor-win/build") { Remove-Item "native-event-monitor-win/build" -Recurse -Force }
+          if (Test-Path "native-event-monitor-win/node_modules") { Remove-Item "native-event-monitor-win/node_modules" -Recurse -Force }
+          npm cache clean --force
+
+      - name: Install native module dependencies
+        run: |
+          cd native-event-monitor-win
+          npm install
+
+      - name: Build native module
+        run: |
+          cd native-event-monitor-win
+          npm run build
+
+      - name: Verify native module
+        run: |
+          cd native-event-monitor-win
+          if (Test-Path "build/Release/event_monitor.node") {
+            $module = Get-Item "build/Release/event_monitor.node"
+            Write-Host "✅ Native module built successfully"
+            Write-Host "📦 File: $($module.FullName)"
+            Write-Host "📏 Size: $([math]::Round($module.Length / 1KB, 2)) KB"
+
+            # 使用 dumpbin 检查模块依赖（如果可用）
+            try {
+              $dumpbin = Get-Command dumpbin -ErrorAction SilentlyContinue
+              if ($dumpbin) {
+                Write-Host "🔍 Module dependencies:"
+                dumpbin /dependents $module.FullName | Select-String -Pattern "\.dll"
+              }
+            } catch {
+              Write-Host "⚠️ dumpbin not available, skipping dependency check"
+            }
+          } else {
+            Write-Host "❌ Native module not found"
+            exit 1
+          }
+
+      - name: Install application dependencies (including Electron)
+        run: |
+          npm install --legacy-peer-deps
+          Write-Host "Electron 已安装，版本:"
+          npx electron --version
+
+      - name: Update package version
+        run: |
+          $VERSION = "${{ github.event.inputs.version }}".TrimStart('v')
+          Write-Host "📌 Setting version to: $VERSION"
+
+          $packageJson = Get-Content "package.json" -Raw | ConvertFrom-Json
+          $packageJson.version = $VERSION
+          $packageJson | ConvertTo-Json -Depth 100 | Set-Content "package.json"
+
+          Write-Host "✅ Updated package.json version to: $VERSION"
+
+      - name: Build TypeScript
+        run: |
+          npm run compile
+
+      - name: Package application
+        run: |
+          npm run pack:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List build outputs
+        run: |
+          Write-Host "📦 Build outputs:"
+          if (Test-Path "release") {
+            Get-ChildItem -Path "release" -Recurse | ForEach-Object {
+              if (-not $_.PSIsContainer) {
+                $sizeMB = [math]::Round($_.Length / 1MB, 2)
+                Write-Host "  📄 $($_.Name) ($sizeMB MB)"
+              }
+            }
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-build-${{ github.event.inputs.version }}
+          path: |
+            release/*.exe
+            release/*.zip
+          retention-days: 30
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Clean Build ${{ github.event.inputs.version }}
+          body: |
+            ## 🧹 Clean Build (No Cache)
+
+            This release was built **without any caching** to ensure:
+            - ✅ Fresh compilation with Node.js ${{ env.NODE_VERSION }}
+            - ✅ Correct NODE_MODULE_VERSION 116
+            - ✅ Compatible with Electron 25
+
+            ### Build Info
+            - Node.js: ${{ env.NODE_VERSION }}
+            - Commit: ${{ github.sha }}
+            - Workflow: Clean Build (cache disabled)
+          files: |
+            release/*.exe
+            release/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,30 @@
+{
+  "buildTime": "2025-09-28T02:41:00.782Z",
+  "nodeVersion": "v18.20.8",
+  "platform": "win32",
+  "arch": "x64",
+  "electronVersion": "^25.9.0",
+  "isMock": true,
+  "mockCreatedBy": "192.168.1.140",
+  "mockCreatedOn": "darwin",
+  "files": [
+    {
+      "name": "event_monitor_mock.js",
+      "size": "2.5 KB",
+      "modified": "2025-09-28T02:41:00.783Z",
+      "note": "Mock implementation for testing"
+    }
+  ],
+  "buildEnvironment": {
+    "os": "Windows 10 (Simulated)",
+    "release": "10.0.19041",
+    "hostname": "mock-build-server",
+    "compiler": "Mock Compiler v1.0.0",
+    "visualStudio": "Mock VS 2022"
+  },
+  "warnings": [
+    "This is a mock precompiled module for testing purposes",
+    "Real event monitoring functionality is simulated",
+    "Do not use in production environments"
+  ]
+}

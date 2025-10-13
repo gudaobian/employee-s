@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows原生功能模块下载</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 600px;
+            text-align: center;
+        }
+        
+        .icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #7f8c8d;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+        
+        .feature-list {
+            text-align: left;
+            margin: 30px 0;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        .feature-item {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+        }
+        
+        .feature-item::before {
+            content: "✅";
+            margin-right: 10px;
+        }
+        
+        .download-btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px;
+        }
+        
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+        
+        .download-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .progress-container {
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #ecf0f1;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .status-text {
+            margin-top: 10px;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .manual-steps {
+            text-align: left;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .step {
+            margin: 10px 0;
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .step-number {
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🚀</div>
+        <h1>启用Windows完整监控功能</h1>
+        <p class="subtitle">当前运行在基础模式，点击下载完整功能模块</p>
+        
+        <div class="feature-list">
+            <h3>完整功能包含：</h3>
+            <div class="feature-item">真实键盘事件检测（替代推断模式）</div>
+            <div class="feature-item">精确鼠标点击监控</div>
+            <div class="feature-item">系统空闲时间计算</div>
+            <div class="feature-item">Windows权限智能处理</div>
+            <div class="feature-item">性能优化的Hook机制</div>
+        </div>
+        
+        <div class="warning">
+            <strong>⚠️ 注意：</strong> 下载和安装需要管理员权限，某些防病毒软件可能会进行安全检查。
+        </div>
+        
+        <button class="download-btn" id="downloadBtn" onclick="startDownload()">
+            📥 下载并安装Windows原生模块
+        </button>
+        
+        <button class="download-btn" onclick="showManualSteps()" style="background: #95a5a6;">
+            📋 手动安装指南
+        </button>
+        
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="status-text" id="statusText">准备下载...</div>
+        </div>
+        
+        <div class="success" id="successMessage">
+            <strong>🎉 安装成功！</strong> 
+            <p>Windows原生事件监控模块已安装完成。应用程序将重启以启用完整功能。</p>
+            <button class="download-btn" onclick="restartApplication()">重启应用</button>
+        </div>
+        
+        <div class="manual-steps" id="manualSteps">
+            <h3>📋 手动安装步骤</h3>
+            
+            <div class="step">
+                <span class="step-number">步骤1:</span> 
+                以管理员身份打开PowerShell或命令提示符
+            </div>
+            
+            <div class="step">
+                <span class="step-number">步骤2:</span> 
+                导航到应用程序目录：<br>
+                <code>cd "C:\Program Files\Employee Monitor"</code>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">步骤3:</span> 
+                安装原生模块依赖：<br>
+                <code>cd native-event-monitor-win && npm install</code>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">步骤4:</span> 
+                编译原生模块：<br>
+                <code>npm run build</code>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">步骤5:</span> 
+                重启Employee Monitor应用程序
+            </div>
+            
+            <div class="step">
+                <span class="step-number">验证:</span> 
+                检查日志是否显示 "✅ Windows原生事件监控已启动"
+            </div>
+            
+            <button class="download-btn" onclick="hideManualSteps()">返回自动安装</button>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        async function startDownload() {
+            const downloadBtn = document.getElementById('downloadBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+            const statusText = document.getElementById('statusText');
+            const successMessage = document.getElementById('successMessage');
+            
+            downloadBtn.disabled = true;
+            downloadBtn.textContent = '⏳ 准备中...';
+            progressContainer.style.display = 'block';
+            
+            try {
+                // 检查权限
+                statusText.textContent = '检查系统权限...';
+                progressFill.style.width = '10%';
+                
+                const hasPermissions = await ipcRenderer.invoke('check-admin-permissions');
+                if (!hasPermissions) {
+                    statusText.textContent = '请求管理员权限...';
+                    const elevated = await ipcRenderer.invoke('request-elevation');
+                    if (!elevated) {
+                        throw new Error('需要管理员权限才能安装原生模块');
+                    }
+                }
+                
+                // 下载源码
+                statusText.textContent = '下载原生模块源码...';
+                progressFill.style.width = '30%';
+                await ipcRenderer.invoke('download-native-module-source');
+                
+                // 安装构建工具
+                statusText.textContent = '检查构建环境...';
+                progressFill.style.width = '50%';
+                await ipcRenderer.invoke('setup-build-environment');
+                
+                // 编译原生模块
+                statusText.textContent = '编译Windows原生模块...';
+                progressFill.style.width = '70%';
+                await ipcRenderer.invoke('compile-native-module');
+                
+                // 安装模块
+                statusText.textContent = '安装原生模块...';
+                progressFill.style.width = '90%';
+                await ipcRenderer.invoke('install-native-module');
+                
+                // 完成
+                statusText.textContent = '安装完成！';
+                progressFill.style.width = '100%';
+                
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    successMessage.style.display = 'block';
+                }, 1000);
+                
+            } catch (error) {
+                console.error('安装失败:', error);
+                statusText.textContent = `安装失败: ${error.message}`;
+                downloadBtn.disabled = false;
+                downloadBtn.textContent = '🔄 重试安装';
+                
+                // 显示手动安装选项
+                setTimeout(() => {
+                    if (confirm('自动安装失败，是否查看手动安装指南？')) {
+                        showManualSteps();
+                    }
+                }, 2000);
+            }
+        }
+        
+        function showManualSteps() {
+            document.getElementById('manualSteps').style.display = 'block';
+            document.querySelector('.feature-list').style.display = 'none';
+            document.querySelector('.warning').style.display = 'none';
+            document.getElementById('downloadBtn').style.display = 'none';
+        }
+        
+        function hideManualSteps() {
+            document.getElementById('manualSteps').style.display = 'none';
+            document.querySelector('.feature-list').style.display = 'block';
+            document.querySelector('.warning').style.display = 'block';
+            document.getElementById('downloadBtn').style.display = 'inline-block';
+        }
+        
+        async function restartApplication() {
+            await ipcRenderer.invoke('restart-application');
+        }
+        
+        // 页面加载时检查原生模块状态
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const hasNativeModule = await ipcRenderer.invoke('check-native-module-status');
+                if (hasNativeModule) {
+                    document.querySelector('.subtitle').textContent = '✅ Windows完整监控功能已启用';
+                    document.getElementById('downloadBtn').style.display = 'none';
+                    document.querySelector('.warning').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('检查原生模块状态失败:', error);
+            }
+        });
+    </script>
+</body>
+</html>

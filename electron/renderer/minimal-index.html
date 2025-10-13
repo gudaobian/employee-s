@@ -1,0 +1,1631 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业安全</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 12px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            color: #333;
+            width: 340px;
+            height: 750px; /* Windows标题栏需要更高 */
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            width: 340px;
+            height: 750px; /* Windows标题栏需要更高 */
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-sizing: border-box;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 只在macOS上为窗口控制按钮留出空间 */
+        .header.macos {
+            padding-left: 80px;
+        }
+
+        .title {
+            flex: 1;
+            text-align: center;
+            margin-right: 20px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #34c759;
+            box-shadow: 0 0 8px rgba(52, 199, 89, 0.6);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.offline {
+            background: #ff3b30;
+            box-shadow: 0 0 8px rgba(255, 59, 48, 0.6);
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+
+        .content {
+            padding: 14px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            /* 确保内容不会溢出 */
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        /* 状态显示 */
+        .status {
+            background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            text-align: center;
+            border-left: 4px solid #2196F3;
+            font-weight: 500;
+            color: #1565C0;
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.15);
+        }
+
+
+        /* 配置区域 */
+        .config-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 6px;
+        }
+
+        .btn-mini {
+            padding: 4px 6px;
+            font-size: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #007AFF;
+            color: white;
+            transition: all 0.2s;
+        }
+
+        .btn-mini:hover {
+            background: #0056CC;
+            transform: scale(1.05);
+        }
+
+        .config-panel {
+            margin-top: 8px;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from { opacity: 0; max-height: 0; }
+            to { opacity: 1; max-height: 100px; }
+        }
+
+        .config-item {
+            margin-bottom: 8px;
+        }
+
+        .config-item label {
+            display: block;
+            font-size: 10px;
+            font-weight: 500;
+            color: #6c757d;
+            margin-bottom: 4px;
+        }
+
+        .config-item input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-size: 10px;
+            background: white;
+            transition: border-color 0.2s;
+        }
+
+        .config-item input:focus {
+            outline: none;
+            border-color: #007AFF;
+            box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.2);
+        }
+
+        .config-buttons {
+            display: flex;
+            gap: 6px;
+            justify-content: flex-end;
+            margin-top: 8px;
+        }
+
+        .btn-save {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 4px 8px;
+            font-size: 10px;
+        }
+
+        .btn-reset {
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+            color: white;
+            padding: 4px 8px;
+            font-size: 10px;
+        }
+
+        /* 按钮组 */
+        .buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        /* 合并的控制按钮 */
+        .control-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .btn-toggle {
+            flex: 2;
+            padding: 10px 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-toggle.stopped {
+            background: linear-gradient(135deg, #34c759 0%, #28a745 100%);
+            color: white;
+        }
+
+        .btn-toggle.running {
+            background: linear-gradient(135deg, #ff3b30 0%, #dc3545 100%);
+            color: white;
+        }
+
+        .btn-toggle:disabled {
+            background: linear-gradient(135deg, #999 0%, #777 100%);
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .btn {
+            padding: 8px 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #34c759 0%, #28a745 100%);
+            color: white;
+        }
+
+        .btn-stop {
+            background: linear-gradient(135deg, #ff3b30 0%, #dc3545 100%);
+            color: white;
+        }
+
+        .btn-status {
+            background: linear-gradient(135deg, #007AFF 0%, #0056CC 100%);
+            color: white;
+        }
+
+        .btn-permission {
+            background: linear-gradient(135deg, #ff9500 0%, #ff8c00 100%);
+            color: white;
+        }
+
+        .btn-background {
+            background: linear-gradient(135deg, #8e8e93 0%, #6d6d70 100%);
+            color: white;
+        }
+
+        .btn-background:hover {
+            background: linear-gradient(135deg, #6d6d70 0%, #48484a 100%);
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+
+        /* 权限指示器和自启动行 */
+        .permissions-autostart-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            background: rgba(248, 249, 250, 0.8);
+            padding: 8px 10px;
+            border-radius: 8px;
+            backdrop-filter: blur(5px);
+        }
+
+        /* 权限指示器 */
+        .permissions {
+            display: flex;
+            gap: 12px;
+            font-size: 10px;
+        }
+
+        .perm-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 4px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .perm-item:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .perm-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #34c759;
+            box-shadow: 0 0 4px rgba(52, 199, 89, 0.5);
+        }
+
+        .perm-dot.denied {
+            background: #ff3b30;
+            box-shadow: 0 0 4px rgba(255, 59, 48, 0.5);
+        }
+
+        /* 日志控制 */
+        .log-controls {
+            margin-bottom: 6px;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 4px;
+        }
+
+        .log-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        .log-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 6px;
+            background: rgba(248, 249, 250, 0.8);
+            border-radius: 6px;
+            font-size: 10px;
+        }
+
+        .log-filters label {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 3px;
+            transition: background 0.2s;
+        }
+
+        .log-filters label:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .log-filters input[type="checkbox"] {
+            margin: 0;
+            width: 12px;
+            height: 12px;
+        }
+
+        /* 日志区域 */
+        .logs {
+            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+            color: #e2e8f0;
+            font-family: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+            font-size: 10px;
+            padding: 8px;
+            border-radius: 8px;
+            height: 380px; /* Windows需要更高的日志区域 */
+            min-height: 380px;
+            max-height: 380px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            line-height: 1.4;
+            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            /* 确保日志区域不会影响布局 */
+            flex-shrink: 0;
+            margin-bottom: 2px;
+        }
+
+        .logs::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .logs::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+
+        .logs::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 2px;
+        }
+
+        .log-entry {
+            margin-bottom: 1px;
+        }
+
+        .log-time {
+            color: #81c784;
+        }
+
+        .log-error {
+            color: #ef5350;
+            font-weight: bold;
+        }
+        
+        .log-warning {
+            color: #ffb74d;
+        }
+        
+        .log-success {
+            color: #81c784;
+            font-weight: 500;
+        }
+        
+        .log-info {
+            color: #64b5f6;
+        }
+
+        .log-data {
+            color: #bb86fc;
+        }
+
+        .log-upload {
+            color: #03dac6;
+        }
+
+        /* 底部控制 */
+        .footer {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            padding: 12px 14px 16px 14px;
+            background: rgba(248, 249, 250, 0.9);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid rgba(229, 231, 235, 0.5);
+            border-radius: 0 0 12px 12px;
+            /* 确保底部有足够间距 */
+            margin-bottom: 0;
+            flex-shrink: 0;
+        }
+
+        .auto-start {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #4b5563;
+        }
+
+        .toggle {
+            width: 28px;
+            height: 16px;
+            background: #d1d5db;
+            border-radius: 8px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .toggle.active {
+            background: linear-gradient(135deg, #34c759 0%, #28a745 100%);
+            box-shadow: 0 2px 8px rgba(52, 199, 89, 0.3);
+        }
+
+        .toggle::after {
+            content: '';
+            width: 12px;
+            height: 12px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .toggle.active::after {
+            transform: translateX(12px);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+        }
+
+        /* 权限弹窗样式 */
+        .permission-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .permission-dialog {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            width: 260px;
+            max-height: 300px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: scale(0.8) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .permission-header {
+            text-align: center;
+            margin-bottom: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .permission-list {
+            margin-bottom: 12px;
+        }
+
+        .permission-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .permission-item:last-child {
+            border-bottom: none;
+        }
+
+        .permission-name {
+            font-size: 12px;
+            color: #555;
+        }
+
+        .permission-status {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        .permission-status.granted {
+            background: #e8f5e8;
+            color: #2e7d2e;
+        }
+
+        .permission-status.denied {
+            background: #ffe8e8;
+            color: #d63384;
+        }
+
+        .permission-guide {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 12px;
+            color: #856404;
+            line-height: 1.4;
+        }
+
+        .permission-guide strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .permission-buttons {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .btn-modal {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #007AFF 0%, #0056CC 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #0056CC 0%, #003d99 100%);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: linear-gradient(135deg, #218838 0%, #1e7e34 100%);
+        }
+
+        .btn-secondary {
+            background: #f8f9fa;
+            color: #6c757d;
+            border: 1px solid #dee2e6;
+        }
+
+        .btn-secondary:hover {
+            background: #e9ecef;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 标题栏 -->
+        <div class="header">
+            <div class="title">Employee Safety</div>
+            <div class="status-dot" id="statusDot"></div>
+        </div>
+
+        <div class="content">
+            <!-- 状态显示 -->
+            <div class="status" id="statusText">就绪</div>
+
+
+            <!-- 服务器配置 -->
+            <div class="config-section">
+                <div class="config-header">
+                    <span>服务器配置</span>
+                    <button class="btn-mini btn-config" onclick="toggleConfig()">⚙️</button>
+                </div>
+                <div class="config-panel" id="configPanel" style="display: none;">
+                    <div class="config-item">
+                        <label for="serverUrl">服务器地址:</label>
+                        <input type="text" id="serverUrl" placeholder="http://23.95.193.155:3000" value="http://23.95.193.155:3000">
+                    </div>
+                    <div class="config-buttons">
+                        <button class="btn btn-save" onclick="saveConfig()">保存</button>
+                        <button class="btn btn-reset" onclick="resetConfig()">重置</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 核心控制按钮 -->
+            <div class="control-buttons">
+                <button class="btn-toggle stopped" id="toggleButton" onclick="toggleService()">启动</button>
+                <button class="btn btn-permission" onclick="showPermissionModal()">查看权限</button>
+                <button class="btn btn-background" onclick="enterBackgroundMode()">后台运行</button>
+            </div>
+
+            <!-- 权限指示器和自启动 -->
+            <div class="permissions-autostart-row">
+                <div class="permissions">
+                    <div class="perm-item">
+                        <div class="perm-dot" id="screenPerm"></div>
+                        <span>屏幕</span>
+                    </div>
+                    <div class="perm-item">
+                        <div class="perm-dot" id="accessPerm"></div>
+                        <span>辅助</span>
+                    </div>
+                </div>
+                <div class="auto-start">
+                    <span>开机自启动</span>
+                    <div class="toggle" id="autoStartToggle" onclick="toggleAutoStart()"></div>
+                </div>
+            </div>
+
+            <!-- 日志控制 -->
+            <div class="log-controls">
+                <div class="log-header">
+                    <span>运行日志</span>
+                    <div class="log-actions">
+                        <button class="btn-mini" onclick="clearLogs()">清空</button>
+                        <button class="btn-mini" onclick="toggleLogLevels()">过滤</button>
+                        <button class="btn-mini" onclick="showLogStats()">统计</button>
+                        <button class="btn-mini" onclick="cleanupOldLogs()">清理</button>
+                    </div>
+                </div>
+                <div class="log-filters" id="logFilters" style="display: none;">
+                    <label><input type="checkbox" id="filterData" checked> 数据</label>
+                    <label><input type="checkbox" id="filterUpload" checked> 上传</label>
+                    <label><input type="checkbox" id="filterSuccess" checked> 成功</label>
+                    <label><input type="checkbox" id="filterInfo" checked> 信息</label>
+                    <label><input type="checkbox" id="filterWarning" checked> 警告</label>
+                    <label><input type="checkbox" id="filterError" checked> 错误</label>
+                </div>
+            </div>
+
+            <!-- 日志区域 -->
+            <div class="logs" id="logs">
+                <div class="log-entry">
+                    <span class="log-time">[启动]</span> 应用程序已就绪
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部控制 -->
+        <div class="footer">
+        </div>
+    </div>
+
+    <!-- 权限弹窗 -->
+    <div class="permission-modal" id="permissionModal">
+        <div class="permission-dialog">
+            <div class="permission-header">系统权限状态</div>
+            <div class="permission-list" id="permissionList">
+                <!-- 权限列表将动态生成 -->
+            </div>
+            <div class="permission-guide" id="permissionGuide" style="display: none;">
+                <!-- 权限指导将动态生成 -->
+            </div>
+            <div class="permission-buttons">
+                <button class="btn-modal btn-secondary" onclick="closePermissionModal()">关闭</button>
+                <button class="btn-modal btn-success" id="requestPermissionsBtn" onclick="requestAllPermissions()">请求权限</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isRunning = false;
+        let autoStartEnabled = false;
+        let configExpanded = false;
+        
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 根据平台调整样式
+            if (window.electronAPI && window.electronAPI.platform === 'darwin') {
+                document.querySelector('.header').classList.add('macos');
+            }
+            
+            updateToggleButton(); // 初始化按钮状态
+            loadConfig();
+            loadAutoStartStatus(); // 加载自启动状态
+            addLog('界面已加载');
+            
+            // 监听来自主进程的日志
+            if (window.electronAPI && window.electronAPI.onLogReceived) {
+                window.electronAPI.onLogReceived((logData) => {
+                    addLog(logData.message, logData.type);
+                });
+            }
+            
+            // 监听来自 LogManager 的日志更新
+            if (window.electronAPI && window.electronAPI.on) {
+                window.electronAPI.on('log-update', (event, logUpdate) => {
+                    if (logUpdate.type === 'new-log' && logUpdate.log) {
+                        const log = logUpdate.log;
+                        addLog(log.message, log.level);
+                    }
+                });
+            }
+            
+            // 加载历史日志
+            loadHistoryLogs();
+            
+            // 监听来自托盘的权限设置请求
+            if (window.electronAPI && window.electronAPI.onMessage) {
+                window.electronAPI.onMessage('show-permission-modal', () => {
+                    console.log('收到托盘权限设置请求，显示权限弹窗');
+                    showPermissionModal();
+                });
+            }
+            
+            // 监听应用状态变化事件
+            if (window.electronAPI && window.electronAPI.on) {
+                window.electronAPI.on('app-status-changed', (event, statusData) => {
+                    console.log('收到应用状态变化:', statusData);
+                    isRunning = statusData.isRunning;
+                    
+                    if (statusData.appState === 'ERROR') {
+                        updateStatus('启动失败', false);
+                    } else if (statusData.isRunning) {
+                        updateStatus('运行中', true);
+                    } else {
+                        updateStatus('已停止', false);
+                    }
+                    
+                    // 更新切换按钮状态
+                    updateToggleButton();
+                });
+                
+                window.electronAPI.on('device-status-changed', (event, statusData) => {
+                    console.log('收到设备状态变化:', statusData);
+                    addLog(`设备状态变化: ${statusData.from} → ${statusData.to}`, 'info');
+                });
+            }
+            
+            // 定期检查状态和权限同步（每10秒）
+            setInterval(() => {
+                checkStatus();
+                updatePermissionIndicators();
+            }, 10000);
+            
+            // 立即更新权限状态
+            updatePermissionIndicators();
+        });
+
+        // 切换服务状态
+        async function toggleService() {
+            const toggleBtn = document.getElementById('toggleButton');
+            
+            if (isRunning) {
+                // 当前运行中，需要停止
+                toggleBtn.disabled = true;
+                toggleBtn.textContent = '停止中...';
+                updateStatus('停止中...', false);
+                addLog('正在停止服务...');
+                
+                try {
+                    if (window.electronAPI) {
+                        const result = await window.electronAPI.app.stop();
+                        if (result && result.success !== false) {
+                            isRunning = false;
+                            updateStatus('已停止', false);
+                            addLog('服务已停止', 'warning');
+                        } else {
+                            addLog('停止失败: ' + (result.message || '未知错误'), 'error');
+                        }
+                    } else {
+                        isRunning = false;
+                        updateStatus('已停止', false);
+                        addLog('服务已停止 (模拟模式)', 'warning');
+                    }
+                } catch (error) {
+                    addLog('停止错误: ' + error.message, 'error');
+                }
+            } else {
+                // 当前停止，需要启动
+                toggleBtn.disabled = true;
+                toggleBtn.textContent = '启动中...';
+                updateStatus('启动中...', false);
+                addLog('正在启动服务...');
+                
+                try {
+                    if (window.electronAPI) {
+                        const result = await window.electronAPI.app.start();
+                        console.log('启动结果:', result);
+                        
+                        // 修复判断逻辑：只要result存在且success不是明确的false，就认为成功
+                        if (result && result.success !== false) {
+                            isRunning = true;
+                            updateStatus('运行中', true);
+                            addLog('服务启动成功', 'success');
+                        } else {
+                            isRunning = false;
+                            updateStatus('启动失败', false);
+                            addLog('启动失败: ' + (result?.message || result?.error || '未知错误'), 'error');
+                        }
+                    } else {
+                        isRunning = true;
+                        updateStatus('运行中', true);
+                        addLog('服务启动成功 (模拟模式)', 'success');
+                    }
+                } catch (error) {
+                    console.error('启动异常:', error);
+                    isRunning = false;
+                    updateStatus('启动失败', false);
+                    addLog('启动错误: ' + error.message, 'error');
+                }
+            }
+            
+            // 更新按钮状态
+            updateToggleButton();
+        }
+
+        // 更新切换按钮状态
+        function updateToggleButton() {
+            const toggleBtn = document.getElementById('toggleButton');
+            toggleBtn.disabled = false;
+            
+            if (isRunning) {
+                toggleBtn.className = 'btn-toggle running';
+                toggleBtn.textContent = '停止';
+            } else {
+                toggleBtn.className = 'btn-toggle stopped';
+                toggleBtn.textContent = '启动';
+            }
+        }
+
+        // 查看状态
+        async function checkStatus() {
+            try {
+                if (window.electronAPI) {
+                    const status = await window.electronAPI.app.getStatus();
+                    if (status) {
+                        const wasRunning = isRunning;
+                        isRunning = status.isRunning || false;
+                        
+                        // 根据状态和错误信息更新显示
+                        if (status.error) {
+                            updateStatus('启动失败', false);
+                            addLog('状态检查发现错误: ' + status.error, 'error');
+                        } else if (isRunning) {
+                            updateStatus('运行中', true);
+                            if (!wasRunning) {
+                                addLog('服务状态已变为运行中', 'success');
+                            }
+                        } else {
+                            updateStatus('已停止', false);
+                            if (wasRunning) {
+                                addLog('服务状态已变为停止', 'warning');
+                            }
+                        }
+                        
+                        // 显示FSM状态信息（如果可用）
+                        if (status.deviceState) {
+                            addLog(`设备状态: ${status.deviceState}`, 'info');
+                        }
+                        
+                        // 更新切换按钮状态
+                        updateToggleButton();
+                    }
+                } else {
+                    updateStatus(isRunning ? '运行中' : '已停止', isRunning);
+                    addLog('状态检查完成: ' + (isRunning ? '运行中' : '已停止'));
+                    updateToggleButton();
+                }
+            } catch (error) {
+                updateStatus('状态未知', false);
+                addLog('状态检查错误: ' + error.message, 'error');
+                updateToggleButton();
+            }
+        }
+
+        // 显示权限弹窗
+        async function showPermissionModal() {
+            try {
+                let permissions = {};
+                
+                if (window.electronAPI) {
+                    const result = await window.electronAPI.permission.check();
+                    console.log('[权限检查] 原始结果:', result);
+                    if (result && result.success && result.data) {
+                        permissions = result.data;
+                        console.log('[权限检查] 解析后权限:', permissions);
+                    } else {
+                        permissions = result || {};
+                        console.log('[权限检查] 使用原始结果:', permissions);
+                    }
+                } else {
+                    // 模拟权限数据
+                    permissions = {
+                        screenRecording: false,
+                        accessibility: true,
+                        inputMonitoring: false
+                    };
+                }
+                
+                displayPermissionModal(permissions);
+            } catch (error) {
+                addLog('权限检查错误: ' + error.message, 'error');
+                // 显示错误状态
+                displayPermissionModal({});
+            }
+        }
+
+        // 后台运行功能
+        async function enterBackgroundMode() {
+            try {
+                addLog('正在切换到后台运行模式...');
+                
+                // 调用主进程的后台模式功能
+                if (window.electronAPI && window.electronAPI.window) {
+                    await window.electronAPI.window.minimize();
+                    addLog('已切换到后台运行，应用将在系统托盘中运行', 'success');
+                } else {
+                    // 降级方案：隐藏窗口
+                    if (window.close) {
+                        window.close();
+                    }
+                }
+            } catch (error) {
+                addLog('切换后台模式失败: ' + error.message, 'error');
+            }
+        }
+
+        // 后台更新权限状态指示器
+        async function updatePermissionIndicators() {
+            try {
+                if (window.electronAPI) {
+                    const result = await window.electronAPI.permission.check();
+                    let permissions = {};
+                    if (result && result.success && result.data) {
+                        permissions = result.data;
+                    } else {
+                        permissions = result || {};
+                    }
+                    updatePermissionDot('screenPerm', permissions.screenRecording);
+                    updatePermissionDot('accessPerm', permissions.accessibility);
+                } else {
+                    updatePermissionDot('screenPerm', true);
+                    updatePermissionDot('accessPerm', true);
+                }
+            } catch (error) {
+                console.error('权限状态更新错误:', error);
+            }
+        }
+
+        // 开启自启动
+        async function toggleAutoStart() {
+            try {
+                if (window.electronAPI && window.electronAPI.autostart) {
+                    if (autoStartEnabled) {
+                        // 当前是开启状态，需要关闭
+                        addLog('⏳ 正在关闭自启动...');
+                        const result = await window.electronAPI.autostart.disable();
+                        if (result && result.success) {
+                            addLog('✅ 自启动已关闭', 'warning');
+
+                            // 延迟500ms后重新验证实际状态
+                            setTimeout(async () => {
+                                await verifyAutoStartStatus();
+                            }, 500);
+                        } else {
+                            addLog('❌ 关闭自启动失败: ' + (result.error || '未知错误'), 'error');
+                        }
+                    } else {
+                        // 当前是关闭状态，需要开启
+                        addLog('⏳ 正在开启自启动...');
+                        const result = await window.electronAPI.autostart.enable();
+                        if (result && result.success) {
+                            addLog('✅ 自启动已开启', 'success');
+
+                            // 延迟500ms后重新验证实际状态
+                            setTimeout(async () => {
+                                await verifyAutoStartStatus();
+                            }, 500);
+                        } else {
+                            addLog('❌ 开启自启动失败: ' + (result.error || '未知错误'), 'error');
+                        }
+                    }
+                } else {
+                    // 降级到模拟模式
+                    autoStartEnabled = !autoStartEnabled;
+                    updateAutoStartToggle(autoStartEnabled);
+                    addLog(`⚠️ 自启动 (模拟): ${autoStartEnabled ? '已开启' : '已关闭'}`, 'warning');
+                }
+            } catch (error) {
+                addLog('❌ 自启动切换错误: ' + error.message, 'error');
+            }
+        }
+
+        // 验证自启动实际状态
+        async function verifyAutoStartStatus() {
+            try {
+                console.log('[AUTO_START_UI] 验证自启动实际状态...');
+                const result = await window.electronAPI.autostart.getStatus();
+                if (result && result.success) {
+                    const actualStatus = result.enabled || false;
+                    console.log('[AUTO_START_UI] 实际状态:', actualStatus, '当前UI状态:', autoStartEnabled);
+
+                    if (actualStatus !== autoStartEnabled) {
+                        console.log('[AUTO_START_UI] 状态不一致，更新UI');
+                        autoStartEnabled = actualStatus;
+                        updateAutoStartToggle(autoStartEnabled);
+                        addLog(`🔄 自启动状态已同步: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
+                    } else {
+                        console.log('[AUTO_START_UI] 状态一致');
+                    }
+                } else {
+                    console.warn('[AUTO_START_UI] 无法验证状态:', result?.error);
+                }
+            } catch (error) {
+                console.error('[AUTO_START_UI] 验证状态失败:', error);
+            }
+        }
+
+        // 加载自启动状态(带多次重试机制)
+        async function loadAutoStartStatus(retryCount = 0, maxRetries = 5) {
+            try {
+                if (window.electronAPI && window.electronAPI.autostart) {
+                    const result = await window.electronAPI.autostart.getStatus();
+                    if (result && result.success) {
+                        autoStartEnabled = result.enabled || false;
+                        updateAutoStartToggle(autoStartEnabled);
+                        addLog(`✅ 自启动状态: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
+                        console.log('[AUTO_START_UI] 状态加载成功:', { enabled: autoStartEnabled, retryCount });
+                    } else {
+                        // 如果平台适配器不可用或获取失败,延迟重试
+                        if (retryCount < maxRetries) {
+                            const delay = Math.min(1000 * Math.pow(2, retryCount), 5000); // 指数退避: 1s, 2s, 4s, 5s, 5s
+                            console.log(`[AUTO_START_UI] 重试获取自启动状态 (${retryCount + 1}/${maxRetries}), ${delay}ms后重试...`);
+                            addLog(`⏳ 重试获取自启动状态 (${retryCount + 1}/${maxRetries})...`, 'info');
+
+                            setTimeout(() => {
+                                loadAutoStartStatus(retryCount + 1, maxRetries);
+                            }, delay);
+                        } else {
+                            // 达到最大重试次数,使用默认值
+                            console.warn('[AUTO_START_UI] 达到最大重试次数,使用默认状态');
+                            autoStartEnabled = false;
+                            updateAutoStartToggle(autoStartEnabled);
+                            addLog('⚠️ 无法获取自启动状态，使用默认值: ' + (result?.error || '未知错误'), 'warning');
+                        }
+                    }
+                } else {
+                    // API不可用,延迟重试
+                    if (retryCount < maxRetries) {
+                        const delay = 1000;
+                        console.log(`[AUTO_START_UI] electronAPI.autostart不可用,${delay}ms后重试 (${retryCount + 1}/${maxRetries})...`);
+                        setTimeout(() => {
+                            loadAutoStartStatus(retryCount + 1, maxRetries);
+                        }, delay);
+                    } else {
+                        autoStartEnabled = false;
+                        updateAutoStartToggle(autoStartEnabled);
+                        addLog('⚠️ 自启动API不可用', 'warning');
+                    }
+                }
+            } catch (error) {
+                console.error('[AUTO_START_UI] 加载自启动状态错误:', error);
+                if (retryCount < maxRetries) {
+                    const delay = 1000;
+                    setTimeout(() => {
+                        loadAutoStartStatus(retryCount + 1, maxRetries);
+                    }, delay);
+                } else {
+                    addLog('❌ 加载自启动状态错误: ' + error.message, 'error');
+                    autoStartEnabled = false;
+                    updateAutoStartToggle(autoStartEnabled);
+                }
+            }
+        }
+
+        // 加载历史日志
+        async function loadHistoryLogs() {
+            try {
+                if (window.electronAPI && window.electronAPI.log) {
+                    const result = await window.electronAPI.log.getUILogs();
+                    if (result && result.success && result.data && Array.isArray(result.data)) {
+                        // 清除初始日志
+                        const logs = document.getElementById('logs');
+                        logs.innerHTML = '';
+                        
+                        // 添加历史日志
+                        result.data.forEach(logEntry => {
+                            addLogFromManager(logEntry);
+                        });
+                        
+                        addLog('历史日志已加载 (' + result.data.length + ' 条)', 'info');
+                    }
+                }
+            } catch (error) {
+                console.error('加载历史日志失败:', error);
+                addLog('加载历史日志失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 从 LogManager 添加日志条目
+        function addLogFromManager(logEntry) {
+            if (!logEntry || !logEntry.message) return;
+            
+            const logs = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.dataset.type = logEntry.level || 'info';
+            
+            // 检查是否应该显示此类型的日志
+            if (!shouldShowLog(logEntry.level || 'info')) {
+                entry.style.display = 'none';
+            }
+            
+            // 使用 LogManager 的时间格式
+            const timeStr = logEntry.timeStr || new Date(logEntry.timestamp).toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 8);
+            
+            // 根据日志级别设置样式
+            let className = 'log-time';
+            let icon = 'ℹ️';
+            
+            switch (logEntry.level) {
+                case 'error':
+                    className = 'log-error';
+                    icon = '❌';
+                    break;
+                case 'warning':
+                    className = 'log-warning';
+                    icon = '⚠️';
+                    break;
+                case 'success':
+                    className = 'log-success';
+                    icon = '✅';
+                    break;
+                case 'data':
+                    className = 'log-data';
+                    icon = '📊';
+                    break;
+                case 'upload':
+                    className = 'log-upload';
+                    icon = '📤';
+                    break;
+                case 'debug':
+                    className = 'log-info';
+                    icon = '🔍';
+                    break;
+                default:
+                    className = 'log-info';
+                    icon = 'ℹ️';
+            }
+            
+            entry.innerHTML = `<span class="${className}">[${timeStr}]</span> ${icon} ${logEntry.message}`;
+            logs.appendChild(entry);
+            
+            // 限制日志数量
+            if (logs.children.length > 150) {
+                logs.removeChild(logs.firstChild);
+            }
+        }
+
+        // 配置相关函数
+        function toggleConfig() {
+            configExpanded = !configExpanded;
+            const panel = document.getElementById('configPanel');
+            panel.style.display = configExpanded ? 'block' : 'none';
+        }
+
+        async function loadConfig() {
+            try {
+                if (window.electronAPI && window.electronAPI.config) {
+                    const config = await window.electronAPI.config.get();
+                    if (config && config.serverUrl) {
+                        document.getElementById('serverUrl').value = config.serverUrl;
+                        addLog('配置已加载');
+                    }
+                } else {
+                    // 默认配置
+                    document.getElementById('serverUrl').value = 'http://23.95.193.155:3000';
+                }
+            } catch (error) {
+                addLog('加载配置错误: ' + error.message, 'error');
+            }
+        }
+
+        async function saveConfig() {
+            try {
+                const serverUrl = document.getElementById('serverUrl').value.trim();
+                
+                if (!serverUrl) {
+                    addLog('服务器地址不能为空', 'error');
+                    return;
+                }
+
+                // 验证URL格式
+                try {
+                    new URL(serverUrl);
+                } catch {
+                    addLog('服务器地址格式不正确', 'error');
+                    return;
+                }
+
+                if (window.electronAPI && window.electronAPI.config) {
+                    const result = await window.electronAPI.config.update({ serverUrl });
+                    if (result && result.success !== false) {
+                        addLog('配置已保存: ' + serverUrl);
+                        toggleConfig(); // 关闭配置面板
+                    } else {
+                        addLog('保存配置失败: ' + (result.message || '未知错误'), 'error');
+                    }
+                } else {
+                    addLog('配置已更新: ' + serverUrl);
+                    toggleConfig();
+                }
+            } catch (error) {
+                addLog('保存配置错误: ' + error.message, 'error');
+            }
+        }
+
+        function resetConfig() {
+            document.getElementById('serverUrl').value = 'http://23.95.193.155:3000';
+            addLog('配置已重置为默认值');
+        }
+
+        // 显示权限弹窗内容
+        function displayPermissionModal(permissions) {
+            const modal = document.getElementById('permissionModal');
+            const list = document.getElementById('permissionList');
+            const guide = document.getElementById('permissionGuide');
+            
+            // 权限名称映射
+            const permissionNames = {
+                'screenRecording': '屏幕录制权限',
+                'accessibility': '辅助功能权限'
+            };
+            
+            // 生成权限列表
+            list.innerHTML = '';
+            let hasUnauthorized = false;
+            
+            Object.entries(permissionNames).forEach(([key, name]) => {
+                const granted = permissions[key] === true || permissions[key] === 'granted';
+                if (!granted) hasUnauthorized = true;
+                
+                // 调试信息
+                console.log(`[权限检查] ${key}: ${permissions[key]} -> ${granted ? '已授权' : '未授权'}`);
+                
+                const item = document.createElement('div');
+                item.className = 'permission-item';
+                item.innerHTML = `
+                    <span class="permission-name">${name}</span>
+                    <span class="permission-status ${granted ? 'granted' : 'denied'}">
+                        ${granted ? '已授权' : '未授权'}
+                    </span>
+                `;
+                list.appendChild(item);
+            });
+            
+            // 显示或隐藏指导信息和按钮
+            const requestBtn = document.getElementById('requestPermissionsBtn');
+            
+            // 隐藏指导信息，但总是显示请求权限按钮
+            guide.style.display = 'none';
+            requestBtn.style.display = 'inline-block';
+            
+            // 显示弹窗
+            modal.style.display = 'flex';
+        }
+
+        // 关闭权限弹窗
+        function closePermissionModal() {
+            const modal = document.getElementById('permissionModal');
+            modal.style.display = 'none';
+        }
+
+        // 请求所有权限
+        async function requestAllPermissions() {
+            try {
+                const requestBtn = document.getElementById('requestPermissionsBtn');
+                if (requestBtn) {
+                    requestBtn.disabled = true;
+                    requestBtn.textContent = '请求中...';
+                }
+                
+                addLog('开始请求系统权限...');
+                
+                if (window.electronAPI && window.electronAPI.permission) {
+                    const result = await window.electronAPI.permission.requestAll();
+                    if (result.success) {
+                        addLog('权限请求已发送，请按照提示完成授权', 'success');
+                        
+                        // 3秒后重新检查权限状态
+                        setTimeout(async () => {
+                            await updatePermissionIndicators();
+                            await showPermissionModal(); // 刷新权限弹窗显示
+                        }, 3000);
+                    } else {
+                        addLog('权限请求失败: ' + (result.error || '未知错误'), 'error');
+                    }
+                } else {
+                    addLog('权限请求功能暂不可用', 'warning');
+                }
+                
+                if (requestBtn) {
+                    requestBtn.disabled = false;
+                    requestBtn.textContent = '请求权限';
+                }
+            } catch (error) {
+                addLog('权限请求错误: ' + error.message, 'error');
+                const requestBtn = document.getElementById('requestPermissionsBtn');
+                if (requestBtn) {
+                    requestBtn.disabled = false;
+                    requestBtn.textContent = '请求权限';
+                }
+            }
+        }
+
+
+        // 点击弹窗外部关闭
+        document.addEventListener('click', (event) => {
+            const modal = document.getElementById('permissionModal');
+            if (event.target === modal) {
+                closePermissionModal();
+            }
+        });
+
+
+        // 辅助函数
+        function updateStatus(text, running) {
+            document.getElementById('statusText').textContent = text;
+            const dot = document.getElementById('statusDot');
+            dot.className = running ? 'status-dot' : 'status-dot offline';
+        }
+
+        function updatePermissionDot(id, granted) {
+            const dot = document.getElementById(id);
+            dot.className = granted ? 'perm-dot' : 'perm-dot denied';
+        }
+
+        function updateAutoStartToggle(enabled) {
+            const toggle = document.getElementById('autoStartToggle');
+            toggle.className = enabled ? 'toggle active' : 'toggle';
+        }
+
+        // 清空日志
+        function clearLogs() {
+            const logs = document.getElementById('logs');
+            logs.innerHTML = '';
+            addLog('日志已清空', 'info');
+        }
+
+        // 切换日志过滤器显示
+        function toggleLogLevels() {
+            const filters = document.getElementById('logFilters');
+            filters.style.display = filters.style.display === 'none' ? 'flex' : 'none';
+        }
+
+        // 检查日志是否应该显示
+        function shouldShowLog(type) {
+            const filterCheckboxes = {
+                'data': document.getElementById('filterData'),
+                'upload': document.getElementById('filterUpload'),
+                'success': document.getElementById('filterSuccess'),
+                'info': document.getElementById('filterInfo'),
+                'warning': document.getElementById('filterWarning'),
+                'error': document.getElementById('filterError')
+            };
+            
+            const checkbox = filterCheckboxes[type];
+            return checkbox ? checkbox.checked : true;
+        }
+
+        function addLog(message, type = 'info') {
+            // 检查是否应该显示此类型的日志
+            if (!shouldShowLog(type)) {
+                return;
+            }
+
+            const logs = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 8);
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.dataset.type = type; // 保存类型用于过滤
+            
+            // 根据日志类型设置不同的样式
+            let className = 'log-time';
+            if (type === 'error') {
+                className = 'log-error';
+            } else if (type === 'warning') {
+                className = 'log-warning';
+            } else if (type === 'success') {
+                className = 'log-success';
+            } else if (type === 'data') {
+                className = 'log-data';
+            } else if (type === 'upload') {
+                className = 'log-upload';
+            } else {
+                className = 'log-info';
+            }
+            
+            // 为数据采集和上传相关的消息添加特殊标记
+            if (message.includes('采集') || message.includes('数据') || message.includes('活动')) {
+                className = 'log-data';
+                logEntry.dataset.type = 'data';
+            } else if (message.includes('上传') || message.includes('传输') || message.includes('WebSocket')) {
+                className = 'log-upload';
+                logEntry.dataset.type = 'upload';
+            }
+            
+            // 增强消息格式，添加更多视觉提示
+            let icon = '';
+            switch (type) {
+                case 'success': icon = '✅'; break;
+                case 'error': icon = '❌'; break;
+                case 'warning': icon = '⚠️'; break;
+                case 'data': icon = '📊'; break;
+                case 'upload': icon = '📤'; break;
+                default: icon = 'ℹ️'; break;
+            }
+            
+            logEntry.innerHTML = `<span class="${className}">[${time}]</span> ${icon} ${message}`;
+            
+            logs.appendChild(logEntry);
+            
+            // 限制日志数量，保持性能
+            if (logs.children.length > 150) { // 增加日志数量限制
+                logs.removeChild(logs.firstChild);
+            }
+            
+            // 确保滚动到底部，使用setTimeout确保DOM更新完成
+            setTimeout(() => {
+                logs.scrollTop = logs.scrollHeight;
+            }, 10);
+        }
+
+        // 重新过滤日志显示
+        function refilterLogs() {
+            const logs = document.getElementById('logs');
+            const entries = logs.querySelectorAll('.log-entry');
+            
+            entries.forEach(entry => {
+                const type = entry.dataset.type;
+                if (type && !shouldShowLog(type)) {
+                    entry.style.display = 'none';
+                } else {
+                    entry.style.display = 'block';
+                }
+            });
+        }
+
+        // 为过滤器复选框添加事件监听
+        document.addEventListener('DOMContentLoaded', () => {
+            const filterCheckboxes = ['filterData', 'filterUpload', 'filterSuccess', 'filterInfo', 'filterWarning', 'filterError'];
+            filterCheckboxes.forEach(id => {
+                const checkbox = document.getElementById(id);
+                if (checkbox) {
+                    checkbox.addEventListener('change', refilterLogs);
+                }
+            });
+        });
+        
+        // 显示日志统计信息
+        async function showLogStats() {
+            try {
+                if (window.electronAPI && window.electronAPI.log) {
+                    const result = await window.electronAPI.log.getStats();
+                    if (result && result.success && result.data) {
+                        const stats = result.data;
+                        const statsText = `日志统计:
+` +
+                            `- UI日志: ${stats.uiLogCount}/${stats.maxUILogs}
+` +
+                            `- 当前文件: ${stats.currentFileLines || 0}/${stats.maxFileLines}
+` +
+                            `- 文件数量: ${stats.logFileCount || 0}
+` +
+                            `- 日志目录: ${stats.logsDir || '未设置'}`;
+                        
+                        alert(statsText);
+                        addLog('日志统计信息已显示', 'info');
+                    } else {
+                        addLog('获取日志统计失败', 'error');
+                    }
+                } else {
+                    addLog('日志统计功能不可用', 'warning');
+                }
+            } catch (error) {
+                addLog('日志统计错误: ' + error.message, 'error');
+            }
+        }
+        
+        // 清理旧日志文件
+        async function cleanupOldLogs() {
+            try {
+                if (window.electronAPI && window.electronAPI.log) {
+                    const maxDays = prompt('输入保留天数（默认30天）:', '30');
+                    if (maxDays === null) return; // 用户取消
+                    
+                    const days = parseInt(maxDays) || 30;
+                    const result = await window.electronAPI.log.cleanup(days);
+                    
+                    if (result && result.success) {
+                        addLog(`旧日志清理完成（${days}天前）`, 'success');
+                    } else {
+                        addLog('旧日志清理失败: ' + (result.error || '未知错误'), 'error');
+                    }
+                } else {
+                    addLog('日志清理功能不可用', 'warning');
+                }
+            } catch (error) {
+                addLog('日志清理错误: ' + error.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

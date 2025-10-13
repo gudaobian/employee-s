@@ -1,0 +1,557 @@
+name: Build and Release Employee Monitor
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 触发条件：推送版本标签，如 v1.0.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        default: 'v2.0.0'
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+  issues: write
+  pull-requests: write
+
+env:
+  NODE_VERSION: '18'  # Must match Electron 25's internal Node.js version
+
+jobs:
+  # 构建Windows应用（使用代码库中预编译的原生模块）
+  build-windows:
+    name: Build Windows Application
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify Node.js and npm versions
+        run: |
+          Write-Host "========================================="
+          Write-Host "环境信息检查"
+          Write-Host "========================================="
+          Write-Host "Node.js 版本:"
+          node --version
+          Write-Host ""
+          Write-Host "npm 版本:"
+          npm --version
+          Write-Host ""
+          Write-Host "Node.js 路径:"
+          where.exe node
+          Write-Host ""
+          Write-Host "npm 路径:"
+          where.exe npm
+          Write-Host ""
+          Write-Host "期望 Node.js 版本: ${{ env.NODE_VERSION }}"
+          Write-Host "========================================="
+
+      - name: Check Electron version and Node.js compatibility
+        run: |
+          Write-Host "========================================="
+          Write-Host "Electron 兼容性检查"
+          Write-Host "========================================="
+
+          # 读取 package.json 中的 Electron 版本
+          $packageJson = Get-Content "package.json" -Raw | ConvertFrom-Json
+          $electronVersion = $packageJson.devDependencies.electron
+          Write-Host "package.json 中的 Electron 版本: $electronVersion"
+
+          # Electron 25 内置 Node.js 18.15.0 (ABI 116)
+          Write-Host ""
+          Write-Host "Electron 25 内置信息:"
+          Write-Host "- Node.js: 18.15.0"
+          Write-Host "- ABI Version: 116"
+          Write-Host "- Chrome: 114"
+          Write-Host ""
+          Write-Host "当前 Node.js 版本:"
+          node --version
+          Write-Host "========================================="
+
+      - name: Install application dependencies (Windows)
+        run: |
+          echo "🔄 Installing Windows application dependencies..."
+
+          # 清理环境和缓存（但保留原生模块）
+          if (Test-Path "package-lock.json") { Remove-Item "package-lock.json" -Force }
+          if (Test-Path "node_modules") { Remove-Item "node_modules" -Recurse -Force }
+          # ❌ 不要删除 native-event-monitor-win/build/ - 它包含从 artifact 下载的编译好的模块
+          if (Test-Path "native-event-monitor-win/node_modules") { Remove-Item "native-event-monitor-win/node_modules" -Recurse -Force }
+          
+          # 设置 npm 配置以避免权限问题
+          npm config set fund false
+          npm config set audit false
+          npm config set progress false
+          
+          # 强制清理 npm 缓存
+          npm cache clean --force
+
+          # 先单独安装 Electron（允许 postinstall）
+          echo "📦 Installing Electron first (allow postinstall)..."
+          npm install electron@25.9.8 --legacy-peer-deps
+
+          # 验证 Electron 安装
+          if (Test-Path "node_modules/electron/dist/electron.exe") {
+            Write-Host "✅ Electron installed successfully"
+          } else {
+            Write-Host "❌ Electron installation failed"
+            exit 1
+          }
+
+          # 安装其他依赖包括 devDependencies（构建需要）
+          # 使用 --ignore-scripts 阻止任何自动构建脚本覆盖我们的原生模块
+          echo "📦 Installing other dependencies (block auto-build)..."
+          npm install --production=false --legacy-peer-deps --ignore-scripts
+          
+          # 验证关键构建依赖
+          echo "🔍 Verifying critical build dependencies..."
+          $criticalDeps = @("electron-builder", "@electron/packager", "typescript")
+          foreach ($dep in $criticalDeps) {
+            if (-not (Test-Path "node_modules/$dep")) {
+              echo "❌ Critical dependency missing: $dep"
+              echo "🔧 Attempting individual install..."
+              npm install $dep --legacy-peer-deps --ignore-scripts
+            } else {
+              echo "✅ $dep is installed"
+            }
+          }
+
+          # Electron 已经单独安装，再次验证
+          if (Test-Path "node_modules/electron") {
+            echo "✅ electron is installed"
+          } else {
+            echo "❌ electron missing - this should not happen"
+            exit 1
+          }
+          
+          echo "✅ Dependencies installation completed"
+
+          # 显示最终状态
+          echo "📋 Final dependency status:"
+          npm list --depth=0 2>$null | Out-String | Write-Host
+
+      - name: Verify precompiled native module
+        run: |
+          Write-Host "========================================="
+          Write-Host "验证代码库中的预编译原生模块"
+          Write-Host "========================================="
+          if (Test-Path "native-event-monitor-win/build/Release/event_monitor.node") {
+            $module = Get-Item "native-event-monitor-win/build/Release/event_monitor.node"
+            $hash = (Get-FileHash $module.FullName -Algorithm SHA256).Hash.Substring(0,8)
+            Write-Host "✅ 原生模块已存在（来自代码库）"
+            Write-Host "   文件: $($module.FullName)"
+            Write-Host "   大小: $([math]::Round($module.Length / 1KB, 2)) KB"
+            Write-Host "   哈希: $hash"
+            Write-Host ""
+            Write-Host "⚠️  重要: 此文件将被 electron-builder 打包"
+            Write-Host "   请勿在后续步骤中删除或覆盖此文件"
+          } else {
+            Write-Host "❌ 未找到原生模块"
+            Write-Host "   预期位置: native-event-monitor-win/build/Release/event_monitor.node"
+            Write-Host "   请确保原生模块已提交到代码库"
+            exit 1
+          }
+          Write-Host "========================================="
+
+      - name: Update package version from git tag
+        run: |
+          # 从 git tag 提取版本号
+          if ("${{ github.ref }}" -match "refs/tags/v(.+)") {
+            $VERSION = $matches[1]
+            Write-Host "📌 Extracted version from tag: $VERSION"
+
+            # 更新 package.json 的版本号
+            $packageJson = Get-Content "package.json" -Raw | ConvertFrom-Json
+            $packageJson.version = $VERSION
+            $packageJson | ConvertTo-Json -Depth 100 | Set-Content "package.json"
+
+            Write-Host "✅ Updated package.json version to: $VERSION"
+            Write-Host ""
+            Write-Host "验证 package.json:"
+            Get-Content "package.json" | Select-String '"version"'
+          } else {
+            Write-Host "⚠️ Not a tag push, using package.json version"
+          }
+
+      - name: Build TypeScript
+        run: |
+          npm run compile
+
+      - name: Final verification before packaging
+        run: |
+          Write-Host "========================================="
+          Write-Host "打包前最终验证"
+          Write-Host "========================================="
+
+          # 验证原生模块仍然存在
+          if (Test-Path "native-event-monitor-win/build/Release/event_monitor.node") {
+            $module = Get-Item "native-event-monitor-win/build/Release/event_monitor.node"
+            $hash = (Get-FileHash $module.FullName -Algorithm SHA256).Hash.Substring(0,8)
+            $lastModified = $module.LastWriteTime
+
+            Write-Host "✅ 原生模块验证通过"
+            Write-Host "   文件路径: $($module.FullName)"
+            Write-Host "   文件大小: $([math]::Round($module.Length / 1KB, 2)) KB"
+            Write-Host "   SHA256哈希: $hash"
+            Write-Host "   最后修改: $lastModified"
+
+            # 尝试检测 ABI 版本（通过文件内容特征）
+            Write-Host ""
+            Write-Host "🔍 尝试检测 NODE_MODULE_VERSION..."
+            try {
+              # 读取文件的前 1KB 寻找 NODE_MODULE_VERSION 字符串
+              $bytes = [System.IO.File]::ReadAllBytes($module.FullName)
+              $content = [System.Text.Encoding]::ASCII.GetString($bytes)
+
+              if ($content -match "node_module_version.(\d+)") {
+                Write-Host "   检测到 NODE_MODULE_VERSION: $($matches[1])"
+                if ($matches[1] -eq "116") {
+                  Write-Host "   ✅ 正确！ABI 116 匹配 Electron 25"
+                } else {
+                  Write-Host "   ❌ 错误！ABI $($matches[1]) 不匹配 Electron 25 (应该是 116)"
+                  Write-Host "   🚨 这个文件可能是用错误的工具编译的！"
+                }
+              } else {
+                Write-Host "   ⚠️ 无法从文件中提取 NODE_MODULE_VERSION"
+              }
+            } catch {
+              Write-Host "   ⚠️ ABI 版本检测失败: $($_.Exception.Message)"
+            }
+
+            Write-Host ""
+            Write-Host "⚠️  此文件将被 electron-builder 打包到最终 exe 中"
+            Write-Host "   如果最后修改时间太新，可能是被意外重新编译了！"
+          } else {
+            Write-Host "❌ 严重错误: 原生模块文件丢失！"
+            Write-Host "   预期位置: native-event-monitor-win/build/Release/event_monitor.node"
+            Write-Host "   electron-builder 将无法打包正确的文件"
+            exit 1
+          }
+
+          # 检查是否有其他可疑的 .node 文件
+          Write-Host ""
+          Write-Host "检查其他 .node 文件:"
+          Get-ChildItem -Path "." -Filter "*.node" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "   找到: $($_.FullName) ($([math]::Round($_.Length / 1KB, 2)) KB)"
+          }
+
+          Write-Host "========================================="
+
+      - name: Create application bundle
+        run: |
+          npm run pack:win
+        env:
+          # 不设置GH_TOKEN，禁用electron-builder自动发布
+          # Release由后续的create-release job统一处理
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Verify packaged native module (CRITICAL)
+        run: |
+          Write-Host "========================================="
+          Write-Host "验证打包后的原生模块（关键步骤）"
+          Write-Host "========================================="
+
+          # 检查 win-unpacked 目录（electron-builder 的解压版本）
+          $unpackedPath = "release/win-unpacked/resources/app.asar.unpacked/native-event-monitor-win/build/Release/event_monitor.node"
+
+          if (Test-Path $unpackedPath) {
+            $packedModule = Get-Item $unpackedPath
+            $packedHash = (Get-FileHash $packedModule.FullName -Algorithm SHA256).Hash.Substring(0,8)
+
+            Write-Host "✅ 在安装包中找到原生模块"
+            Write-Host "   路径: $unpackedPath"
+            Write-Host "   大小: $([math]::Round($packedModule.Length / 1KB, 2)) KB"
+            Write-Host "   SHA256: $packedHash"
+            Write-Host ""
+
+            # 检测打包文件的 ABI 版本
+            Write-Host "🔍 检测打包文件的 NODE_MODULE_VERSION..."
+            try {
+              $bytes = [System.IO.File]::ReadAllBytes($packedModule.FullName)
+              $content = [System.Text.Encoding]::ASCII.GetString($bytes)
+
+              if ($content -match "node_module_version.(\d+)") {
+                Write-Host "   打包文件的 NODE_MODULE_VERSION: $($matches[1])"
+                if ($matches[1] -eq "116") {
+                  Write-Host "   ✅✅✅ 完美！打包的是 ABI 116（正确）"
+                } else {
+                  Write-Host "   ❌❌❌ 严重错误！打包的是 ABI $($matches[1])，应该是 116"
+                  Write-Host "   🚨 用户将收到 NODE_MODULE_VERSION 错误！"
+                  exit 1
+                }
+              }
+            } catch {
+              Write-Host "   ⚠️ 无法检测 ABI: $($_.Exception.Message)"
+            }
+          } else {
+            Write-Host "❌ 未在安装包中找到原生模块"
+            Write-Host "   预期路径: $unpackedPath"
+            Write-Host ""
+            Write-Host "可能的原因:"
+            Write-Host "1. electron-builder 配置错误"
+            Write-Host "2. 文件未被包含在 asar.unpacked 中"
+            exit 1
+          }
+
+          Write-Host "========================================="
+
+      - name: List build outputs
+        run: |
+          Write-Host "Build outputs:"
+          if (Test-Path "release") {
+            Get-ChildItem -Path "release" -Recurse | ForEach-Object {
+              $relativePath = $_.FullName.Replace((Get-Location).Path + "\release\", "")
+              if ($_.PSIsContainer) {
+                Write-Host "  📁 $relativePath"
+              } else {
+                $sizeMB = [math]::Round($_.Length / 1MB, 2)
+                Write-Host "  📄 $relativePath ($sizeMB MB)"
+              }
+            }
+          } else {
+            Write-Host "❌ Release directory not found"
+            Get-ChildItem -Path "." -Name
+          }
+
+      - name: Upload Windows build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            release/*.exe
+            release/*.msi
+            release/*.zip
+          retention-days: 1
+          if-no-files-found: error
+
+  # 第三阶段：构建macOS应用（可选）
+  build-macos:
+    name: Build macOS Application
+    runs-on: macos-latest
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install application dependencies (macOS)
+        run: |
+          echo "🔄 Installing macOS application dependencies..."
+          
+          # 设置 npm 配置
+          npm config set fund false
+          npm config set audit false
+          npm config set progress false
+          
+          # 清理缓存
+          npm cache clean --force
+          
+          # 安装所有依赖包括 devDependencies（构建需要）
+          echo "📱 macOS build - installing all dependencies..."
+          npm install --production=false --legacy-peer-deps
+          
+          # 验证关键构建依赖
+          echo "🔍 Verifying critical build dependencies..."
+          for dep in "electron" "electron-builder" "@electron/packager" "typescript"; do
+            if [ ! -d "node_modules/$dep" ]; then
+              echo "❌ Critical dependency missing: $dep"
+              echo "🔧 Attempting individual install..."
+              npm install $dep --legacy-peer-deps
+            else
+              echo "✅ $dep is installed"
+            fi
+          done
+          
+          echo "✅ Dependencies installation completed"
+          
+          echo "📋 Final dependency status:"
+          npm list --depth=0 2>/dev/null || echo "Dependencies installed successfully"
+
+      - name: Build TypeScript
+        run: |
+          npm run compile
+
+      - name: Build native modules for macOS
+        run: |
+          npm run build:native:mac
+
+      - name: Create macOS bundle
+        run: |
+          npm run pack:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: |
+            release/*.dmg
+            release/*.zip
+          retention-days: 1
+          if-no-files-found: warn
+
+  # 第三阶段：创建GitHub Release
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-windows]
+    if: always() && (needs.build-windows.result == 'success')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="v$(date +'%Y.%m.%d')-$(echo $GITHUB_SHA | cut -c1-7)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: release-artifacts/windows/
+
+      - name: Download macOS artifacts (if available)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: macos-installer
+          path: release-artifacts/macos/
+
+      - name: Prepare release notes
+        id: release-notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          # Employee Monitor ${{ steps.version.outputs.version }}
+          
+          ## 🚀 新版本发布
+          
+          ### 📦 安装包
+          
+          **Windows 用户：**
+          - `Employee-Monitor-Setup-${{ steps.version.outputs.version }}.exe` - Windows 安装程序（推荐）
+          - `Employee-Monitor-${{ steps.version.outputs.version }}-win.zip` - Windows 便携版
+          
+          **macOS 用户：**
+          - `Employee-Monitor-${{ steps.version.outputs.version }}.dmg` - macOS 安装包
+          
+          ### ✨ 主要特性
+          
+          - 🖥️ 跨平台支持（Windows、macOS）
+          - 📊 实时活动监控
+          - 📸 自动截屏功能
+          - 🔒 本地数据安全存储
+          - 🌐 服务器同步支持
+          - ⚙️ 灵活的配置选项
+          
+          ### 🔧 技术信息
+          
+          - **构建时间**: $(date -u +'%Y-%m-%d %H:%M:%S') UTC
+          - **提交哈希**: ${{ github.sha }}
+          - **Node.js 版本**: ${{ env.NODE_VERSION }}
+          - **原生模块**: ✅ 使用预编译模块（代码库）
+          
+          ### 📋 安装说明
+          
+          1. **Windows**: 下载 `.exe` 安装程序，右键以管理员身份运行
+          2. **macOS**: 下载 `.dmg` 文件，拖拽到应用程序文件夹
+          
+          ### 🆘 技术支持
+          
+          如遇问题，请访问 [Issues](https://github.com/${{ github.repository }}/issues) 页面报告。
+          
+          EOF
+          
+          echo "Release notes prepared"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Employee Monitor ${{ steps.version.outputs.version }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          files: |
+            release-artifacts/windows/*.exe
+            release-artifacts/windows/*.msi
+            release-artifacts/windows/*.zip
+            release-artifacts/macos/*.dmg
+            release-artifacts/macos/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release summary
+        run: |
+          echo "🎉 Release ${{ steps.version.outputs.version }} created successfully!" 
+          echo "📦 Artifacts uploaded:"
+          find release-artifacts -type f -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.msi" | while read file; do
+            filename=$(basename "$file")
+            size=$(du -h "$file" | cut -f1)
+            echo "  - $filename ($size)"
+          done
+          echo ""
+          echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }}"
+
+  # 第四阶段：通知完成
+  notify-completion:
+    name: Notify Build Completion
+    runs-on: ubuntu-latest
+    needs: [build-windows, create-release]
+    if: always()
+    
+    steps:
+      - name: Notify success
+        if: needs.create-release.result == 'success'
+        run: |
+          echo "🎉 Employee Monitor 构建和发布成功完成！"
+          echo "✅ Windows 应用构建完成"
+          echo "📦 安装包已上传到 GitHub Releases"
+          echo "🔗 立即下载: https://github.com/${{ github.repository }}/releases/latest"
+          
+      - name: Notify failure
+        if: needs.create-release.result != 'success'
+        run: |
+          echo "❌ Employee Monitor 构建或发布失败"
+          echo "🔧 请检查构建日志获取详细错误信息"
+          echo "📋 故障排除："
+          echo "  1. 检查 TypeScript 编译错误"
+          echo "  2. 验证 electron-builder 配置"
+          echo "  3. 确认依赖项完整性"
+          echo "  4. 检查 GitHub token 权限"
+          exit 1

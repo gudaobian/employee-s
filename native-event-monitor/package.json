@@ -1,0 +1,26 @@
+{
+  "name": "native-event-monitor",
+  "version": "1.0.0",
+  "description": "macOS native keyboard and mouse event monitor using CGEvent API",
+  "main": "index.js",
+  "scripts": {
+    "install": "node-gyp rebuild",
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean"
+  },
+  "dependencies": {
+    "node-gyp": "^10.0.0",
+    "socket.io": "^4.8.1"
+  },
+  "gypfile": true,
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ]
+}
