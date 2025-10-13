@@ -182,22 +182,7 @@ export class DataCollectStateHandler extends BaseStateHandler {
 
       logger.info('[DATA_COLLECT] ✅ Permissions checked, setting isCollecting = true');
 
-      // 确保 WebSocket 持久连接已建立
-      logger.info('[DATA_COLLECT] 🔌 Ensuring WebSocket persistent connection...');
-      if (!this.websocketService) {
-        logger.warn('[DATA_COLLECT] ⚠️ WebSocket service not available, data upload may fail');
-      } else if (!this.websocketService.isConnected()) {
-        logger.info('[DATA_COLLECT] 📡 WebSocket not connected, establishing persistent connection...');
-        try {
-          await this.websocketService.connect();
-          logger.info('[DATA_COLLECT] ✅ WebSocket persistent connection established');
-        } catch (error: any) {
-          logger.error('[DATA_COLLECT] ❌ Failed to establish WebSocket connection:', error.message);
-          logger.warn('[DATA_COLLECT] Will retry connection in background...');
-        }
-      } else {
-        logger.info('[DATA_COLLECT] ✅ WebSocket service is ready for data upload');
-      }
+      // WebSocket连接检查已移到handleOnlineCollection()开头统一处理
 
       // 启动活动收集服务
       logger.info('[DATA_COLLECT] 启动活动收集服务...');
@@ -1818,6 +1803,23 @@ export class DataCollectStateHandler extends BaseStateHandler {
   private async handleOnlineCollection(context: FSMContext): Promise<StateHandlerResult> {
     try {
       logger.info('[DATA_COLLECT] 📊 handleOnlineCollection() - isCollecting: ' + this.isCollecting);
+
+      // 确保 WebSocket 持久连接已建立（每次execute都检查）
+      logger.info('[DATA_COLLECT] 🔌 Ensuring WebSocket persistent connection...');
+      if (!this.websocketService) {
+        logger.warn('[DATA_COLLECT] ⚠️ WebSocket service not available, data upload may fail');
+      } else if (!this.websocketService.isConnected()) {
+        logger.info('[DATA_COLLECT] 📡 WebSocket not connected, establishing persistent connection...');
+        try {
+          await this.websocketService.connect();
+          logger.info('[DATA_COLLECT] ✅ WebSocket persistent connection established');
+        } catch (error: any) {
+          logger.error('[DATA_COLLECT] ❌ Failed to establish WebSocket connection:', error.message);
+          logger.warn('[DATA_COLLECT] Will retry connection in background...');
+        }
+      } else {
+        logger.info('[DATA_COLLECT] ✅ WebSocket service is ready for data upload');
+      }
 
       // 如果已经在收集数据，检查状态
       if (this.isCollecting) {
