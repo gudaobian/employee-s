@@ -95,12 +95,13 @@ class WindowsNativeEventAdapter {
    */
   async startMonitoring(): Promise<boolean> {
     try {
-      if (this.nativeModule.startMonitoring) {
-        console.log('[NativeEventAdapter] Calling native startMonitoring()...');
-        this.nativeModule.startMonitoring();
+      // C++ 模块导出的方法名是 'start'，不是 'startMonitoring'
+      if (this.nativeModule.start) {
+        console.log('[NativeEventAdapter] Calling native start()...');
+        this.nativeModule.start();
 
         // Verify hooks were installed successfully
-        const counts = this.nativeModule.getEventCounts ? this.nativeModule.getEventCounts() : null;
+        const counts = this.nativeModule.getCounts ? this.nativeModule.getCounts() : null;
         if (counts) {
           console.log('[NativeEventAdapter] Hook status:', {
             keyboardHook: counts.keyboardHookInstalled ? '✅' : '❌',
@@ -118,7 +119,7 @@ class WindowsNativeEventAdapter {
         console.log('[NativeEventAdapter] ✅ Native monitoring started successfully');
         return true;
       }
-      console.warn('[NativeEventAdapter] startMonitoring method not available');
+      console.warn('[NativeEventAdapter] start method not available');
       return false;
     } catch (error) {
       console.error('[NativeEventAdapter] ❌ Failed to start monitoring:', error);
@@ -135,8 +136,9 @@ class WindowsNativeEventAdapter {
    */
   async stopMonitoring(): Promise<boolean> {
     try {
-      if (this.nativeModule.stopMonitoring) {
-        this.nativeModule.stopMonitoring();
+      // C++ 模块导出的方法名是 'stop'，不是 'stopMonitoring'
+      if (this.nativeModule.stop) {
+        this.nativeModule.stop();
         return true;
       }
       return false;
@@ -175,8 +177,9 @@ class WindowsNativeEventAdapter {
     mouseHookInstalled: boolean;
   }> {
     try {
-      if (this.nativeModule.getEventCounts) {
-        return this.nativeModule.getEventCounts();
+      // C++ 模块导出的方法名是 'getCounts'，不是 'getEventCounts'
+      if (this.nativeModule.getCounts) {
+        return this.nativeModule.getCounts();
       }
       return {
         keyboard: 0,
