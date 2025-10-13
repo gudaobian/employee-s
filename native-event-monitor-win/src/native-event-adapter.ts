@@ -20,11 +20,34 @@ class WindowsNativeEventAdapter {
 
   constructor() {
     try {
-      // Load the native module
-      this.nativeModule = require('../../build/Release/event_monitor.node');
+      // Load the native module with proper path resolution for both dev and production
+      const path = require('path');
+
+      // In production (Electron packaged app), native modules are in app.asar.unpacked
+      // In development, they are in the project directory
+      let modulePath: string;
+
+      if (process.resourcesPath) {
+        // Production: Electron packaged app
+        modulePath = path.join(
+          process.resourcesPath,
+          'app.asar.unpacked',
+          'native-event-monitor-win',
+          'build',
+          'Release',
+          'event_monitor.node'
+        );
+      } else {
+        // Development: relative path from compiled location
+        modulePath = path.join(__dirname, '../../build/Release/event_monitor.node');
+      }
+
+      console.log('[NativeEventAdapter] Loading native module from:', modulePath);
+      this.nativeModule = require(modulePath);
       this.nativeModuleRef = this.nativeModule;
+      console.log('[NativeEventAdapter] ✅ Native module loaded successfully');
     } catch (error) {
-      console.error('Failed to load native module:', error);
+      console.error('[NativeEventAdapter] ❌ Failed to load native module:', error);
       throw new Error('Native event monitor module not available');
     }
   }
