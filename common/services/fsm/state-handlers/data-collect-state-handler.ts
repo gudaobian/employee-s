@@ -182,12 +182,19 @@ export class DataCollectStateHandler extends BaseStateHandler {
 
       logger.info('[DATA_COLLECT] ✅ Permissions checked, setting isCollecting = true');
 
-      // WebSocket服务已在全局启动,无需建立额外连接
-      logger.info('[DATA_COLLECT] 🔌 Using global WebSocket service for data upload');
+      // 确保 WebSocket 持久连接已建立
+      logger.info('[DATA_COLLECT] 🔌 Ensuring WebSocket persistent connection...');
       if (!this.websocketService) {
         logger.warn('[DATA_COLLECT] ⚠️ WebSocket service not available, data upload may fail');
       } else if (!this.websocketService.isConnected()) {
-        logger.warn('[DATA_COLLECT] ⚠️ WebSocket not connected yet, waiting for connection...');
+        logger.info('[DATA_COLLECT] 📡 WebSocket not connected, establishing persistent connection...');
+        try {
+          await this.websocketService.connect();
+          logger.info('[DATA_COLLECT] ✅ WebSocket persistent connection established');
+        } catch (error: any) {
+          logger.error('[DATA_COLLECT] ❌ Failed to establish WebSocket connection:', error.message);
+          logger.warn('[DATA_COLLECT] Will retry connection in background...');
+        }
       } else {
         logger.info('[DATA_COLLECT] ✅ WebSocket service is ready for data upload');
       }
