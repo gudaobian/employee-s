@@ -203,6 +203,7 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
         reconnectionDelay: 1000, // 重连延迟
         reconnectionDelayMax: 5000, // 最大重连延迟
         randomizationFactor: 0.5, // 重连延迟随机化
+        maxHttpBufferSize: 10 * 1024 * 1024, // 🔧 增加最大消息大小到 10MB（用于截图传输）
         auth: {
           deviceId: config.deviceId,
           // token 是可选的，设备可以无token连接
