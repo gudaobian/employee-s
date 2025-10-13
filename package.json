@@ -1,6 +1,6 @@
 {
   "name": "employee-safety-client",
-  "version": "2.3.13",
+  "version": "2.3.14",
   "description": "Employee Safety Client - Comprehensive Employee Security Solution",
   "main": "electron/main-minimal.js",
   "bin": {
