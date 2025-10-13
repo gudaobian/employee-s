@@ -27,10 +27,12 @@ class WindowsNativeEventAdapter {
       // In development, they are in the project directory
       let modulePath: string;
 
-      if (process.resourcesPath) {
+      // Use type assertion for Electron-specific process.resourcesPath
+      const electronProcess = process as any;
+      if (electronProcess.resourcesPath) {
         // Production: Electron packaged app
         modulePath = path.join(
-          process.resourcesPath,
+          electronProcess.resourcesPath,
           'app.asar.unpacked',
           'native-event-monitor-win',
           'build',
