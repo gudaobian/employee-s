@@ -435,8 +435,9 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
 
       // 使用 Promise 包装以支持超时和错误处理
       await new Promise<void>((resolve, reject) => {
-        // 设置超时: 截图15秒，其他5秒
-        const timeout = event === 'client:screenshot' ? 15000 : 5000;
+        // 设置超时: 截图15秒，进程数据10秒，其他5秒
+        const timeout = event === 'client:screenshot' ? 15000 :
+                        event === 'client:process' ? 10000 : 5000;
         const timeoutId = setTimeout(() => {
           reject(new Error(`Upload timeout after ${timeout}ms`));
         }, timeout);

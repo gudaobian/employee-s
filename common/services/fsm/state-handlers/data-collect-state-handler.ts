@@ -1331,7 +1331,21 @@ export class DataCollectStateHandler extends BaseStateHandler {
 
             const dataSize = screenshotResult.data.length;
             const base64Size = bufferBase64.length;
+
+            // 验证 Base64 格式
+            const base64Preview = bufferBase64.substring(0, 50) + '...' + bufferBase64.substring(bufferBase64.length - 20);
+            const isValidBase64 = /^[A-Za-z0-9+/]*={0,2}$/.test(bufferBase64.replace(/\s/g, ''));
+
             logger.info(`[DATA_COLLECT] 截图数据转换: Buffer(${dataSize} bytes) → Base64(${base64Size} chars)`);
+            logger.info(`[DATA_COLLECT] Base64验证: ${isValidBase64 ? '✅ 格式正确' : '❌ 格式错误'}`);
+            logger.info(`[DATA_COLLECT] Base64预览: ${base64Preview}`);
+
+            // 检查原始图片格式 (magic bytes)
+            const magicBytes = screenshotResult.data.slice(0, 4);
+            const isPNG = magicBytes[0] === 0x89 && magicBytes[1] === 0x50;
+            const isJPEG = magicBytes[0] === 0xFF && magicBytes[1] === 0xD8;
+            const isWebP = magicBytes.toString('ascii', 0, 4) === 'RIFF';
+            logger.info(`[DATA_COLLECT] 图片格式: ${isPNG ? 'PNG' : isJPEG ? 'JPEG' : isWebP ? 'WebP' : 'Unknown'}`);
 
             await this.websocketService.sendScreenshotData({
               buffer: bufferBase64,  // Base64 编码的字符串
