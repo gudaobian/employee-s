@@ -999,24 +999,42 @@ function setupIPCHandlers() {
                 // 注意：这里只设置开机自启动，不启动监控服务
                 // 用户需要手动点击"启动服务"按钮来启动监控
 
+                // 检查 app 状态，如果正在启动中，等待完成
+                const appState = app_instance.getState ? app_instance.getState() : null;
+                console.log('[AUTO_START] Current app state:', appState);
+
+                if (appState === 'starting' || appState === 'STARTING') {
+                    console.log('[AUTO_START] App is starting, waiting for initialization to complete...');
+                    sendLogToRenderer('⏳ 正在等待应用初始化完成...', 'info');
+
+                    // 等待最多30秒让 app 完成启动
+                    const maxWaitTime = 30000;
+                    const checkInterval = 1000;
+                    const startTime = Date.now();
+
+                    while (Date.now() - startTime < maxWaitTime) {
+                        const currentState = app_instance.getState ? app_instance.getState() : null;
+                        if (currentState === 'running' || currentState === 'RUNNING') {
+                            console.log('[AUTO_START] App initialization completed');
+                            break;
+                        }
+
+                        // 等待1秒后再检查
+                        await new Promise(resolve => setTimeout(resolve, checkInterval));
+                    }
+
+                    const finalState = app_instance.getState ? app_instance.getState() : null;
+                    if (finalState !== 'running' && finalState !== 'RUNNING') {
+                        console.log('[AUTO_START] App initialization timeout, current state:', finalState);
+                        sendLogToRenderer('⚠️ 应用初始化超时，请稍后再试', 'warning');
+                        return { success: false, error: '应用正在初始化中，请稍后再试' };
+                    }
+                }
+
                 console.log('[AUTO_START] Getting platform adapter...');
                 const platformAdapter = app_instance.getPlatformAdapter();
                 console.log('[AUTO_START] Platform adapter:', platformAdapter ? 'available' : 'not available');
-                
-                if (!platformAdapter) {
-                    console.log('[AUTO_START] Debugging platform adapter issue...');
-                    console.log('[AUTO_START] App instance type:', typeof app_instance);
-                    console.log('[AUTO_START] App instance methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(app_instance)));
-                    
-                    // Try to get detailed status to see what's wrong
-                    try {
-                        const detailedStatus = await app_instance.getDetailedStatus();
-                        console.log('[AUTO_START] Detailed status:', JSON.stringify(detailedStatus, null, 2));
-                    } catch (statusError) {
-                        console.log('[AUTO_START] Error getting detailed status:', statusError);
-                    }
-                }
-                
+
                 if (platformAdapter && typeof platformAdapter.enableAutoStart === 'function') {
                     console.log('[AUTO_START] enableAutoStart method available, calling...');
                     const result = await platformAdapter.enableAutoStart();
@@ -1086,6 +1104,14 @@ function setupIPCHandlers() {
     ipcMain.handle('autostart:status', async () => {
         try {
             if (app_instance && app_instance.getPlatformAdapter) {
+                // 检查 app 状态，如果正在启动中，返回特殊状态而不是错误
+                const appState = app_instance.getState ? app_instance.getState() : null;
+
+                if (appState === 'starting' || appState === 'STARTING') {
+                    console.log('[AUTO_START] App is starting, status check will retry later');
+                    return { success: false, error: '应用正在初始化中', initializing: true };
+                }
+
                 const platformAdapter = app_instance.getPlatformAdapter();
                 if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
                     const result = await platformAdapter.isAutoStartEnabled();
