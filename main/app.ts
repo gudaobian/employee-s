@@ -74,24 +74,27 @@ export class EmployeeMonitorApp extends EventEmitter {
     try {
       logger.info('Starting Employee Monitor App...');
 
+      // 0. 等待网络就绪（新增）
+      await this.waitForNetworkReady(60000); // 最多等待60秒
+
       // 1. 初始化平台适配器（带超时保护）
       await this.withTimeout(
         this.initializePlatform(),
-        10000,
+        20000,
         'Platform initialization'
       );
 
       // 2. 初始化服务（带超时保护）
       await this.withTimeout(
         this.initializeServices(),
-        15000,
+        30000,
         'Services initialization'
       );
 
       // 3. 初始化状态机（但不启动，带超时保护）
       await this.withTimeout(
         this.initializeStateMachine(),
-        5000,
+        10000,
         'State machine initialization'
       );
 
@@ -698,11 +701,11 @@ export class EmployeeMonitorApp extends EventEmitter {
       if (!this.serviceManager) {
         throw new Error('ServiceManager not initialized');
       }
-      
+
       // 从ServiceManager获取网络状态
       const networkStatus = this.serviceManager.getNetworkStatus();
       const recoveryStatus = this.serviceManager.getRecoveryStatus();
-      
+
       return {
         network: networkStatus,
         recovery: recoveryStatus,
@@ -715,6 +718,153 @@ export class EmployeeMonitorApp extends EventEmitter {
         error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
+  }
+
+  /**
+   * 等待网络就绪
+   * 在启动FSM前确保网络已经可用
+   */
+  private async waitForNetworkReady(maxWaitTime: number = 60000): Promise<boolean> {
+    const startTime = Date.now();
+    const checkInterval = 5000; // 每5秒检查一次
+
+    logger.info('[APP] Waiting for network ready...');
+
+    while (Date.now() - startTime < maxWaitTime) {
+      try {
+        // 1. 检查网卡状态
+        const hasActiveAdapter = await this.checkNetworkAdapter();
+        if (!hasActiveAdapter) {
+          logger.debug('[APP] No active network adapter, waiting...');
+          await this.sleep(checkInterval);
+          continue;
+        }
+
+        // 2. 检查DNS解析
+        const dnsWorks = await this.checkDNS();
+        if (!dnsWorks) {
+          logger.debug('[APP] DNS not ready, waiting...');
+          await this.sleep(checkInterval);
+          continue;
+        }
+
+        // 3. 检查API server连通性
+        const apiReachable = await this.checkAPIServer();
+        if (!apiReachable) {
+          logger.debug('[APP] API server not reachable, waiting...');
+          await this.sleep(checkInterval);
+          continue;
+        }
+
+        logger.info('[APP] Network is ready!');
+        return true;
+
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        logger.debug(`[APP] Network check failed: ${errorMsg}, retrying...`);
+        await this.sleep(checkInterval);
+      }
+    }
+
+    logger.warn('[APP] Network ready timeout, proceeding anyway...');
+    return false;
+  }
+
+  /**
+   * 检查网卡状态
+   */
+  private async checkNetworkAdapter(): Promise<boolean> {
+    try {
+      const os = await import('os');
+      const interfaces = os.networkInterfaces();
+
+      if (!interfaces) {
+        return false;
+      }
+
+      // 检查是否有活动的非回环网络接口
+      for (const name of Object.keys(interfaces)) {
+        const addrs = interfaces[name];
+        if (!addrs) continue;
+
+        for (const addr of addrs) {
+          // 忽略回环地址和内部地址
+          if (!addr.internal && addr.family === 'IPv4') {
+            logger.debug(`[APP] Found active network adapter: ${name} (${addr.address})`);
+            return true;
+          }
+        }
+      }
+
+      return false;
+    } catch (error) {
+      logger.debug(`[APP] Error checking network adapter: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * 检查DNS解析
+   */
+  private async checkDNS(): Promise<boolean> {
+    try {
+      const dns = await import('dns');
+      const { promisify } = await import('util');
+      const lookup = promisify(dns.lookup);
+
+      // 尝试解析一个常见的域名
+      await lookup('www.google.com');
+      logger.debug('[APP] DNS resolution working');
+      return true;
+    } catch (error) {
+      logger.debug(`[APP] DNS resolution failed: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * 检查API服务器连通性
+   */
+  private async checkAPIServer(): Promise<boolean> {
+    try {
+      const https = await import('https');
+      const http = await import('http');
+      const url = await import('url');
+
+      const serverUrl = this.config.serverUrl || 'http://localhost:3000';
+      const parsedUrl = new url.URL(serverUrl);
+      const client = parsedUrl.protocol === 'https:' ? https : http;
+
+      return new Promise<boolean>((resolve) => {
+        const timeout = 5000; // 5秒超时
+
+        const req = client.get(parsedUrl.href, { timeout }, (res) => {
+          logger.debug(`[APP] API server reachable, status: ${res.statusCode}`);
+          resolve(true);
+        });
+
+        req.on('error', (error) => {
+          logger.debug(`[APP] API server unreachable: ${error.message}`);
+          resolve(false);
+        });
+
+        req.on('timeout', () => {
+          req.destroy();
+          logger.debug('[APP] API server check timeout');
+          resolve(false);
+        });
+      });
+    } catch (error) {
+      logger.debug(`[APP] Error checking API server: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * 延迟辅助函数
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 

@@ -258,41 +258,65 @@ export class InitStateHandler extends BaseStateHandler {
   }
 
   private async checkNetworkCapability(): Promise<void> {
-    try {
-      console.log('[INIT] Checking network connectivity...');
-      
-      // 简单的网络连接检查
-      const { exec } = require('child_process');
-      const { promisify } = require('util');
-      const execAsync = promisify(exec);
+    const maxRetries = 5;
+    const retryDelay = 10000; // 10秒
 
-      // 尝试ping一个可靠的服务器
-      const testHosts = ['8.8.8.8', 'google.com', '1.1.1.1'];
-      let connected = false;
+    console.log('[INIT] Checking network connectivity...');
 
-      for (const host of testHosts) {
-        try {
-          const pingCommand = process.platform === 'win32' 
-            ? `ping -n 1 -w 2000 ${host}`
-            : `ping -c 1 -W 2 ${host}`;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // 简单的网络连接检查
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
 
-          await execAsync(pingCommand);
-          connected = true;
-          console.log(`[INIT] Network connectivity check passed (${host})`);
-          break;
-        } catch {
-          continue;
+        // 尝试ping一个可靠的服务器
+        const testHosts = ['8.8.8.8', 'google.com', '1.1.1.1'];
+        let connected = false;
+
+        for (const host of testHosts) {
+          try {
+            const pingCommand = process.platform === 'win32'
+              ? `ping -n 1 -w 2000 ${host}`
+              : `ping -c 1 -W 2 ${host}`;
+
+            await execAsync(pingCommand);
+            connected = true;
+            console.log(`[INIT] Network connectivity check passed (${host})`);
+            break;
+          } catch {
+            continue;
+          }
+        }
+
+        if (connected) {
+          console.log('[INIT] Network connectivity verified');
+          return; // 成功，继续初始化
+        }
+
+        // 网络不可用，记录警告并重试
+        console.warn(`[INIT] Network connectivity check failed, retry ${attempt}/${maxRetries}`);
+
+        if (attempt < maxRetries) {
+          // 等待后重试
+          console.log(`[INIT] Waiting ${retryDelay / 1000}s before retry...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+        }
+
+      } catch (error: any) {
+        console.warn(`[INIT] Network connectivity check error (attempt ${attempt}/${maxRetries}):`, error.message);
+
+        if (attempt < maxRetries) {
+          // 等待后重试
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
         }
       }
-
-      if (!connected) {
-        console.warn('[INIT] Network connectivity check failed - no internet connection');
-      }
-
-    } catch (error: any) {
-      console.warn('[INIT] Network connectivity check failed:', error);
-      // 网络检查失败时只记录警告，不阻止初始化
     }
+
+    // 所有重试都失败，抛出异常阻止FSM继续
+    const errorMsg = 'Network not available after multiple retries. Please check your network connection and restart the application.';
+    console.error(`[INIT] ${errorMsg}`);
+    throw new Error(errorMsg);
   }
 
   private async checkFileSystemPermissions(): Promise<void> {
