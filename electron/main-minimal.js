@@ -2521,10 +2521,18 @@ function setupAppLogging() {
             sendLogToRenderer('监控服务已启动', 'success');
             updateTrayIcon(true);
         });
-        
+
         app_instance.on('stopped', () => {
             sendLogToRenderer('监控服务已停止', 'warning');
             updateTrayIcon(false);
+        });
+
+        // 监听初始化进度事件
+        app_instance.on('init-progress', (progress) => {
+            // 转发进度事件到渲染进程
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('init-progress', progress);
+            }
         });
         
         app_instance.on('screenshotTaken', () => {

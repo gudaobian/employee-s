@@ -258,8 +258,8 @@ export class InitStateHandler extends BaseStateHandler {
   }
 
   private async checkNetworkCapability(): Promise<void> {
-    const maxRetries = 5;
-    const retryDelay = 10000; // 10秒
+    const maxRetries = 3;
+    const retryDelay = 5000; // 5秒
 
     console.log('[INIT] Checking network connectivity...');
 

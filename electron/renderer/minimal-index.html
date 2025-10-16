@@ -104,6 +104,54 @@
             box-shadow: 0 2px 8px rgba(33, 150, 243, 0.15);
         }
 
+        /* 初始化进度条 */
+        .init-progress {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 8px;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .init-progress.show {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .progress-message {
+            font-size: 11px;
+            color: #495057;
+            margin-bottom: 6px;
+            text-align: center;
+        }
+
+        .progress-bar-container {
+            background: #e9ecef;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+            border-radius: 3px;
+        }
+
+        .progress-percentage {
+            font-size: 10px;
+            color: #6c757d;
+            text-align: right;
+            margin-top: 4px;
+        }
 
         /* 配置区域 */
         .config-section {
@@ -688,6 +736,14 @@
             <!-- 状态显示 -->
             <div class="status" id="statusText">就绪</div>
 
+            <!-- 初始化进度条 -->
+            <div class="init-progress" id="initProgress">
+                <div class="progress-message" id="progressMessage">正在初始化...</div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="progressBarFill" style="width: 0%"></div>
+                </div>
+                <div class="progress-percentage" id="progressPercentage">0%</div>
+            </div>
 
             <!-- 服务器配置 -->
             <div class="config-section">
@@ -829,12 +885,51 @@
                 });
             }
             
+            // 监听初始化进度事件
+            if (window.electronAPI && window.electronAPI.on) {
+                window.electronAPI.on('init-progress', (event, progressData) => {
+                    const { message, percentage } = progressData;
+                    console.log('初始化进度:', percentage + '%', message);
+
+                    // 显示进度条
+                    const progressElement = document.getElementById('initProgress');
+                    const messageElement = document.getElementById('progressMessage');
+                    const fillElement = document.getElementById('progressBarFill');
+                    const percentageElement = document.getElementById('progressPercentage');
+
+                    if (progressElement) {
+                        progressElement.classList.add('show');
+                    }
+
+                    if (messageElement) {
+                        messageElement.textContent = message;
+                    }
+
+                    if (fillElement) {
+                        fillElement.style.width = percentage + '%';
+                    }
+
+                    if (percentageElement) {
+                        percentageElement.textContent = percentage + '%';
+                    }
+
+                    // 如果完成，3秒后隐藏进度条
+                    if (percentage >= 100) {
+                        setTimeout(() => {
+                            if (progressElement) {
+                                progressElement.classList.remove('show');
+                            }
+                        }, 3000);
+                    }
+                });
+            }
+
             // 监听应用状态变化事件
             if (window.electronAPI && window.electronAPI.on) {
                 window.electronAPI.on('app-status-changed', (event, statusData) => {
                     console.log('收到应用状态变化:', statusData);
                     isRunning = statusData.isRunning;
-                    
+
                     if (statusData.appState === 'ERROR') {
                         updateStatus('启动失败', false);
                     } else if (statusData.isRunning) {

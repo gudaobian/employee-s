@@ -64,6 +64,14 @@ export class EmployeeMonitorApp extends EventEmitter {
   /**
    * 启动应用程序
    */
+  /**
+   * 发送初始化进度事件
+   */
+  private emitProgress(message: string, percentage: number): void {
+    this.emit('init-progress', { message, percentage });
+    logger.info(`[INIT PROGRESS] ${percentage}% - ${message}`);
+  }
+
   async start(): Promise<void> {
     if (this.state !== AppState.STOPPED) {
       throw new Error(`Cannot start app from state: ${this.state}`);
@@ -73,36 +81,47 @@ export class EmployeeMonitorApp extends EventEmitter {
 
     try {
       logger.info('Starting Employee Monitor App...');
+      this.emitProgress('开始初始化应用程序...', 0);
 
       // 0. 等待网络就绪（新增）
-      await this.waitForNetworkReady(60000); // 最多等待60秒
+      this.emitProgress('正在检测网络连接...', 10);
+      await this.waitForNetworkReady(30000); // 最多等待30秒
+      this.emitProgress('网络连接检测完成', 25);
 
       // 1. 初始化平台适配器（带超时保护）
+      this.emitProgress('正在初始化平台适配器...', 30);
       await this.withTimeout(
         this.initializePlatform(),
         20000,
         'Platform initialization'
       );
+      this.emitProgress('平台适配器初始化完成', 50);
 
       // 2. 初始化服务（带超时保护）
+      this.emitProgress('正在初始化核心服务...', 55);
       await this.withTimeout(
         this.initializeServices(),
         30000,
         'Services initialization'
       );
+      this.emitProgress('核心服务初始化完成', 75);
 
       // 3. 初始化状态机（但不启动，带超时保护）
+      this.emitProgress('正在初始化设备状态机...', 80);
       await this.withTimeout(
         this.initializeStateMachine(),
         10000,
         'State machine initialization'
       );
+      this.emitProgress('设备状态机初始化完成', 90);
 
       // 4. 启动健康检查
+      this.emitProgress('正在启动健康检查...', 95);
       this.startHealthCheck();
 
       this.setState(AppState.RUNNING);
       logger.info('Employee Monitor App started successfully');
+      this.emitProgress('应用程序启动成功！', 100);
 
       this.emit('started');
 
@@ -727,31 +746,44 @@ export class EmployeeMonitorApp extends EventEmitter {
   private async waitForNetworkReady(maxWaitTime: number = 60000): Promise<boolean> {
     const startTime = Date.now();
     const checkInterval = 5000; // 每5秒检查一次
+    let attempt = 0;
+    const maxAttempts = Math.ceil(maxWaitTime / checkInterval);
 
     logger.info('[APP] Waiting for network ready...');
 
     while (Date.now() - startTime < maxWaitTime) {
+      attempt++;
+      const progressBase = 10;
+      const progressRange = 15; // 10% to 25%
+      const currentProgress = progressBase + Math.floor((attempt / maxAttempts) * progressRange);
+
       try {
         // 1. 检查网卡状态
+        this.emitProgress(`检查网络适配器状态... (${attempt}/${maxAttempts})`, currentProgress);
         const hasActiveAdapter = await this.checkNetworkAdapter();
         if (!hasActiveAdapter) {
           logger.debug('[APP] No active network adapter, waiting...');
+          this.emitProgress('等待网络适配器就绪...', currentProgress);
           await this.sleep(checkInterval);
           continue;
         }
 
         // 2. 检查DNS解析
+        this.emitProgress(`检查DNS解析... (${attempt}/${maxAttempts})`, currentProgress + 2);
         const dnsWorks = await this.checkDNS();
         if (!dnsWorks) {
           logger.debug('[APP] DNS not ready, waiting...');
+          this.emitProgress('等待DNS服务就绪...', currentProgress + 2);
           await this.sleep(checkInterval);
           continue;
         }
 
         // 3. 检查API server连通性
+        this.emitProgress(`检查API服务器连通性... (${attempt}/${maxAttempts})`, currentProgress + 4);
         const apiReachable = await this.checkAPIServer();
         if (!apiReachable) {
           logger.debug('[APP] API server not reachable, waiting...');
+          this.emitProgress('等待API服务器就绪...', currentProgress + 4);
           await this.sleep(checkInterval);
           continue;
         }
@@ -805,6 +837,7 @@ export class EmployeeMonitorApp extends EventEmitter {
 
   /**
    * 检查DNS解析
+   * 使用多个备选域名提高检测成功率
    */
   private async checkDNS(): Promise<boolean> {
     try {
@@ -812,10 +845,28 @@ export class EmployeeMonitorApp extends EventEmitter {
       const { promisify } = await import('util');
       const lookup = promisify(dns.lookup);
 
-      // 尝试解析一个常见的域名
-      await lookup('www.google.com');
-      logger.debug('[APP] DNS resolution working');
-      return true;
+      // 使用多个备选域名
+      const testDomains = [
+        'www.baidu.com',      // 中国大陆
+        'www.taobao.com',     // 中国大陆
+        'www.cloudflare.com', // 国际
+        '1.1.1.1'             // Cloudflare DNS
+      ];
+
+      // 串行测试，任意一个成功即可
+      for (const domain of testDomains) {
+        try {
+          await lookup(domain);
+          logger.debug(`[APP] DNS resolution working (${domain})`);
+          return true;
+        } catch (error) {
+          logger.debug(`[APP] DNS test failed for ${domain}`);
+          continue;
+        }
+      }
+
+      logger.debug('[APP] All DNS tests failed');
+      return false;
     } catch (error) {
       logger.debug(`[APP] DNS resolution failed: ${error}`);
       return false;
@@ -836,7 +887,7 @@ export class EmployeeMonitorApp extends EventEmitter {
       const client = parsedUrl.protocol === 'https:' ? https : http;
 
       return new Promise<boolean>((resolve) => {
-        const timeout = 5000; // 5秒超时
+        const timeout = 2000; // 2秒超时
 
         const req = client.get(parsedUrl.href, { timeout }, (res) => {
           logger.debug(`[APP] API server reachable, status: ${res.statusCode}`);

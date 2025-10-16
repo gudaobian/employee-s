@@ -98,9 +98,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'status-update',
       'log:received',
       'log-update',
-      'install-progress-update'
+      'install-progress-update',
+      'init-progress'
     ];
-    
+
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, callback);
     }
@@ -110,14 +111,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const validChannels = [
       'app-status-changed',
       'device-status-changed',
-      'fsm-state-changed', 
+      'fsm-state-changed',
       'permission-required',
       'status-update',
       'log:received',
       'log-update',
-      'install-progress-update'
+      'install-progress-update',
+      'init-progress'
     ];
-    
+
     if (validChannels.includes(channel)) {
       ipcRenderer.removeListener(channel, callback);
     }
