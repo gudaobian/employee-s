@@ -224,38 +224,120 @@ app.whenReady().then(() => {
     } catch (error) {
         console.error('[INIT] Failed to load main application:', error.message);
         console.error('[INIT] Error stack:', error.stack);
-        console.log('[INIT] Debug info:', {
-            __dirname,
-            'process.cwd()': process.cwd(),
-            'process.resourcesPath': process.resourcesPath,
-            'app.isPackaged': app.isPackaged,
-            'app.getAppPath()': app.getAppPath()
-        });
-        
-        // 检查目录结构
+
+        // === 建议1: 增强诊断信息收集 ===
         const fs = require('fs');
+        const diagnosticInfo = {
+            timestamp: new Date().toISOString(),
+            errorMessage: error.message,
+            errorStack: error.stack,
+            environment: {
+                isPackaged: app.isPackaged,
+                appPath: app.getAppPath(),
+                __dirname: __dirname,
+                cwd: process.cwd(),
+                resourcesPath: process.resourcesPath,
+                platform: process.platform,
+                electronVersion: process.versions.electron,
+                nodeVersion: process.versions.node
+            },
+            attemptedPaths: [],
+            directoryStructure: {}
+        };
+
+        // 重新检查所有路径并记录详细信息
+        possiblePaths.forEach(modulePath => {
+            const pathInfo = {
+                path: modulePath,
+                fullPath: modulePath + '.js',
+                exists: false,
+                error: null,
+                stats: null
+            };
+
+            try {
+                if (fs.existsSync(modulePath + '.js')) {
+                    pathInfo.exists = true;
+                    pathInfo.stats = fs.statSync(modulePath + '.js');
+                }
+            } catch (pathError) {
+                pathInfo.error = pathError.message;
+            }
+
+            diagnosticInfo.attemptedPaths.push(pathInfo);
+        });
+
+        // 检查关键目录结构
         const checkPaths = [
             path.join(__dirname, '..', 'dist'),
             path.join(app.getAppPath(), 'dist'),
-            path.join(process.cwd(), 'dist')
+            path.join(process.cwd(), 'dist'),
+            path.join(process.resourcesPath || '', 'app', 'dist')
         ];
-        
+
         checkPaths.forEach(dirPath => {
+            const dirInfo = {
+                path: dirPath,
+                exists: false,
+                files: [],
+                error: null
+            };
+
             try {
                 if (fs.existsSync(dirPath)) {
-                    const files = fs.readdirSync(dirPath);
-                    sendLogToRenderer(`[DEBUG] 目录 ${dirPath} 存在，包含文件: ${files.join(', ')}`);
-                    console.log(`[INIT] Directory ${dirPath} exists with files:`, files);
-                } else {
-                    sendLogToRenderer(`[DEBUG] 目录不存在: ${dirPath}`);
-                    console.log(`[INIT] Directory ${dirPath} does not exist`);
+                    dirInfo.exists = true;
+                    // 递归列出目录内容（最多2层）
+                    const listDir = (dir, depth = 0) => {
+                        if (depth > 2) return [];
+                        try {
+                            const items = fs.readdirSync(dir);
+                            return items.map(item => {
+                                const itemPath = path.join(dir, item);
+                                const stat = fs.statSync(itemPath);
+                                if (stat.isDirectory() && depth < 2) {
+                                    return {
+                                        name: item,
+                                        type: 'directory',
+                                        children: listDir(itemPath, depth + 1)
+                                    };
+                                }
+                                return {
+                                    name: item,
+                                    type: 'file',
+                                    size: stat.size
+                                };
+                            });
+                        } catch (err) {
+                            return [];
+                        }
+                    };
+                    dirInfo.files = listDir(dirPath);
                 }
             } catch (dirError) {
-                sendLogToRenderer(`[DEBUG] 检查目录错误 ${dirPath}: ${dirError.message}`, 'error');
-                console.log(`[INIT] Error checking directory ${dirPath}:`, dirError.message);
+                dirInfo.error = dirError.message;
             }
+
+            diagnosticInfo.directoryStructure[dirPath] = dirInfo;
         });
-        
+
+        // 保存诊断信息到文件
+        try {
+            const userDataPath = app.getPath('userData');
+            const diagPath = path.join(userDataPath, 'module-load-diagnostic.json');
+            fs.writeFileSync(diagPath, JSON.stringify(diagnosticInfo, null, 2));
+            console.error('[INIT] ❌ 诊断信息已保存至:', diagPath);
+            sendLogToRenderer(`诊断信息已保存: ${diagPath}`, 'error');
+        } catch (saveError) {
+            console.error('[INIT] 保存诊断信息失败:', saveError.message);
+        }
+
+        // 输出诊断摘要到日志
+        console.log('[INIT] 诊断摘要:', {
+            attemptedPathCount: diagnosticInfo.attemptedPaths.length,
+            existingPaths: diagnosticInfo.attemptedPaths.filter(p => p.exists).length,
+            checkedDirectories: Object.keys(diagnosticInfo.directoryStructure).length
+        });
+
         console.log('[INIT] Running in standalone/simulation mode');
         sendLogToRenderer('主应用加载失败，运行在模拟模式: ' + error.message, 'warning');
     }
@@ -304,6 +386,33 @@ function createMainWindow() {
                 logManager.setMainWindow(mainWindow);
                 console.log('[LOG_MANAGER] 主窗口引用已设置');
             }
+
+            // 延迟推送自启动状态(等待渲染进程初始化完成)
+            setTimeout(async () => {
+                try {
+                    console.log('[AUTO_START_INIT] 正在获取自启动状态...');
+                    const platformAdapter = app_instance?.getPlatformAdapter();
+                    if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
+                        const result = await platformAdapter.isAutoStartEnabled();
+                        if (result && result.success !== undefined) {
+                            const enabled = result.enabled || false;
+                            console.log('[AUTO_START_INIT] 当前自启动状态:', enabled);
+
+                            // 推送初始状态到渲染进程
+                            if (mainWindow && !mainWindow.isDestroyed()) {
+                                console.log('[AUTO_START_INIT] 推送初始状态到UI: enabled =', enabled);
+                                mainWindow.webContents.send('autostart-status-changed', { enabled });
+                            }
+                        } else {
+                            console.warn('[AUTO_START_INIT] 获取状态失败:', result?.error);
+                        }
+                    } else {
+                        console.warn('[AUTO_START_INIT] 平台适配器不可用');
+                    }
+                } catch (error) {
+                    console.error('[AUTO_START_INIT] 获取自启动状态异常:', error);
+                }
+            }, 3000); // 延迟3秒,确保渲染进程和平台适配器都已初始化
 
             // 根据启动参数决定是否显示窗口
             if (!isStartMinimized) {
@@ -1305,16 +1414,45 @@ async function startAppService(isManualStart = false) {
         }
     }
     
-    // 模拟启动
+    // === 建议2: 模拟模式强烈警告 ===
     updateTrayIcon(true);
-    sendLogToRenderer('服务启动成功 (模拟模式)');
-    
+
+    // 向日志发送警告
+    sendLogToRenderer('⚠️⚠️⚠️ 警告：运行在模拟模式 ⚠️⚠️⚠️', 'error');
+    sendLogToRenderer('核心监控功能不可用：截图、活动监测、数据上传均已禁用', 'error');
+    sendLogToRenderer('这通常是因为应用打包配置错误导致主模块加载失败', 'error');
+    sendLogToRenderer('请检查 ~/Library/Application Support/企业安全/module-load-diagnostic.json', 'error');
+
+    // 更新托盘提示
+    if (tray && !tray.isDestroyed()) {
+        tray.setToolTip('⚠️ 企业安全 (模拟模式 - 功能受限)');
+    }
+
     // 模拟状态更新
     setTimeout(() => {
         broadcastStatusUpdate();
     }, 1000);
-    
-    return { success: true, message: 'Started (simulation mode)' };
+
+    // 持续警告（每30秒一次）
+    const simulationWarningInterval = setInterval(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('critical-warning', {
+                title: '🚨 核心功能不可用',
+                message: '主应用模块加载失败，监控功能已禁用。\n\n请重新安装应用或查看诊断文件：\n~/Library/Application Support/企业安全/module-load-diagnostic.json',
+                severity: 'critical',
+                persistent: true
+            });
+        }
+    }, 30000);
+
+    // 保存定时器以便清理
+    global.simulationWarningInterval = simulationWarningInterval;
+
+    return {
+        success: false,  // 返回 false 表示实际上失败了
+        message: '⚠️ Started in simulation mode - core features disabled',
+        simulationMode: true
+    };
 }
 
 // 新增：广播状态更新到UI
@@ -1484,8 +1622,15 @@ async function stopAppService() {
     
     // 模拟停止
     updateTrayIcon(false);
+
+    // 清理警告定时器
+    if (global.simulationWarningInterval) {
+        clearInterval(global.simulationWarningInterval);
+        global.simulationWarningInterval = null;
+    }
+
     sendLogToRenderer('服务已停止 (模拟模式)');
-    return { success: true, message: 'Stopped (simulation mode)' };
+    return { success: true, message: 'Stopped (simulation mode)', simulationMode: true };
 }
 
 async function checkSystemPermissions() {
@@ -1947,10 +2092,25 @@ function updateTrayMenu() {
             { type: 'separator' },
             {
                 label: '显示主界面',
-                click: () => {
+                click: async () => {
                     if (mainWindow) {
                         mainWindow.show();
                         mainWindow.focus();
+
+                        // 窗口显示时同步自启动状态
+                        try {
+                            const platformAdapter = app_instance?.getPlatformAdapter();
+                            if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
+                                const result = await platformAdapter.isAutoStartEnabled();
+                                if (result && result.success !== undefined) {
+                                    const enabled = result.enabled || false;
+                                    console.log('[AUTO_START_SYNC] 托盘打开窗口,同步状态:', enabled);
+                                    mainWindow.webContents.send('autostart-status-changed', { enabled });
+                                }
+                            }
+                        } catch (error) {
+                            console.error('[AUTO_START_SYNC] 同步状态失败:', error);
+                        }
                     }
                 }
             },
