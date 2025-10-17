@@ -99,7 +99,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'log:received',
       'log-update',
       'install-progress-update',
-      'init-progress'
+      'init-progress',
+      'autostart-status-changed'
     ];
 
     if (validChannels.includes(channel)) {
@@ -117,7 +118,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'log:received',
       'log-update',
       'install-progress-update',
-      'init-progress'
+      'init-progress',
+      'autostart-status-changed'
     ];
 
     if (validChannels.includes(channel)) {

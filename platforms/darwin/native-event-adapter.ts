@@ -30,88 +30,92 @@ export class NativeEventAdapter extends EventEmitter {
             logger.info(`初始化原生事件适配器, 当前目录: ${__dirname}`);
             
             try {
-                // 优化的路径解析策略
+                // 简化的路径解析策略 - 3种场景
                 const path = require('path');
                 const fs = require('fs');
-                
-                // 多种路径策略，确保在各种环境下都能找到
-                const possibleBasePaths = [
-                    process.cwd(),  // 当前工作目录
-                    path.dirname(process.execPath),  // Electron 可执行文件目录
-                    path.dirname(require.main?.filename || ''),  // 主模块目录
-                    __dirname,  // 当前模块目录
-                    path.resolve(__dirname, '../../..'),  // 从dist回到项目根目录
-                ];
-                
-                let simpleRelativePath = null;
-                
-                // 尝试每个基础路径
-                for (const basePath of possibleBasePaths) {
-                    if (!basePath) continue;
-                    
-                    const testPath = path.resolve(basePath, 'native-event-monitor');
-                    console.log(`[NATIVE_EVENT] 测试基础路径: ${basePath} → ${testPath}`);
-                    
-                    if (fs.existsSync(testPath)) {
-                        simpleRelativePath = testPath;
-                        console.log(`[NATIVE_EVENT] ✅ 找到可用路径: ${simpleRelativePath}`);
-                        break;
-                    }
-                }
-                
-                if (!simpleRelativePath) {
-                    // 如果都没找到，使用第一个作为默认值
-                    simpleRelativePath = path.resolve(process.cwd(), 'native-event-monitor');
-                }
-                
-                console.log(`[NATIVE_EVENT] 优先尝试简单路径: ${simpleRelativePath}`);
-                logger.info(`优先尝试简单路径: ${simpleRelativePath}`);
-                
-                if (fs.existsSync(simpleRelativePath)) {
-                    console.log(`[NATIVE_EVENT] ✅ 找到原生模块: ${simpleRelativePath}`);
-                    MacOSEventMonitor = require(simpleRelativePath);
-                    console.log(`[NATIVE_EVENT] ✅ 模块加载成功`);
-                    logger.info('✅ 原生模块加载成功');
-                } else {
-                    // 回退到多路径尝试
-                    const possiblePaths = [
-                        // 从编译后的dist目录向上3级 (dist/platforms/darwin -> project root)
-                        path.resolve(__dirname, '../../../native-event-monitor'),
-                        // 从electron目录的相对路径 (electron -> project root)
-                        path.resolve(__dirname, '../native-event-monitor'),
-                        // 绝对路径尝试 (开发环境)
-                        '/Volumes/project/employee-monitering-master 2/employee-client-new/native-event-monitor'
-                    ];
-                    
-                    let foundPath = null;
-                    for (const testPath of possiblePaths) {
-                        console.log(`[NATIVE_EVENT] 尝试备用路径: ${testPath}`);
-                        if (fs.existsSync(testPath)) {
-                            foundPath = testPath;
-                            console.log(`[NATIVE_EVENT] ✅ 找到备用路径: ${foundPath}`);
-                            break;
+
+                // 定义路径解析策略函数
+                const pathStrategies = [
+                    // 策略1: ASAR解包后的路径 (Electron打包后)
+                    {
+                        name: 'ASAR unpacked',
+                        getPath: () => {
+                            // process.resourcesPath 在Electron打包后指向Resources目录
+                            if (process.resourcesPath) {
+                                return path.join(process.resourcesPath, 'app.asar.unpacked', 'native-event-monitor');
+                            }
+                            return null;
+                        }
+                    },
+
+                    // 策略2: 开发环境路径 (相对于可执行文件或工作目录)
+                    {
+                        name: 'Development',
+                        getPath: () => {
+                            // 尝试从多个基础目录定位
+                            const baseDirs = [
+                                process.cwd(),  // 当前工作目录
+                                path.dirname(process.execPath),  // 可执行文件目录
+                                path.dirname(require.main?.filename || ''),  // 主模块目录
+                            ];
+
+                            for (const baseDir of baseDirs) {
+                                if (!baseDir) continue;
+                                const modulePath = path.resolve(baseDir, 'native-event-monitor');
+                                if (fs.existsSync(modulePath)) {
+                                    return modulePath;
+                                }
+                            }
+                            return null;
+                        }
+                    },
+
+                    // 策略3: 编译后的相对路径 (从dist目录向上查找)
+                    {
+                        name: 'Compiled relative',
+                        getPath: () => {
+                            // __dirname 在编译后通常是 dist/platforms/darwin
+                            // 向上3级到达项目根目录
+                            return path.resolve(__dirname, '../../../native-event-monitor');
                         }
                     }
-                    
-                    if (!foundPath) {
-                        throw new Error(`❌ 无法找到原生模块，尝试的路径: ${[simpleRelativePath, ...possiblePaths].join(', ')}`);
+                ];
+
+                // 尝试所有策略
+                let loadedPath: string | null = null;
+                const attemptedPaths: string[] = [];
+
+                for (const strategy of pathStrategies) {
+                    const modulePath = strategy.getPath();
+                    if (!modulePath) continue;
+
+                    attemptedPaths.push(`${strategy.name}: ${modulePath}`);
+
+                    if (fs.existsSync(modulePath)) {
+                        logger.info(`[NATIVE_EVENT] ✅ 找到原生模块 (${strategy.name}): ${modulePath}`);
+                        MacOSEventMonitor = require(modulePath);
+                        loadedPath = modulePath;
+                        break;
+                    } else {
+                        logger.debug(`[NATIVE_EVENT] ⏭️  跳过策略 ${strategy.name}: 路径不存在`);
                     }
-                    
-                    MacOSEventMonitor = require(foundPath);
-                    console.log(`[NATIVE_EVENT] ✅ 从备用路径加载成功`);
-                    logger.info('✅ 从备用路径加载原生模块成功');
                 }
-            } catch (firstError) {
-                logger.warn(`项目根目录加载失败: ${firstError.message}`);
-                try {
-                    // 回退到相对路径 (适用于ts-node运行)
-                    logger.info('尝试相对路径加载');
-                    MacOSEventMonitor = require('../../native-event-monitor');
-                    logger.info('从相对路径成功加载原生模块');
-                } catch (secondError) {
-                    // 如果都失败，抛出更详细的错误
-                    throw new Error(`无法加载原生模块: 主路径失败(${firstError.message}) | 备用路径失败(${secondError.message})`);
+
+                if (!loadedPath) {
+                    throw new Error(
+                        `无法找到原生模块 native-event-monitor。\n` +
+                        `尝试的路径策略:\n${attemptedPaths.map(p => `  - ${p}`).join('\n')}\n` +
+                        `请确保:\n` +
+                        `  1. 已运行 npm run build:native:mac 编译原生模块\n` +
+                        `  2. native-event-monitor 目录存在于项目根目录\n` +
+                        `  3. 如果是打包后的应用，检查 asarUnpack 配置是否正确`
+                    );
                 }
+
+                logger.info('✅ 原生模块加载成功');
+            } catch (error) {
+                logger.error('原生模块加载失败:', error);
+                throw error;
             }
             
             console.log('[NATIVE_EVENT] 🔧 创建MacOSEventMonitor实例...');

@@ -1040,6 +1040,13 @@ function setupIPCHandlers() {
                     const result = await platformAdapter.enableAutoStart();
                     if (result) {
                         sendLogToRenderer('自启动已开启', 'success');
+
+                        // 推送状态变化到渲染进程
+                        if (mainWindow && !mainWindow.isDestroyed()) {
+                            console.log('[AUTO_START] Sending autostart-status-changed event to renderer (enabled: true)');
+                            mainWindow.webContents.send('autostart-status-changed', { enabled: true });
+                        }
+
                         return { success: true, message: '自启动开启成功' };
                     } else {
                         sendLogToRenderer('自启动开启失败', 'error');
@@ -1086,6 +1093,13 @@ function setupIPCHandlers() {
                     const result = await platformAdapter.disableAutoStart();
                     if (result) {
                         sendLogToRenderer('自启动已关闭', 'warning');
+
+                        // 推送状态变化到渲染进程
+                        if (mainWindow && !mainWindow.isDestroyed()) {
+                            console.log('[AUTO_START] Sending autostart-status-changed event to renderer (enabled: false)');
+                            mainWindow.webContents.send('autostart-status-changed', { enabled: false });
+                        }
+
                         return { success: true, message: '自启动关闭成功' };
                     } else {
                         sendLogToRenderer('自启动关闭失败', 'error');

@@ -946,8 +946,16 @@
                     console.log('收到设备状态变化:', statusData);
                     addLog(`设备状态变化: ${statusData.from} → ${statusData.to}`, 'info');
                 });
+
+                // 监听自启动状态变化事件
+                window.electronAPI.on('autostart-status-changed', (event, data) => {
+                    console.log('[AUTO_START_UI] 收到自启动状态变化事件:', data);
+                    autoStartEnabled = data.enabled;
+                    updateAutoStartToggle(autoStartEnabled);
+                    addLog(`🔄 自启动状态已更新: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
+                });
             }
-            
+
             // 定期检查状态和权限同步（每10秒）
             setInterval(() => {
                 checkStatus();
