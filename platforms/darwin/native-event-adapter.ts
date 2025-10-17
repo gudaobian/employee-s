@@ -41,8 +41,9 @@ export class NativeEventAdapter extends EventEmitter {
                         name: 'ASAR unpacked',
                         getPath: () => {
                             // process.resourcesPath 在Electron打包后指向Resources目录
-                            if (process.resourcesPath) {
-                                return path.join(process.resourcesPath, 'app.asar.unpacked', 'native-event-monitor');
+                            const resourcesPath = (process as any).resourcesPath;
+                            if (resourcesPath) {
+                                return path.join(resourcesPath, 'app.asar.unpacked', 'native-event-monitor');
                             }
                             return null;
                         }
