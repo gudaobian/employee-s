@@ -394,23 +394,14 @@ function createMainWindow() {
                     console.log(`[AUTO_START_INIT] 正在获取自启动状态... (尝试 ${retryCount + 1}/${maxRetries})`);
                     const platformAdapter = app_instance?.getPlatformAdapter();
                     if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
-                        const result = await platformAdapter.isAutoStartEnabled();
-                        if (result && result.success !== undefined) {
-                            const enabled = result.enabled || false;
-                            console.log('[AUTO_START_INIT] ✅ 当前自启动状态:', enabled);
+                        const enabled = await platformAdapter.isAutoStartEnabled();
+                        console.log('[AUTO_START_INIT] ✅ 当前自启动状态:', enabled);
 
-                            // 推送初始状态到渲染进程
-                            if (mainWindow && !mainWindow.isDestroyed()) {
-                                console.log('[AUTO_START_INIT] 📤 推送初始状态到UI: enabled =', enabled);
-                                mainWindow.webContents.send('autostart-status-changed', { enabled });
-                                sendLogToRenderer(`[状态同步] 自启动状态: ${enabled ? '已开启' : '已关闭'}`);
-                            }
-                        } else {
-                            console.warn('[AUTO_START_INIT] ⚠️ 获取状态失败:', result?.error);
-                            // 继续重试
-                            if (retryCount < maxRetries - 1) {
-                                setTimeout(() => pushAutoStartStatus(retryCount + 1, maxRetries), 2000);
-                            }
+                        // 推送初始状态到渲染进程
+                        if (mainWindow && !mainWindow.isDestroyed()) {
+                            console.log('[AUTO_START_INIT] 📤 推送初始状态到UI: enabled =', enabled);
+                            mainWindow.webContents.send('autostart-status-changed', { enabled });
+                            sendLogToRenderer(`[状态同步] 自启动状态: ${enabled ? '已开启' : '已关闭'}`);
                         }
                     } else {
                         console.warn('[AUTO_START_INIT] ⚠️ 平台适配器不可用,继续重试...');
@@ -2118,12 +2109,9 @@ function updateTrayMenu() {
                         try {
                             const platformAdapter = app_instance?.getPlatformAdapter();
                             if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
-                                const result = await platformAdapter.isAutoStartEnabled();
-                                if (result && result.success !== undefined) {
-                                    const enabled = result.enabled || false;
-                                    console.log('[AUTO_START_SYNC] 托盘打开窗口,同步状态:', enabled);
-                                    mainWindow.webContents.send('autostart-status-changed', { enabled });
-                                }
+                                const enabled = await platformAdapter.isAutoStartEnabled();
+                                console.log('[AUTO_START_SYNC] 托盘打开窗口,同步状态:', enabled);
+                                mainWindow.webContents.send('autostart-status-changed', { enabled });
                             }
                         } catch (error) {
                             console.error('[AUTO_START_SYNC] 同步状态失败:', error);
