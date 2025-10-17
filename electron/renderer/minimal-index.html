@@ -1251,17 +1251,14 @@
                         if (retryCount < maxRetries) {
                             const delay = Math.min(1000 * Math.pow(2, retryCount), 5000); // 指数退避: 1s, 2s, 4s, 5s, 5s
                             console.log(`[AUTO_START_UI] 重试获取自启动状态 (${retryCount + 1}/${maxRetries}), ${delay}ms后重试...`);
-                            addLog(`⏳ 重试获取自启动状态 (${retryCount + 1}/${maxRetries})...`, 'info');
 
                             setTimeout(() => {
                                 loadAutoStartStatus(retryCount + 1, maxRetries);
                             }, delay);
                         } else {
-                            // 达到最大重试次数,使用默认值
-                            console.warn('[AUTO_START_UI] 达到最大重试次数,使用默认状态');
-                            autoStartEnabled = false;
-                            updateAutoStartToggle(autoStartEnabled);
-                            addLog('⚠️ 无法获取自启动状态，使用默认值: ' + (result?.error || '未知错误'), 'warning');
+                            // 达到最大重试次数,不设置默认值,等待事件推送
+                            console.warn('[AUTO_START_UI] 达到最大重试次数,等待主进程推送状态事件');
+                            addLog('⏳ 等待自启动状态同步...', 'info');
                         }
                     }
                 } else {
@@ -1273,9 +1270,9 @@
                             loadAutoStartStatus(retryCount + 1, maxRetries);
                         }, delay);
                     } else {
-                        autoStartEnabled = false;
-                        updateAutoStartToggle(autoStartEnabled);
-                        addLog('⚠️ 自启动API不可用', 'warning');
+                        // API不可用但不强制设置为false,等待事件
+                        console.warn('[AUTO_START_UI] API不可用,等待状态推送');
+                        addLog('⏳ 等待自启动状态同步...', 'info');
                     }
                 }
             } catch (error) {
@@ -1286,9 +1283,9 @@
                         loadAutoStartStatus(retryCount + 1, maxRetries);
                     }, delay);
                 } else {
-                    addLog('❌ 加载自启动状态错误: ' + error.message, 'error');
-                    autoStartEnabled = false;
-                    updateAutoStartToggle(autoStartEnabled);
+                    // 错误情况也不强制设置为false,等待事件
+                    console.warn('[AUTO_START_UI] 加载失败,等待状态推送');
+                    addLog('⏳ 等待自启动状态同步...', 'info');
                 }
             }
         }
