@@ -68,6 +68,8 @@ export interface ScreenshotResult {
   data?: Buffer;
   width?: number;
   height?: number;
+  format?: string;
+  size?: number;
   error?: string;
 }
 

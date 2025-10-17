@@ -9,6 +9,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import * as si from 'systeminformation';
+import sharp from 'sharp';
 
 import { PlatformAdapterBase } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
@@ -867,32 +868,59 @@ export class DarwinAdapter extends PlatformAdapterBase {
 
   async takeScreenshot(options: any = {}): Promise<any> {
     this.ensureInitialized();
-    
+
     try {
-      const format = options.format || 'png';
-      const tempPath = `/tmp/screenshot-${Date.now()}.${format}`;
-      
-      let command = `screencapture -t ${format} "${tempPath}"`;
+      const quality = options.quality || 80;
+      const format = options.format || 'jpg';
+      const timestamp = Date.now();
+
+      // 步骤1: 先用 PNG 格式捕获原始截图（保证质量）
+      const tempPngPath = `/tmp/screenshot-original-${timestamp}.png`;
+
+      let command = `screencapture -t png "${tempPngPath}"`;
       if (options.displayId !== undefined) {
         command += ` -D ${options.displayId}`;
       }
-      
+
       await execAsync(command);
-      
-      if (fs.existsSync(tempPath)) {
-        const data = await fs.promises.readFile(tempPath);
-        await fs.promises.unlink(tempPath); // 清理临时文件
-        
-        return {
-          success: true,
-          data
-        };
-      } else {
+
+      if (!fs.existsSync(tempPngPath)) {
         return {
           success: false,
           error: 'Screenshot file not created'
         };
       }
+
+      // 步骤2: 使用 sharp 压缩图片
+      const tempJpgPath = `/tmp/screenshot-compressed-${timestamp}.${format}`;
+
+      await sharp(tempPngPath)
+        .jpeg({
+          quality: quality,
+          mozjpeg: true  // 使用 mozjpeg 引擎获得更好的压缩率
+        })
+        .toFile(tempJpgPath);
+
+      // 步骤3: 读取压缩后的图片数据
+      const data = await fs.promises.readFile(tempJpgPath);
+
+      // 步骤4: 清理临时文件
+      await fs.promises.unlink(tempPngPath);
+      await fs.promises.unlink(tempJpgPath);
+
+      // 记录压缩效果
+      const originalStats = await fs.promises.stat(tempPngPath).catch(() => null);
+      const compressedSize = data.length;
+
+      logger.info(`Screenshot captured and compressed: ${compressedSize} bytes (quality: ${quality})`);
+
+      return {
+        success: true,
+        data,
+        format: format,
+        size: compressedSize
+      };
+
     } catch (error) {
       logger.error('Failed to take screenshot', error);
       return {

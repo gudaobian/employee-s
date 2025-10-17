@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
+import sharp from 'sharp';
 import {
   PlatformAdapterBase,
   SystemInfo,
@@ -340,17 +341,38 @@ Windows 截屏权限指导：
     this.ensureInitialized();
 
     try {
-      logger.info('[WINDOWS] 开始截图...');
+      const quality = options.quality || 80;
+      const format = options.format || 'jpg';
+      logger.info(`[WINDOWS] 开始截图... (质量: ${quality}, 格式: ${format})`);
 
       // 尝试使用 Node.js screenshot-desktop 包（如果可用）
       try {
         const screenshot = require('screenshot-desktop');
         logger.info('[WINDOWS] 使用 screenshot-desktop 包进行截图');
+
+        // 先捕获原始 PNG 格式截图
         const imgBuffer = await screenshot({ format: 'png' });
-        logger.info(`[WINDOWS] ✅ 截图成功，大小: ${imgBuffer.length} bytes`);
+        const originalSize = imgBuffer.length;
+        logger.info(`[WINDOWS] 原始截图大小: ${originalSize} bytes`);
+
+        // 使用 sharp 压缩图片
+        const compressedBuffer = await sharp(imgBuffer)
+          .jpeg({
+            quality: quality,
+            mozjpeg: true  // 使用 mozjpeg 引擎获得更好的压缩率
+          })
+          .toBuffer();
+
+        const compressedSize = compressedBuffer.length;
+        const compressionRatio = ((1 - compressedSize / originalSize) * 100).toFixed(2);
+
+        logger.info(`[WINDOWS] ✅ 截图已压缩: ${compressedSize} bytes (压缩率: ${compressionRatio}%)`);
+
         return {
           success: true,
-          data: imgBuffer
+          data: compressedBuffer,
+          format: format,
+          size: compressedSize
         };
       } catch (requireError) {
         logger.warn('[WINDOWS] screenshot-desktop 包不可用，使用降级方案');
