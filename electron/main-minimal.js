@@ -388,31 +388,48 @@ function createMainWindow() {
             }
 
             // 延迟推送自启动状态(等待渲染进程初始化完成)
-            setTimeout(async () => {
+            // 使用多次重试确保状态能够正确推送
+            const pushAutoStartStatus = async (retryCount = 0, maxRetries = 10) => {
                 try {
-                    console.log('[AUTO_START_INIT] 正在获取自启动状态...');
+                    console.log(`[AUTO_START_INIT] 正在获取自启动状态... (尝试 ${retryCount + 1}/${maxRetries})`);
                     const platformAdapter = app_instance?.getPlatformAdapter();
                     if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
                         const result = await platformAdapter.isAutoStartEnabled();
                         if (result && result.success !== undefined) {
                             const enabled = result.enabled || false;
-                            console.log('[AUTO_START_INIT] 当前自启动状态:', enabled);
+                            console.log('[AUTO_START_INIT] ✅ 当前自启动状态:', enabled);
 
                             // 推送初始状态到渲染进程
                             if (mainWindow && !mainWindow.isDestroyed()) {
-                                console.log('[AUTO_START_INIT] 推送初始状态到UI: enabled =', enabled);
+                                console.log('[AUTO_START_INIT] 📤 推送初始状态到UI: enabled =', enabled);
                                 mainWindow.webContents.send('autostart-status-changed', { enabled });
+                                sendLogToRenderer(`[状态同步] 自启动状态: ${enabled ? '已开启' : '已关闭'}`);
                             }
                         } else {
-                            console.warn('[AUTO_START_INIT] 获取状态失败:', result?.error);
+                            console.warn('[AUTO_START_INIT] ⚠️ 获取状态失败:', result?.error);
+                            // 继续重试
+                            if (retryCount < maxRetries - 1) {
+                                setTimeout(() => pushAutoStartStatus(retryCount + 1, maxRetries), 2000);
+                            }
                         }
                     } else {
-                        console.warn('[AUTO_START_INIT] 平台适配器不可用');
+                        console.warn('[AUTO_START_INIT] ⚠️ 平台适配器不可用,继续重试...');
+                        // 平台适配器未初始化,继续重试
+                        if (retryCount < maxRetries - 1) {
+                            setTimeout(() => pushAutoStartStatus(retryCount + 1, maxRetries), 2000);
+                        }
                     }
                 } catch (error) {
-                    console.error('[AUTO_START_INIT] 获取自启动状态异常:', error);
+                    console.error('[AUTO_START_INIT] ❌ 获取自启动状态异常:', error);
+                    // 出错也继续重试
+                    if (retryCount < maxRetries - 1) {
+                        setTimeout(() => pushAutoStartStatus(retryCount + 1, maxRetries), 2000);
+                    }
                 }
-            }, 3000); // 延迟3秒,确保渲染进程和平台适配器都已初始化
+            };
+
+            // 首次尝试延迟3秒
+            setTimeout(() => pushAutoStartStatus(), 3000);
 
             // 根据启动参数决定是否显示窗口
             if (!isStartMinimized) {
