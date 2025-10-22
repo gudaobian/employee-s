@@ -5,9 +5,6 @@
 
 import * as os from 'os';
 import { IPlatformAdapter } from './interfaces/platform-interface';
-import DarwinAdapter from './darwin/darwin-adapter';
-import { WindowsAdapter as Win32Adapter } from './windows/windows-adapter';
-import LinuxAdapter from './linux/linux-adapter';
 import { logger } from '../common/utils';
 
 export type PlatformType = 'darwin' | 'win32' | 'linux' | 'unknown';
@@ -62,18 +59,24 @@ export class PlatformFactory {
     logger.info(`Creating platform adapter for: ${platformInfo.name}`);
 
     switch (platformInfo.type) {
-      case 'darwin':
+      case 'darwin': {
+        const { default: DarwinAdapter } = await import('./darwin/darwin-adapter');
         this.currentAdapter = new DarwinAdapter();
         break;
-      
-      case 'win32':
-        this.currentAdapter = new Win32Adapter();
+      }
+
+      case 'win32': {
+        const { WindowsAdapter } = await import('./windows/windows-adapter');
+        this.currentAdapter = new WindowsAdapter();
         break;
-      
-      case 'linux':
+      }
+
+      case 'linux': {
+        const { default: LinuxAdapter } = await import('./linux/linux-adapter');
         this.currentAdapter = new LinuxAdapter();
         break;
-      
+      }
+
       default:
         throw new Error(`No adapter available for platform: ${platformInfo.type}`);
     }

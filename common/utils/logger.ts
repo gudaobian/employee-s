@@ -60,9 +60,14 @@ export class Logger {
   private static sharedCleanupTimer?: NodeJS.Timeout;
 
   constructor(config: Partial<LoggerConfig> = {}) {
+    // 检测是否在Electron环境
+    const isElectron = typeof process !== 'undefined' &&
+                       process.versions &&
+                       process.versions.electron;
+
     this.config = {
       level: LogLevel.INFO,
-      enableConsole: true,
+      enableConsole: !isElectron,     // Electron环境下禁用console输出,避免双重记录
       enableFile: true,
       maxFileSize: 10 * 1024 * 1024, // 10MB (原5MB)
       maxFiles: 3,                    // 3个轮转文件 (原5个)
@@ -96,6 +101,78 @@ export class Logger {
       Logger.startSharedTimers(); // 确保timer启动
     }
     return Logger.loggers.get(context)!;
+  }
+
+  /**
+   * 清理所有历史日志文件（程序启动时调用）
+   * 同步执行，确保清理完成后才继续启动
+   *
+   * 会清理以下可能的日志目录：
+   * - Windows: %APPDATA%/employee-monitor/logs 和 %APPDATA%/employee-safety-client/logs
+   * - macOS: ~/Library/Logs/employee-monitor 和 ~/Library/Logs/employee-safety-client
+   * - Linux: ~/.local/share/employee-monitor/logs 和 ~/.local/share/employee-safety-client/logs
+   */
+  static cleanupAllLogs(): void {
+    try {
+      // 获取可能的日志目录列表
+      const possibleLogDirs: string[] = [];
+
+      // 标准日志目录
+      const standardLogDir = new Logger().logDir;
+      possibleLogDirs.push(standardLogDir);
+
+      // 额外检查 employee-safety-client 目录（历史遗留）
+      try {
+        const appDataDir = process.env.APPDATA ||
+                          path.join(os.homedir(), process.platform === 'darwin' ? 'Library/Logs' : '.local/share');
+        const legacyLogDir = path.join(appDataDir, 'employee-safety-client', 'logs');
+        if (legacyLogDir !== standardLogDir) {
+          possibleLogDirs.push(legacyLogDir);
+        }
+      } catch {
+        // 忽略错误
+      }
+
+      let totalDeletedCount = 0;
+
+      // 清理所有可能的日志目录
+      for (const logDir of possibleLogDirs) {
+        if (!fs.existsSync(logDir)) {
+          continue; // 目录不存在，跳过
+        }
+
+        try {
+          const files = fs.readdirSync(logDir);
+          let deletedCount = 0;
+
+          for (const file of files) {
+            // 删除所有日志文件：.log, .log.*, .gz
+            if (file.endsWith('.log') || file.includes('.log.') || file.endsWith('.gz')) {
+              try {
+                fs.unlinkSync(path.join(logDir, file));
+                deletedCount++;
+              } catch (error) {
+                // 忽略删除失败的文件（可能被占用）
+                console.warn(`[Logger] Failed to delete log file: ${file}`, error);
+              }
+            }
+          }
+
+          if (deletedCount > 0) {
+            console.info(`[Logger] Cleaned up ${deletedCount} log file(s) in ${logDir}`);
+            totalDeletedCount += deletedCount;
+          }
+        } catch (error) {
+          console.warn(`[Logger] Failed to cleanup logs in ${logDir}:`, error);
+        }
+      }
+
+      if (totalDeletedCount > 0) {
+        console.info(`[Logger] Total cleaned up ${totalDeletedCount} log file(s) on startup`);
+      }
+    } catch (error) {
+      console.warn('[Logger] Failed to cleanup logs on startup:', error);
+    }
   }
 
   // 全局共享的定时器

@@ -4,7 +4,7 @@
  */
 
 import { EmployeeMonitorApp } from './app';
-import { logger } from '../common/utils';
+import { logger, Logger } from '../common/utils';
 import { getPlatformInfo } from '../platforms';
 
 /**
@@ -12,8 +12,11 @@ import { getPlatformInfo } from '../platforms';
  */
 async function main(): Promise<void> {
   let app: EmployeeMonitorApp | null = null;
-  
+
   try {
+    // 清理所有历史日志文件（每次启动时执行）
+    Logger.cleanupAllLogs();
+
     // 记录启动信息
     const platformInfo = getPlatformInfo();
     logger.info('Employee Monitor starting...', {

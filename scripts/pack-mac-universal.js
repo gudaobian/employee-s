@@ -16,14 +16,14 @@ async function packUniversal() {
   try {
     // 1. 构建 x64 版本
     console.log('\n1. 📦 构建 x64 版本...');
-    execSync(`npx @electron/packager . EmployeeMonitor --platform=darwin --arch=x64 --out=release --overwrite --icon=assets/icons/icon.icns --ignore="native-event-monitor-win|test-.*\\.js$|.*\\.test\\.js$|.*\\.spec\\.js$|.*\\.md$|^\\\\..*|Dockerfile$|tsconfig\\.json$|pnpm-.*|package\\.json\\.backup$|.*\\.log$|^cache/|^build/|^claudedocs/|^docs/|.*\\.ts$"`, { 
-      stdio: 'inherit' 
+    execSync(`npx @electron/packager . EmployeeMonitor --platform=darwin --arch=x64 --out=release --overwrite --no-asar --icon=assets/icons/icon.icns --ignore="native-event-monitor-win|native-event-monitor/node_modules|native-event-monitor/\\.npm-cache|native-event-monitor/src|native-event-monitor/binding\\.gyp|^/debug/|^/doc/|^/docs/|^/release/|test-.*\\.js$|.*\\.test\\.js$|.*\\.spec\\.js$|.*\\.md$|^\\\\..*|Dockerfile$|tsconfig\\.json$|pnpm-.*|package.*\\.backup$|.*\\.log$|^/cache/|^/build/|^/claudedocs/|^/src/|^/platforms/|^/main/|^/common/|^/types/|^/scripts/|^/logs/|^/\\.npm-cache/|^/\\.claude/|^/\\.github/|electron-builder.*\\.yml$"`, {
+      stdio: 'inherit'
     });
-    
+
     // 2. 构建 arm64 版本
     console.log('\n2. 📦 构建 arm64 版本...');
-    execSync(`npx @electron/packager . EmployeeMonitor --platform=darwin --arch=arm64 --out=release --overwrite --icon=assets/icons/icon.icns --ignore="native-event-monitor-win|test-.*\\.js$|.*\\.test\\.js$|.*\\.spec\\.js$|.*\\.md$|^\\\\..*|Dockerfile$|tsconfig\\.json$|pnpm-.*|package\\.json\\.backup$|.*\\.log$|^cache/|^build/|^claudedocs/|^docs/|.*\\.ts$"`, { 
-      stdio: 'inherit' 
+    execSync(`npx @electron/packager . EmployeeMonitor --platform=darwin --arch=arm64 --out=release --overwrite --no-asar --icon=assets/icons/icon.icns --ignore="native-event-monitor-win|native-event-monitor/node_modules|native-event-monitor/\\.npm-cache|native-event-monitor/src|native-event-monitor/binding\\.gyp|^/debug/|^/doc/|^/docs/|^/release/|test-.*\\.js$|.*\\.test\\.js$|.*\\.spec\\.js$|.*\\.md$|^\\\\..*|Dockerfile$|tsconfig\\.json$|pnpm-.*|package.*\\.backup$|.*\\.log$|^/cache/|^/build/|^/claudedocs/|^/src/|^/platforms/|^/main/|^/common/|^/types/|^/scripts/|^/logs/|^/\\.npm-cache/|^/\\.claude/|^/\\.github/|electron-builder.*\\.yml$"`, {
+      stdio: 'inherit'
     });
     
     // 3. 修复两个版本的兼容性问题
@@ -74,12 +74,19 @@ async function packUniversal() {
     // 5. 创建用户安装指南
     console.log('\n5. 📖 生成安装指南...');
     createInstallGuide();
-    
+
+    // 6. 创建一键安装脚本
+    console.log('\n6. 🔧 创建一键安装脚本...');
+    execSync('bash scripts/create-installer.sh', { stdio: 'inherit' });
+
     console.log('\n✅ Universal 打包完成！');
     console.log('\n📦 可用版本:');
     console.log('   • EmployeeMonitor-darwin-x64: 适用于 Intel Mac');
     console.log('   • EmployeeMonitor-darwin-arm64: 适用于 Apple Silicon Mac');
-    console.log('\n💡 用户可以根据自己的 Mac 类型选择对应版本');
+    console.log('\n📜 安装脚本:');
+    console.log('   • 安装-Intel.command: Intel Mac 一键安装');
+    console.log('   • 安装-AppleSilicon.command: Apple Silicon 一键安装');
+    console.log('\n💡 用户双击对应的安装脚本即可自动完成安装');
     
   } catch (error) {
     console.error('❌ 打包失败:', error.message);

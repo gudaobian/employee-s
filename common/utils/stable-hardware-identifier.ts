@@ -8,6 +8,7 @@
 import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
+import { execSync } from 'child_process';
 
 export interface StableDeviceIdentifier {
   deviceId: string;
@@ -43,6 +44,29 @@ export class StableHardwareIdentifier {
   }
 
   /**
+   * 获取macOS硬件UUID
+   */
+  private getMacOSHardwareUUID(): string {
+    try {
+      const output = execSync(
+        'system_profiler SPHardwareDataType | grep "Hardware UUID" | awk \'{print $3}\'',
+        { encoding: 'utf-8' }
+      );
+      const uuid = output.trim();
+
+      if (!uuid) {
+        throw new Error('Failed to retrieve macOS Hardware UUID');
+      }
+
+      console.log('[STABLE_HARDWARE] ✅ macOS Hardware UUID obtained:', uuid);
+      return uuid;
+    } catch (error: any) {
+      console.error('[STABLE_HARDWARE] ❌ Failed to get macOS Hardware UUID:', error);
+      throw new Error(`macOS Hardware UUID retrieval failed: ${error.message}`);
+    }
+  }
+
+  /**
    * 加载Windows原生模块（延迟加载）
    */
   private loadNativeModule(): void {
@@ -53,8 +77,14 @@ export class StableHardwareIdentifier {
 
     const platform = os.platform();
 
+    // macOS平台不需要加载原生模块
+    if (platform === 'darwin') {
+      console.log('[STABLE_HARDWARE] macOS platform detected, using system_profiler instead of native module');
+      return;
+    }
+
     if (platform !== 'win32') {
-      throw new Error(`Hardware ID generation is only supported on Windows. Current platform: ${platform}`);
+      throw new Error(`Hardware ID generation is only supported on Windows and macOS. Current platform: ${platform}`);
     }
 
     try {
@@ -104,71 +134,84 @@ export class StableHardwareIdentifier {
   async generateStableDeviceId(): Promise<StableDeviceIdentifier> {
     console.log('[STABLE_HARDWARE] v3.0: Generating device ID from mainboard UUID...');
 
-    // 延迟加载原生模块（只在实际使用时加载）
-    this.loadNativeModule();
+    const platform = os.platform();
+    let uuid: string;
 
-    if (!this.nativeModule) {
-      throw new Error('Native module not loaded');
-    }
+    if (platform === 'darwin') {
+      // macOS平台：使用system_profiler获取硬件UUID
+      console.log('[STABLE_HARDWARE] Using macOS system_profiler for Hardware UUID');
+      try {
+        uuid = this.getMacOSHardwareUUID();
+      } catch (error: any) {
+        console.error('[STABLE_HARDWARE] ❌ CRITICAL: Failed to generate device ID:', error);
+        throw new Error(`Cannot generate stable device ID on macOS: ${error.message}`);
+      }
+    } else {
+      // Windows平台：使用原生模块
+      this.loadNativeModule();
 
-    try {
-      // 调用C++原生接口获取硬件信息
-      const hardwareInfo = this.nativeModule.getHardwareInfo();
-
-      if (!hardwareInfo.success) {
-        throw new Error(`Hardware ID retrieval failed: ${hardwareInfo.error}`);
+      if (!this.nativeModule) {
+        throw new Error('Native module not loaded');
       }
 
-      const uuid = hardwareInfo.uuid;
+      try {
+        // 调用C++原生接口获取硬件信息
+        const hardwareInfo = this.nativeModule.getHardwareInfo();
 
-      // 验证UUID完整性
-      if (!uuid) {
-        throw new Error('Mainboard UUID is empty');
+        if (!hardwareInfo.success) {
+          throw new Error(`Hardware ID retrieval failed: ${hardwareInfo.error}`);
+        }
+
+        uuid = hardwareInfo.uuid;
+      } catch (error: any) {
+        console.error('[STABLE_HARDWARE] ❌ CRITICAL: Failed to generate device ID:', error);
+        throw new Error(`Cannot generate stable device ID on Windows: ${error.message}`);
       }
-
-      // ⚠️ 详细日志：完整打印主板UUID用于调试
-      console.log('[STABLE_HARDWARE] ✅ Mainboard UUID obtained:');
-      console.log('[STABLE_HARDWARE]   UUID (length=' + uuid.length + '):', uuid);
-
-      // 生成确定性设备ID
-      // 使用 主板UUID 生成SHA256哈希 (单一来源，无降级)
-      const hash = crypto.createHash('sha256').update(uuid).digest('hex');
-      const deviceId = `device_${hash.substring(0, 16)}`;
-
-      // ⚠️ 详细日志：打印哈希计算过程
-      console.log('[STABLE_HARDWARE] Device ID generation:');
-      console.log('[STABLE_HARDWARE]   Source: Mainboard UUID');
-      console.log('[STABLE_HARDWARE]   SHA256 hash:', hash);
-      console.log('[STABLE_HARDWARE]   Final Device ID:', deviceId);
-
-      const identifier: StableDeviceIdentifier = {
-        deviceId,
-        uuid,
-        generatedAt: new Date().toISOString(),
-        version: this.IDENTIFIER_VERSION,
-
-        // v3.0向后兼容字段（已废弃）
-        primaryFingerprint: uuid,  // 使用UUID作为主指纹
-        secondaryFingerprint: undefined,  // 不再使用次指纹
-        cpuId: undefined,  // CPU ID已废弃
-        baseboardSerial: undefined,  // 主板序列号已废弃
-        confidence: 'absolute',  // 主板UUID = 绝对唯一
-        stability: 'permanent',  // 硬件级 = 永久稳定
-        components: ['mainboard-uuid']  // v3.0: 单一来源
-      };
-
-      console.log('[STABLE_HARDWARE] ✅ Device ID generated successfully:', {
-        deviceId,
-        version: this.IDENTIFIER_VERSION,
-        components: identifier.components
-      });
-
-      return identifier;
-
-    } catch (error: any) {
-      console.error('[STABLE_HARDWARE] ❌ CRITICAL: Failed to generate device ID:', error);
-      throw new Error(`Cannot generate stable device ID: ${error.message}`);
     }
+
+    // 验证UUID完整性
+    if (!uuid) {
+      throw new Error('Mainboard UUID is empty');
+    }
+
+    // ⚠️ 详细日志：完整打印主板UUID用于调试
+    console.log('[STABLE_HARDWARE] ✅ Mainboard UUID obtained:');
+    console.log('[STABLE_HARDWARE]   UUID (length=' + uuid.length + '):', uuid);
+
+    // 生成确定性设备ID
+    // 使用 主板UUID 生成SHA256哈希 (单一来源，无降级)
+    const hash = crypto.createHash('sha256').update(uuid).digest('hex');
+    const deviceId = `device_${hash.substring(0, 16)}`;
+
+    // ⚠️ 详细日志：打印哈希计算过程
+    console.log('[STABLE_HARDWARE] Device ID generation:');
+    console.log('[STABLE_HARDWARE]   Source: Mainboard UUID');
+    console.log('[STABLE_HARDWARE]   SHA256 hash:', hash);
+    console.log('[STABLE_HARDWARE]   Final Device ID:', deviceId);
+
+    const identifier: StableDeviceIdentifier = {
+      deviceId,
+      uuid,
+      generatedAt: new Date().toISOString(),
+      version: this.IDENTIFIER_VERSION,
+
+      // v3.0向后兼容字段（已废弃）
+      primaryFingerprint: uuid,  // 使用UUID作为主指纹
+      secondaryFingerprint: undefined,  // 不再使用次指纹
+      cpuId: undefined,  // CPU ID已废弃
+      baseboardSerial: undefined,  // 主板序列号已废弃
+      confidence: 'absolute',  // 主板UUID = 绝对唯一
+      stability: 'permanent',  // 硬件级 = 永久稳定
+      components: ['mainboard-uuid']  // v3.0: 单一来源
+    };
+
+    console.log('[STABLE_HARDWARE] ✅ Device ID generated successfully:', {
+      deviceId,
+      version: this.IDENTIFIER_VERSION,
+      components: identifier.components
+    });
+
+    return identifier;
   }
 
   /**
@@ -237,8 +280,21 @@ export class StableHardwareIdentifier {
       nativeModuleLoaded: this.nativeModule !== null
     };
 
-    // 只在 Windows 平台尝试加载和获取硬件信息
-    if (os.platform() === 'win32') {
+    // 平台特定的硬件信息获取
+    const platform = os.platform();
+
+    if (platform === 'darwin') {
+      // macOS平台：使用system_profiler获取硬件UUID
+      try {
+        const uuid = this.getMacOSHardwareUUID();
+        info.hardwareInfo = {
+          uuid
+        };
+      } catch (error) {
+        console.error('[STABLE_HARDWARE] Failed to get macOS diagnostic info:', error);
+      }
+    } else if (platform === 'win32') {
+      // Windows平台：使用原生模块
       try {
         this.loadNativeModule();
         if (this.nativeModule) {
@@ -250,7 +306,7 @@ export class StableHardwareIdentifier {
           }
         }
       } catch (error) {
-        console.error('[STABLE_HARDWARE] Failed to get diagnostic info:', error);
+        console.error('[STABLE_HARDWARE] Failed to get Windows diagnostic info:', error);
       }
     }
 

@@ -1,0 +1,52 @@
+appId: com.employee.monitor
+productName: EmployeeMonitor
+copyright: Copyright © 2025
+
+directories:
+  output: release
+  buildResources: assets
+
+mac:
+  category: public.app-category.business
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: assets/icons/icon.icns
+  entitlements: null
+  entitlementsInherit: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+
+dmg:
+  title: "${productName} ${version}"
+  icon: assets/icons/icon.icns
+  background: null
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 380
+      y: 180
+      type: link
+      path: /Applications
+  window:
+    width: 520
+    height: 380
+  iconSize: 100
+  format: UDZO
+
+files:
+  - "!**/*.ts"
+  - "!test-*.js"
+  - "!*.test.js"
+  - "!*.spec.js"
+  - "!**/*.old"
+  - "!electron/test-log-manager.js"
+  - "!native-event-monitor-win/**/*"
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  - node_modules/**/*
+  - native-event-monitor/**/*

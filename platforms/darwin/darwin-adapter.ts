@@ -6,10 +6,9 @@
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import * as si from 'systeminformation';
-import sharp from 'sharp';
 
 import { PlatformAdapterBase } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
@@ -129,12 +128,22 @@ export class DarwinAdapter extends PlatformAdapterBase {
       isMonitoring: this.nativeEventAdapter.isMonitoring(),
       counts: this.nativeEventAdapter.getCurrentCounts()
     } : { isMonitoring: false, counts: { keyboardCount: 0, mouseCount: 0 } };
-    
+
     console.log(`[DARWIN_DEBUG] 键盘计数详情:`);
     console.log(`  - 当前周期计数: ${this.currentPeriodKeystrokes}`);
     console.log(`  - 原生模块状态: ${nativeStatus.isMonitoring ? '运行中' : '未运行'}`);
     console.log(`  - 原生模块键盘计数: ${nativeStatus.counts.keyboardCount}`);
-    
+
+    // 🔧 新增：如果原生模块有计数但当前周期为0，说明事件没有同步
+    if (nativeStatus.isMonitoring && nativeStatus.counts.keyboardCount > 0 && this.currentPeriodKeystrokes === 0) {
+      console.log(`[DARWIN_DEBUG] ⚠️ 检测到计数不同步问题！`);
+      console.log(`[DARWIN_DEBUG] 原生模块有${nativeStatus.counts.keyboardCount}个事件，但当前周期为0`);
+      console.log(`[DARWIN_DEBUG] 💡 可能原因：定期检查未启动，直接使用原生计数`);
+
+      // 直接使用原生模块的累计计数
+      return nativeStatus.counts.keyboardCount;
+    }
+
     if (!nativeStatus.isMonitoring && this.nativeEventAdapter) {
       console.log(`[DARWIN_DEBUG] ⚠️ 原生事件监听未运行，尝试重新启动...`);
       try {
@@ -144,12 +153,26 @@ export class DarwinAdapter extends PlatformAdapterBase {
         console.log(`[DARWIN_DEBUG] ❌ 重新启动失败:`, error);
       }
     }
-    
+
     return this.currentPeriodKeystrokes;
   }
 
   private async getMouseClickCount(): Promise<number> {
+    // 检查原生事件适配器状态
+    const nativeStatus = this.nativeEventAdapter ? {
+      isMonitoring: this.nativeEventAdapter.isMonitoring(),
+      counts: this.nativeEventAdapter.getCurrentCounts()
+    } : { isMonitoring: false, counts: { keyboardCount: 0, mouseCount: 0 } };
+
     console.log(`[DARWIN_DEBUG] 返回鼠标计数: ${this.currentPeriodMouseClicks} (当前周期)`);
+
+    // 🔧 新增：如果原生模块有计数但当前周期为0，说明事件没有同步
+    if (nativeStatus.isMonitoring && nativeStatus.counts.mouseCount > 0 && this.currentPeriodMouseClicks === 0) {
+      console.log(`[DARWIN_DEBUG] ⚠️ 鼠标计数不同步！原生模块: ${nativeStatus.counts.mouseCount}, 当前周期: 0`);
+      console.log(`[DARWIN_DEBUG] 💡 直接使用原生计数`);
+      return nativeStatus.counts.mouseCount;
+    }
+
     return this.currentPeriodMouseClicks;
   }
 
@@ -436,6 +459,53 @@ export class DarwinAdapter extends PlatformAdapterBase {
     }
   }
 
+  // 创建事件监听器（用于ActivityCollectorService）
+  async createEventListener(options: { keyboard?: boolean; mouse?: boolean; idle?: boolean }): Promise<any> {
+    logger.info('[DARWIN] 创建事件监听器', options);
+
+    // 创建一个EventEmitter来通知事件
+    const { EventEmitter } = require('events');
+    const eventEmitter = new EventEmitter();
+
+    // 启动原生活动监控（如果尚未启动）
+    if (!this.monitoringActive) {
+      await this.startActivityMonitoring();
+    }
+
+    // 使用定时器轮询活动数据并发送事件
+    const pollingInterval = setInterval(async () => {
+      try {
+        const activityData = await this.getActivityData();
+
+        if (options.keyboard && activityData.keystrokes > 0) {
+          eventEmitter.emit('keyboard', { count: activityData.keystrokes });
+        }
+
+        if (options.mouse && activityData.mouseClicks > 0) {
+          eventEmitter.emit('mouse', {
+            type: 'click',
+            count: activityData.mouseClicks
+          });
+        }
+
+        if (options.idle && activityData.idleTime > 0) {
+          const isIdle = activityData.idleTime > 30000; // 30秒阈值
+          eventEmitter.emit('idle', isIdle);
+        }
+      } catch (error) {
+        logger.error('[DARWIN] 事件监听器轮询错误:', error);
+      }
+    }, 1000); // 每秒轮询一次
+
+    // 添加stop方法用于清理
+    (eventEmitter as any).stop = () => {
+      clearInterval(pollingInterval);
+      logger.info('[DARWIN] 事件监听器已停止');
+    };
+
+    logger.info('[DARWIN] ✅ 事件监听器已创建');
+    return eventEmitter;
+  }
 
   // === 系统信息方法 (保留现有实现) ===
 
@@ -451,11 +521,22 @@ export class DarwinAdapter extends PlatformAdapterBase {
       // 添加进程信息到系统信息中
       const processes = await this.getRunningProcesses();
       
+      // 获取macOS计算机名称（而不是网络主机名）
+      let hostname = os.hostname();
+      try {
+        const computerName = execSync('scutil --get ComputerName', { encoding: 'utf-8' }).trim();
+        if (computerName) {
+          hostname = computerName;
+        }
+      } catch (error) {
+        logger.warn('Failed to get ComputerName, using os.hostname() instead', error);
+      }
+
       return {
         platform: 'macOS',
         architecture: os.arch(),
         version: systemVersion,
-        hostname: os.hostname(),
+        hostname: hostname,
         username: os.userInfo().username,
         memory: memoryInfo,
         cpu: cpuInfo,
@@ -877,7 +958,9 @@ export class DarwinAdapter extends PlatformAdapterBase {
       // 步骤1: 先用 PNG 格式捕获原始截图（保证质量）
       const tempPngPath = `/tmp/screenshot-original-${timestamp}.png`;
 
-      let command = `screencapture -t png "${tempPngPath}"`;
+      // -x: 禁用截图声音
+      // -t png: 指定输出格式为 PNG
+      let command = `screencapture -x -t png "${tempPngPath}"`;
       if (options.displayId !== undefined) {
         command += ` -D ${options.displayId}`;
       }
@@ -891,15 +974,21 @@ export class DarwinAdapter extends PlatformAdapterBase {
         };
       }
 
-      // 步骤2: 使用 sharp 压缩图片
+      // 步骤2: 使用 macOS 原生 sips 命令压缩图片
       const tempJpgPath = `/tmp/screenshot-compressed-${timestamp}.${format}`;
 
-      await sharp(tempPngPath)
-        .jpeg({
-          quality: quality,
-          mozjpeg: true  // 使用 mozjpeg 引擎获得更好的压缩率
-        })
-        .toFile(tempJpgPath);
+      // 使用 sips 转换 PNG 到 JPEG 并压缩
+      // -s format jpeg: 转换为 JPEG 格式
+      // -s formatOptions [quality]: 设置 JPEG 质量
+      try {
+        execSync(`sips -s format jpeg -s formatOptions ${quality} "${tempPngPath}" --out "${tempJpgPath}"`, {
+          stdio: 'pipe'
+        });
+      } catch (sipsError: any) {
+        logger.error(`[DARWIN] sips compression failed: ${sipsError.message}`);
+        // 如果 sips 失败，直接使用原始 PNG
+        fs.copyFileSync(tempPngPath, tempJpgPath);
+      }
 
       // 步骤3: 读取压缩后的图片数据
       const data = await fs.promises.readFile(tempJpgPath);

@@ -79,3 +79,5 @@ coverage/
 # Debug files
 debug*.js
 *.debug
+
+doc/

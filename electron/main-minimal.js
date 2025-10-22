@@ -7,7 +7,7 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electr
 const path = require('path');
 const os = require('os');
 const { WindowsNativeInstaller } = require('./windows-native-installer');
-const LogManager = require('./log-manager');
+const UnifiedLogManager = require('./unified-log-manager');
 
 // 全局变量
 let mainWindow = null;
@@ -48,10 +48,11 @@ if (!gotTheLock) {
     });
 }
 
-// 在macOS上设置为菜单栏应用（不显示在Dock中）
+// 在macOS上保持Dock图标显示，提升用户体验
 if (process.platform === 'darwin') {
-    // 先不隐藏Dock图标，确保应用正常运行后再隐藏
-    console.log('macOS detected - will hide from Dock after tray is created');
+    // 保持在Dock中显示，避免用户误以为应用已退出
+    app.dock.show();
+    console.log('macOS detected - keeping Dock icon visible for better UX');
 }
 
 // 应用就绪
@@ -66,8 +67,10 @@ app.whenReady().then(() => {
     }
     
     // 初始化日志管理器
-    logManager = new LogManager();
-    console.log('[LOG_MANAGER] 日志管理器已启动');
+    logManager = new UnifiedLogManager({
+        logLevel: process.env.NODE_ENV === 'production' ? 'INFO' : 'DEBUG'
+    });
+    console.log('[LOG_MANAGER] 统一日志管理器已启动');
     
     // 初始化Windows原生模块安装器
     if (process.platform === 'win32') {
@@ -424,7 +427,14 @@ function createMainWindow() {
 
             // 根据启动参数决定是否显示窗口
             if (!isStartMinimized) {
+                // 确保窗口在所有工作区可见并置于最前
+                mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
                 mainWindow.show();
+                mainWindow.focus();
+                // 恢复正常工作区行为
+                setTimeout(() => {
+                    mainWindow.setVisibleOnAllWorkspaces(false);
+                }, 500);
                 console.log('[STARTUP] 窗口已显示（正常启动）');
             } else {
                 console.log('[STARTUP] 后台启动，窗口保持隐藏');
@@ -550,14 +560,12 @@ function createTray() {
         tray.setToolTip(APP_CONFIG.name);
         console.log(`Tray tooltip set to: ${APP_CONFIG.name}`);
         
-        // 现在可以安全地隐藏Dock图标了
+        // macOS: 保留Dock图标，提供更好的用户体验
+        // 用户可以通过Dock和菜单栏两种方式访问应用
         if (process.platform === 'darwin') {
-            try {
-                app.dock?.hide();
-                console.log('✅ Hidden from macOS Dock - app should now only appear in menu bar');
-            } catch (error) {
-                console.log('Warning: Could not hide from Dock:', error.message);
-            }
+            console.log('✅ macOS tray created - keeping Dock icon for better UX');
+            // 不隐藏Dock图标，让用户更容易找到应用
+            // app.dock?.hide(); // 已禁用
         }
     } else {
         console.error('❌ Failed to create tray');
