@@ -20,26 +20,14 @@ import {
   ActivityData
 } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
+import WindowsNativeEventAdapter from '../../native-event-monitor-win/src/native-event-adapter';
 
 const execAsync = promisify(exec);
-
-// Dynamically require the native event adapter to handle asar unpacking correctly
-// In production, native-event-monitor-win is unpacked outside of app.asar
-function loadNativeEventAdapter() {
-  const basePath = (process as any).resourcesPath
-    ? path.join((process as any).resourcesPath, 'app.asar.unpacked')
-    : path.resolve(__dirname, '../..');
-
-  const adapterPath = path.join(basePath, 'native-event-monitor-win', 'native-event-adapter');
-  return require(adapterPath);
-}
-
-const WindowsNativeEventAdapter = loadNativeEventAdapter();
 
 export class WindowsAdapter extends PlatformAdapterBase {
   private activityMonitorTimer?: NodeJS.Timeout;
   private lastActivityData: ActivityData | null = null;
-  private nativeEventAdapter: any; // Native event adapter instance
+  private nativeEventAdapter: WindowsNativeEventAdapter;
 
   protected async performInitialization(): Promise<void> {
     logger.info('Initializing Windows platform adapter');
