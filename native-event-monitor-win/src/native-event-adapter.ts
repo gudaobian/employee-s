@@ -45,11 +45,36 @@ class WindowsNativeEventAdapter {
       }
 
       console.log('[NativeEventAdapter] Loading native module from:', modulePath);
+      console.log('[NativeEventAdapter] __dirname:', __dirname);
+      console.log('[NativeEventAdapter] process.resourcesPath:', (process as any).resourcesPath);
+      console.log('[NativeEventAdapter] Checking file exists...');
+
+      const fs = require('fs');
+      const fileExists = fs.existsSync(modulePath);
+      console.log('[NativeEventAdapter] File exists:', fileExists);
+
+      if (!fileExists) {
+        console.error('[NativeEventAdapter] ❌ File not found at path:', modulePath);
+        console.error('[NativeEventAdapter] Listing parent directory:');
+        try {
+          const parentDir = path.dirname(modulePath);
+          const files = fs.readdirSync(parentDir);
+          console.error('[NativeEventAdapter] Files in parent dir:', files);
+        } catch (e) {
+          console.error('[NativeEventAdapter] Cannot list parent directory:', e);
+        }
+        throw new Error(`Native module not found at: ${modulePath}`);
+      }
+
       this.nativeModule = require(modulePath);
       this.nativeModuleRef = this.nativeModule;
       console.log('[NativeEventAdapter] ✅ Native module loaded successfully');
     } catch (error) {
       console.error('[NativeEventAdapter] ❌ Failed to load native module:', error);
+      console.error('[NativeEventAdapter] Error details:', error instanceof Error ? error.message : String(error));
+      if (error instanceof Error && error.stack) {
+        console.error('[NativeEventAdapter] Stack trace:', error.stack);
+      }
       throw new Error('Native event monitor module not available');
     }
   }
