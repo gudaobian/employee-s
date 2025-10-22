@@ -62,6 +62,7 @@ extraMetadata:
 
 npmRebuild: false
 nodeGypRebuild: false
+publish: null  # Disable auto-publish, use create-release job instead
 
 win:
   target:
