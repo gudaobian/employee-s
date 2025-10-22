@@ -64,7 +64,6 @@ npmRebuild: false
 nodeGypRebuild: false
 
 win:
-  icon: assets/icons/icon.ico
   target:
     - target: nsis
       arch:
