@@ -23,7 +23,7 @@ permissions:
   pull-requests: write
 
 env:
-  NODE_VERSION: '18'  # Must match Electron 25's internal Node.js version
+  NODE_VERSION: '18'  # Must match Electron's internal Node.js version (Electron 28 uses Node 18.18.2)
 
 jobs:
   # 构建Windows应用（使用代码库中预编译的原生模块）
@@ -73,12 +73,12 @@ jobs:
           $electronVersion = $packageJson.devDependencies.electron
           Write-Host "package.json 中的 Electron 版本: $electronVersion"
 
-          # Electron 25 内置 Node.js 18.15.0 (ABI 116)
+          # Electron 28 内置 Node.js 18.18.2 (ABI 108)
           Write-Host ""
-          Write-Host "Electron 25 内置信息:"
-          Write-Host "- Node.js: 18.15.0"
-          Write-Host "- ABI Version: 116"
-          Write-Host "- Chrome: 114"
+          Write-Host "Electron 28 内置信息:"
+          Write-Host "- Node.js: 18.18.2"
+          Write-Host "- ABI Version: 108"
+          Write-Host "- Chrome: 120"
           Write-Host ""
           Write-Host "当前 Node.js 版本:"
           node --version
@@ -103,8 +103,10 @@ jobs:
           npm cache clean --force
 
           # 先单独安装 Electron（允许 postinstall）
-          echo "📦 Installing Electron first (allow postinstall)..."
-          npm install electron@25.9.8 --legacy-peer-deps
+          # Read Electron version from package.json
+          $electronVersion = (Get-Content "package.json" -Raw | ConvertFrom-Json).devDependencies.electron
+          echo "📦 Installing Electron $electronVersion (allow postinstall)..."
+          npm install "electron@$electronVersion" --legacy-peer-deps
 
           # 验证 Electron 安装
           if (Test-Path "node_modules/electron/dist/electron.exe") {
@@ -221,10 +223,10 @@ jobs:
 
               if ($content -match "node_module_version.(\d+)") {
                 Write-Host "   检测到 NODE_MODULE_VERSION: $($matches[1])"
-                if ($matches[1] -eq "116") {
-                  Write-Host "   ✅ 正确！ABI 116 匹配 Electron 25"
+                if ($matches[1] -eq "108") {
+                  Write-Host "   ✅ 正确！ABI 108 匹配 Electron 28"
                 } else {
-                  Write-Host "   ❌ 错误！ABI $($matches[1]) 不匹配 Electron 25 (应该是 116)"
+                  Write-Host "   ❌ 错误！ABI $($matches[1]) 不匹配 Electron 28 (应该是 108)"
                   Write-Host "   🚨 这个文件可能是用错误的工具编译的！"
                 }
               } else {
@@ -288,10 +290,10 @@ jobs:
 
               if ($content -match "node_module_version.(\d+)") {
                 Write-Host "   打包文件的 NODE_MODULE_VERSION: $($matches[1])"
-                if ($matches[1] -eq "116") {
-                  Write-Host "   ✅✅✅ 完美！打包的是 ABI 116（正确）"
+                if ($matches[1] -eq "108") {
+                  Write-Host "   ✅✅✅ 完美！打包的是 ABI 108（正确）"
                 } else {
-                  Write-Host "   ❌❌❌ 严重错误！打包的是 ABI $($matches[1])，应该是 116"
+                  Write-Host "   ❌❌❌ 严重错误！打包的是 ABI $($matches[1])，应该是 108"
                   Write-Host "   🚨 用户将收到 NODE_MODULE_VERSION 错误！"
                   exit 1
                 }
