@@ -20,7 +20,7 @@ import {
   ActivityData
 } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
-import WindowsNativeEventAdapter from '../../native-event-monitor-win/src/native-event-adapter';
+import WindowsNativeEventAdapter from '../../native-event-monitor-win/native-event-adapter';
 
 const execAsync = promisify(exec);
 
