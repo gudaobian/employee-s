@@ -28,9 +28,33 @@ class WindowsNativeEventAdapter {
           'Release',
           'event_monitor.node'
         );
+
+        console.log('[NativeEventAdapter] Production mode, loading from:', modulePath);
+        console.log('[NativeEventAdapter] File exists:', fs.existsSync(modulePath));
+
+        if (!fs.existsSync(modulePath)) {
+          // Try alternative path without app.asar.unpacked prefix
+          const altPath = path.join(
+            path.dirname(process.resourcesPath),
+            'app.asar.unpacked',
+            'native-event-monitor-win',
+            'build',
+            'Release',
+            'event_monitor.node'
+          );
+          console.log('[NativeEventAdapter] Trying alternative path:', altPath);
+          console.log('[NativeEventAdapter] Alternative exists:', fs.existsSync(altPath));
+
+          if (fs.existsSync(altPath)) {
+            modulePath = altPath;
+          } else {
+            throw new Error(`Native module not found at: ${modulePath} or ${altPath}`);
+          }
+        }
       } else {
         // Development: Use the native module loader from index.js
         // which handles both local build and precompiled modules
+        console.log('[NativeEventAdapter] Development mode, loading via index.js');
         const nativeModule = require('./index.js');
         if (nativeModule && typeof nativeModule.start === 'function') {
           this.nativeModule = nativeModule;
@@ -42,17 +66,15 @@ class WindowsNativeEventAdapter {
         }
       }
 
-      console.log('[NativeEventAdapter] Loading native module from:', modulePath);
-
-      if (!fs.existsSync(modulePath)) {
-        throw new Error(`Native module not found at: ${modulePath}`);
-      }
-
+      console.log('[NativeEventAdapter] Requiring native module...');
       this.nativeModule = require(modulePath);
       this.nativeModuleRef = this.nativeModule;
       console.log('[NativeEventAdapter] ✅ Native module loaded successfully');
     } catch (error) {
       console.error('[NativeEventAdapter] ❌ Failed to load native module:', error);
+      console.error('[NativeEventAdapter] Error stack:', error.stack);
+      console.error('[NativeEventAdapter] process.resourcesPath:', process.resourcesPath);
+      console.error('[NativeEventAdapter] __dirname:', __dirname);
       throw new Error('Native event monitor module not available');
     }
   }
