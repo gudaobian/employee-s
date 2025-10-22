@@ -195,6 +195,34 @@ jobs:
         run: |
           npm run compile
 
+      - name: Rebuild Windows native module for Electron 28
+        run: |
+          Write-Host "========================================="
+          Write-Host "重新编译Windows原生模块（Electron 28 ABI 108）"
+          Write-Host "========================================="
+
+          cd native-event-monitor-win
+
+          # 安装依赖
+          npm install --ignore-scripts
+
+          # 使用 electron-rebuild 重新编译（确保ABI 108）
+          npx electron-rebuild --version=28.2.10 --force
+
+          # 验证重新编译后的文件
+          if (Test-Path "build/Release/event_monitor.node") {
+            $module = Get-Item "build/Release/event_monitor.node"
+            Write-Host "✅ 原生模块重新编译成功"
+            Write-Host "   大小: $([math]::Round($module.Length / 1KB, 2)) KB"
+            Write-Host "   修改时间: $($module.LastWriteTime)"
+          } else {
+            Write-Host "❌ 重新编译失败 - 文件不存在"
+            exit 1
+          }
+
+          cd ..
+          Write-Host "========================================="
+
       - name: Final verification before packaging
         run: |
           Write-Host "========================================="
