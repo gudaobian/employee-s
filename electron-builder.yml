@@ -1,5 +1,5 @@
-appId: com.employee.monitor
-productName: EmployeeMonitor
+appId: com.company.employee-safety
+productName: EmployeeSafety
 copyright: Copyright © 2025
 
 directories:
@@ -46,7 +46,26 @@ files:
   - "!electron/test-log-manager.js"
   - dist/**/*
   - electron/**/*
+  - assets/**/*
   - package.json
   - node_modules/**/*
   - native-event-monitor/**/*
   - native-event-monitor-win/**/*
+
+asarUnpack:
+  - dist/**/*
+  - native-event-monitor/**/*
+  - native-event-monitor-win/**/*
+  - node_modules/screenshot-desktop/**/*
+
+extraMetadata:
+  main: electron/main-minimal.js
+
+npmRebuild: false
+nodeGypRebuild: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
