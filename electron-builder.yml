@@ -44,9 +44,9 @@ files:
   - "!*.spec.js"
   - "!**/*.old"
   - "!electron/test-log-manager.js"
-  - "!native-event-monitor-win/**/*"
   - dist/**/*
   - electron/**/*
   - package.json
   - node_modules/**/*
   - native-event-monitor/**/*
+  - native-event-monitor-win/**/*
