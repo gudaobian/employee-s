@@ -6,6 +6,7 @@
 import { BaseService } from '../utils/base-service';
 import { IConfigService, IDataSyncService } from '../interfaces/service-interfaces';
 import { IPlatformAdapter } from '../interfaces/platform-interface';
+import { createLogger } from '../utils/logger';
 
 interface QueuedData {
   id: string;
@@ -29,6 +30,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
   private syncInterval?: any;
   private lastSyncTime = 0;
   private syncIntervalMs = 30000; // 30秒
+  private logger = createLogger('DataSync');
 
   constructor(configService: IConfigService, platformAdapter: IPlatformAdapter) {
     super();
@@ -137,15 +139,23 @@ export class DataSyncService extends BaseService implements IDataSyncService {
   // 数据添加方法
   async addActivityData(data: any): Promise<void> {
     try {
+      // 记录活动数据到日志文件，重点显示 activityInterval
+      this.logger.info('Adding activity data to queue', {
+        activityInterval: data.activityInterval,
+        activityData: data,
+        timestamp: new Date().toISOString()
+      });
+
       const queueItem = this.createQueueItem('activity', data);
       await this.addToQueue(queueItem);
-      
+
       // 活动数据优先处理
       if (!this.isSyncing) {
         setTimeout(() => this.performSync(), 1000);
       }
 
     } catch (error: any) {
+      this.logger.error('Failed to add activity data', error, { data });
       console.error('[DATA_SYNC] Failed to add activity data:', error);
       throw error;
     }
@@ -355,7 +365,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
 
       const config = this.configService.getConfig();
       const uploadUrl = this.buildUploadUrl(config.serverUrl, type);
-      
+
       // 准备数据
       const dataToSync = items.map(item => ({
         ...item.data,
@@ -363,11 +373,31 @@ export class DataSyncService extends BaseService implements IDataSyncService {
         syncTimestamp: item.timestamp.toISOString()
       }));
 
+      // 记录上传数据到日志文件，重点记录 activityInterval
+      if (type === 'activity') {
+        this.logger.info(`Uploading ${items.length} activity items to server`, {
+          uploadUrl,
+          itemCount: items.length,
+          activityIntervals: dataToSync.map(d => d.activityInterval),
+          uploadData: dataToSync,
+          deviceId: config.deviceId
+        });
+      }
+
       // 发送数据
       const response = await this.sendDataToServer(uploadUrl, dataToSync);
 
       if (response.success) {
         console.log(`[DATA_SYNC] Successfully synced ${items.length} ${type} items`);
+
+        // 记录上传成功
+        if (type === 'activity') {
+          this.logger.info(`Successfully uploaded ${items.length} activity items`, {
+            itemCount: items.length,
+            syncIds: items.map(i => i.id)
+          });
+        }
+
         this.emit('sync-success', {
           type,
           count: items.length
@@ -377,6 +407,13 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       }
 
     } catch (error: any) {
+      // 记录上传失败
+      if (type === 'activity') {
+        this.logger.error(`Failed to upload ${items.length} activity items`, error, {
+          itemCount: items.length,
+          errorMessage: error.message
+        });
+      }
       console.error(`[DATA_SYNC] Failed to sync ${type} data:`, error);
       throw error;
     }
