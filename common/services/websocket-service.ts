@@ -316,9 +316,16 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
     });
 
     // Socket.IO 事件监听 - 监听后端发送的 'client:config-updated' 事件
-    this.socket.on('client:config-updated', (data: any) => {
-      console.log('[WEBSOCKET] Configuration update received from server:', data);
-      this.emit('config-update', data);
+    this.socket.on('client:config-updated', (payload: any) => {
+      console.log('[WEBSOCKET] Configuration update received from server:', payload);
+
+      // 解包 data 字段（后端推送的格式可能是 { data: { activityInterval: 600000 } }）
+      const configData = payload.data || payload;
+
+      console.log('[WEBSOCKET] Extracted config data:', configData);
+
+      // 发出配置更新事件
+      this.emit('config-update', configData);
     });
 
     this.socket.on('command', (data: any) => {
