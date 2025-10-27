@@ -1533,11 +1533,14 @@ export class DataCollectStateHandler extends BaseStateHandler {
           processCount: data.processCount || (Array.isArray(data.processes) ? data.processes.length : 0),
           timestamp: data.timestamp
         };
-      } else if (eventName === 'screenshot-collected' && data) {
+      } else if (eventName.startsWith('screenshot-') && data) {
+        // 使用模式匹配，过滤所有screenshot相关事件（screenshot-collected, screenshot-uploaded, screenshot-failed等）
         logData = {
+          eventType: eventName,
           format: data.format,
           size: data.size || (data.data ? data.data.length : 0),
-          timestamp: data.timestamp
+          timestamp: data.timestamp,
+          ...(data.error && { error: data.error })
         };
       } else if (eventName === 'activity-collected' && data) {
         logData = {

@@ -440,13 +440,46 @@ export class Logger {
   }
 
   private sanitizeData(data: any): any {
+    const MAX_STRING_LENGTH = 1000;
+    const MAX_ARRAY_LENGTH = 100;
+
     try {
       // 清理敏感数据和循环引用
       return JSON.parse(JSON.stringify(data, (key, value) => {
-        // 清理密码相关字段
+        // 1. 清理密码相关字段
         if (typeof key === 'string' && /password|token|secret|key|auth/i.test(key)) {
           return '[REDACTED]';
         }
+
+        // 2. 检测并过滤Buffer对象（toJSON后的格式）
+        if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
+          return `[BUFFER:${value.data.length}_bytes]`;
+        }
+
+        // 3. 检测大型数字数组（可能是Buffer的data数组）
+        if (Array.isArray(value) && value.length > MAX_ARRAY_LENGTH) {
+          // 检测是否全是0-255的整数（Buffer特征）
+          const isBufferArray = value.every(
+            item => typeof item === 'number' && item >= 0 && item <= 255 && Number.isInteger(item)
+          );
+          if (isBufferArray) {
+            return `[BUFFER_ARRAY:${value.length}_bytes]`;
+          }
+          return `[LARGE_ARRAY:${value.length}_items]`;
+        }
+
+        // 4. 截断超长字符串
+        if (typeof value === 'string' && value.length > MAX_STRING_LENGTH) {
+          return value.substring(0, MAX_STRING_LENGTH) + `...[TRUNCATED:${value.length}_chars]`;
+        }
+
+        // 5. 过滤大型二进制数据字段
+        if (typeof key === 'string' && /buffer|base64|image|screenshot|binary|file/i.test(key)) {
+          if (typeof value === 'string' && value.length > 100) {
+            return `[LARGE_DATA:${value.length}_chars]`;
+          }
+        }
+
         return value;
       }));
     } catch {
