@@ -7,6 +7,7 @@ import { EventEmitter } from 'events';
 import { IConfigService, IDataSyncService, IWebSocketService } from '../interfaces/service-interfaces';
 import { IPlatformAdapter } from '../interfaces/platform-interface';
 import { BaseService } from '../utils/base-service';
+import { logger } from '../utils';
 
 export interface ActivityData {
   keystrokes: number;
@@ -76,19 +77,19 @@ export class ActivityCollectorService extends BaseService {
 
   async start(): Promise<void> {
     if (this.isCollecting) {
-      console.warn('[ACTIVITY_COLLECTOR] Service already running');
+      logger.warn('[ACTIVITY_COLLECTOR] Service already running');
       return;
     }
 
     try {
-      console.log('[ACTIVITY_COLLECTOR] Starting activity collection service...');
+      logger.info('[ACTIVITY_COLLECTOR] Starting activity collection service...');
 
       // 加载配置
       await this.loadConfig();
 
       // 检查是否启用活动监控
       if (!this.config.enableActivity) {
-        console.log('[ACTIVITY_COLLECTOR] Activity monitoring is disabled');
+        logger.info('[ACTIVITY_COLLECTOR] Activity monitoring is disabled');
         return;
       }
 
@@ -107,10 +108,10 @@ export class ActivityCollectorService extends BaseService {
       this.setupConfigChangeListener();
 
       this.emit('service-started');
-      console.log('[ACTIVITY_COLLECTOR] Activity collection service started successfully');
+      logger.info('[ACTIVITY_COLLECTOR] Activity collection service started successfully');
 
     } catch (error: any) {
-      console.error('[ACTIVITY_COLLECTOR] Failed to start service:', error);
+      logger.error('[ACTIVITY_COLLECTOR] Failed to start service:', error);
       this.isCollecting = false;
       throw error;
     }
@@ -122,7 +123,7 @@ export class ActivityCollectorService extends BaseService {
     }
 
     try {
-      console.log('[ACTIVITY_COLLECTOR] Stopping activity collection service...');
+      logger.info('[ACTIVITY_COLLECTOR] Stopping activity collection service...');
 
       this.isCollecting = false;
 
@@ -146,10 +147,10 @@ export class ActivityCollectorService extends BaseService {
       }
 
       this.emit('service-stopped');
-      console.log('[ACTIVITY_COLLECTOR] Activity collection service stopped');
+      logger.info('[ACTIVITY_COLLECTOR] Activity collection service stopped');
 
     } catch (error: any) {
-      console.error('[ACTIVITY_COLLECTOR] Error stopping service:', error);
+      logger.error('[ACTIVITY_COLLECTOR] Error stopping service:', error);
     }
   }
 
@@ -165,7 +166,7 @@ export class ActivityCollectorService extends BaseService {
    */
   async updateConfig(newConfig: Partial<ActivityCollectorConfig>): Promise<void> {
     try {
-      console.log('[ACTIVITY_COLLECTOR] Updating configuration...', newConfig);
+      logger.info('[ACTIVITY_COLLECTOR] Updating configuration...', newConfig);
 
       const oldInterval = this.config.activityInterval;
       const newInterval = newConfig.activityInterval;
@@ -186,7 +187,7 @@ export class ActivityCollectorService extends BaseService {
         // 重启上传定时器
         this.restartUploadTimer();
 
-        console.log(`[ACTIVITY_COLLECTOR] Collection interval updated: ${oldInterval}ms -> ${newInterval}ms`);
+        logger.info(`[ACTIVITY_COLLECTOR] Collection interval updated: ${oldInterval}ms -> ${newInterval}ms`);
       } else {
         // 仅更新配置
         this.config = { ...this.config, ...newConfig };
@@ -203,10 +204,27 @@ export class ActivityCollectorService extends BaseService {
         }
       }
 
+      // 详细的成功日志
+      logger.info('[ACTIVITY_COLLECTOR] ✅ Config updated successfully:', {
+        oldInterval,
+        newInterval,
+        currentInterval: this.config.activityInterval,
+        changed: oldInterval !== newInterval,
+        isCollecting: this.isCollecting
+      });
+
+      if (newInterval && newInterval !== oldInterval) {
+        if (newInterval === 600000) {
+          logger.info('[ACTIVITY_COLLECTOR] ✅ Now using CORRECT interval: 600000ms (10 minutes)');
+        } else if (newInterval === 60000) {
+          logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Still using 60000ms (1 minute), expected 600000ms (10 minutes)');
+        }
+      }
+
       this.emit('config-updated', this.config);
 
     } catch (error: any) {
-      console.error('[ACTIVITY_COLLECTOR] Failed to update config:', error);
+      logger.error('[ACTIVITY_COLLECTOR] Failed to update config:', error);
       throw error;
     }
   }
@@ -244,17 +262,34 @@ export class ActivityCollectorService extends BaseService {
   private async loadConfig(): Promise<void> {
     try {
       const config = this.configService.getConfig();
-      
+
       this.config = {
-        activityInterval: config.activityInterval || 60000,
+        activityInterval: config.activityInterval ?? 60000,
         enableActivity: config.enableActivity !== false,
         enableIdleDetection: config.enableIdleDetection !== false,
-        idleThreshold: config.idleThreshold || 30000
+        idleThreshold: config.idleThreshold ?? 30000
       };
 
-      console.log('[ACTIVITY_COLLECTOR] Configuration loaded:', this.config);
+      logger.info('[ACTIVITY_COLLECTOR] Configuration loaded:', {
+        activityInterval: this.config.activityInterval,
+        enableActivity: this.config.enableActivity,
+        enableIdleDetection: this.config.enableIdleDetection,
+        idleThreshold: this.config.idleThreshold
+      });
+
+      // 添加警告：如果使用了默认值
+      if (config.activityInterval === undefined || config.activityInterval === null) {
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ activityInterval not configured, using default 60000ms');
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ This should be configured in system_config table');
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Expected value from server: 600000ms (10 minutes)');
+      } else if (this.config.activityInterval === 60000) {
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ activityInterval is 60000ms (1 minute)');
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Expected configured value: 600000ms (10 minutes)');
+      } else {
+        logger.info('[ACTIVITY_COLLECTOR] ✅ Using configured activityInterval:', this.config.activityInterval);
+      }
     } catch (error) {
-      console.warn('[ACTIVITY_COLLECTOR] Failed to load config, using defaults:', error);
+      logger.warn('[ACTIVITY_COLLECTOR] Failed to load config, using defaults:', error);
     }
   }
 
@@ -301,13 +336,13 @@ export class ActivityCollectorService extends BaseService {
           });
         }
 
-        console.log('[ACTIVITY_COLLECTOR] Native event listener started');
+        logger.info('[ACTIVITY_COLLECTOR] Native event listener started');
       } else {
-        console.warn('[ACTIVITY_COLLECTOR] Failed to create native event listener');
+        logger.warn('[ACTIVITY_COLLECTOR] Failed to create native event listener');
       }
 
     } catch (error) {
-      console.error('[ACTIVITY_COLLECTOR] Failed to start native event listener:', error);
+      logger.error('[ACTIVITY_COLLECTOR] Failed to start native event listener:', error);
       // 继续运行，但没有原生事件监听
     }
   }
@@ -320,9 +355,9 @@ export class ActivityCollectorService extends BaseService {
           await this.nativeEventListener.stop();
         }
         this.nativeEventListener = undefined;
-        console.log('[ACTIVITY_COLLECTOR] Native event listener stopped');
+        logger.info('[ACTIVITY_COLLECTOR] Native event listener stopped');
       } catch (error) {
-        console.error('[ACTIVITY_COLLECTOR] Error stopping native event listener:', error);
+        logger.error('[ACTIVITY_COLLECTOR] Error stopping native event listener:', error);
       }
     }
   }
@@ -371,13 +406,13 @@ export class ActivityCollectorService extends BaseService {
     if (isIdle && !this.isCurrentlyIdle) {
       // 变为空闲状态
       this.isCurrentlyIdle = true;
-      console.log('[ACTIVITY_COLLECTOR] User became idle');
+      logger.info('[ACTIVITY_COLLECTOR] User became idle');
     } else if (!isIdle && this.isCurrentlyIdle) {
       // 从空闲状态恢复
       this.isCurrentlyIdle = false;
       this.accumulatedData.idleTime += timeDiff;
       this.updateLastActivityTime();
-      console.log('[ACTIVITY_COLLECTOR] User became active again', { idleTime: timeDiff });
+      logger.info('[ACTIVITY_COLLECTOR] User became active again', { idleTime: timeDiff });
     }
   }
 
@@ -403,12 +438,12 @@ export class ActivityCollectorService extends BaseService {
         try {
           await this.uploadAccumulatedData();
         } catch (error) {
-          console.error('[ACTIVITY_COLLECTOR] Upload interval error:', error);
+          logger.error('[ACTIVITY_COLLECTOR] Upload interval error:', error);
         }
       }
     }, this.config.activityInterval);
 
-    console.log(`[ACTIVITY_COLLECTOR] Upload timer started with interval: ${this.config.activityInterval}ms`);
+    logger.info(`[ACTIVITY_COLLECTOR] Upload timer started with interval: ${this.config.activityInterval}ms`);
   }
 
   private restartUploadTimer(): void {
@@ -438,7 +473,7 @@ export class ActivityCollectorService extends BaseService {
     this.lastActivityTime = this.collectionStartTime;
     this.isCurrentlyIdle = false;
 
-    console.log('[ACTIVITY_COLLECTOR] Accumulated data reset');
+    logger.info('[ACTIVITY_COLLECTOR] Accumulated data reset');
   }
 
   private hasAccumulatedData(): boolean {
@@ -464,10 +499,10 @@ export class ActivityCollectorService extends BaseService {
         this.accumulatedData.windowTitle = windowInfo?.title;
         this.accumulatedData.processName = windowInfo?.processName;
       } catch (error) {
-        console.debug('[ACTIVITY_COLLECTOR] Failed to get window info:', error);
+        logger.warn('[ACTIVITY_COLLECTOR] Failed to get window info:', error);
       }
 
-      console.log('[ACTIVITY_COLLECTOR] Uploading accumulated data:', {
+      logger.info('[ACTIVITY_COLLECTOR] Uploading accumulated data:', {
         keystrokes: this.accumulatedData.keystrokes,
         mouseClicks: this.accumulatedData.mouseClicks,
         activeTime: this.accumulatedData.activeTime,
@@ -486,30 +521,48 @@ export class ActivityCollectorService extends BaseService {
         activityInterval: this.accumulatedData.intervalDuration
       };
 
+      // 详细的上传数据日志
+      logger.info('[ACTIVITY_COLLECTOR] 📤 Data to upload:', {
+        activityInterval: inputActivityData.activityInterval,
+        configInterval: this.config.activityInterval,
+        match: inputActivityData.activityInterval === this.config.activityInterval,
+        expectedInterval: 600000
+      });
+
+      // 警告：如果上传的 interval 与期望不符
+      if (inputActivityData.activityInterval !== 600000) {
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Uploading WRONG activityInterval:', inputActivityData.activityInterval);
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Expected: 600000ms (10 minutes)');
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Config interval:', this.config.activityInterval);
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Actual duration:', actualDuration);
+      } else {
+        logger.info('[ACTIVITY_COLLECTOR] ✅ Uploading CORRECT activityInterval: 600000ms (10 minutes)');
+      }
+
       // 优先使用WebSocket上传，失败则使用HTTP
       let uploadSuccess = false;
 
       if (this.websocketService && this.websocketService.isConnected()) {
         try {
-          console.log('[ACTIVITY_COLLECTOR] ⚡ Uploading via WebSocket (real-time)');
+          logger.info('[ACTIVITY_COLLECTOR] ⚡ Uploading via WebSocket (real-time)');
           await this.websocketService.sendActivityData(inputActivityData);
           uploadSuccess = true;
-          console.log('[ACTIVITY_COLLECTOR] ✅ WebSocket upload successful');
+          logger.info('[ACTIVITY_COLLECTOR] ✅ WebSocket upload successful');
         } catch (wsError: any) {
-          console.error('[ACTIVITY_COLLECTOR] ❌ WebSocket upload failed, falling back to HTTP:', {
+          logger.error('[ACTIVITY_COLLECTOR] ❌ WebSocket upload failed, falling back to HTTP:', {
             message: wsError?.message,
             code: wsError?.code
           });
         }
       } else {
-        console.log('[ACTIVITY_COLLECTOR] WebSocket not connected, using HTTP fallback');
+        logger.info('[ACTIVITY_COLLECTOR] WebSocket not connected, using HTTP fallback');
       }
 
       // HTTP fallback
       if (!uploadSuccess) {
-        console.log('[ACTIVITY_COLLECTOR] 🔄 Uploading via HTTP API (fallback)');
+        logger.info('[ACTIVITY_COLLECTOR] 🔄 Uploading via HTTP API (fallback)');
         await this.dataSyncService.addActivityData(inputActivityData);
-        console.log('[ACTIVITY_COLLECTOR] ✅ HTTP upload successful');
+        logger.info('[ACTIVITY_COLLECTOR] ✅ HTTP upload successful');
       }
 
       // 重置累积数据
@@ -518,7 +571,7 @@ export class ActivityCollectorService extends BaseService {
       this.emit('data-uploaded', this.accumulatedData);
 
     } catch (error: any) {
-      console.error('[ACTIVITY_COLLECTOR] Failed to upload accumulated data:', error);
+      logger.error('[ACTIVITY_COLLECTOR] Failed to upload accumulated data:', error);
       this.emit('upload-error', error);
       throw error;
     }
