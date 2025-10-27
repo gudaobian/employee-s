@@ -486,11 +486,9 @@ export class ActivityCollectorService extends BaseService {
 
   private async uploadAccumulatedData(): Promise<void> {
     try {
-      const now = Date.now();
-      const actualDuration = now - this.collectionStartTime;
-
-      // 更新数据
-      this.accumulatedData.intervalDuration = actualDuration;
+      // 使用配置的间隔值，而不是实际计时时长
+      // 这样可以避免计时器漂移导致的间隔不一致
+      this.accumulatedData.intervalDuration = this.config.activityInterval;
       this.accumulatedData.timestamp = new Date();
 
       // 获取当前窗口信息
@@ -506,7 +504,7 @@ export class ActivityCollectorService extends BaseService {
         keystrokes: this.accumulatedData.keystrokes,
         mouseClicks: this.accumulatedData.mouseClicks,
         activeTime: this.accumulatedData.activeTime,
-        duration: actualDuration
+        duration: this.config.activityInterval
       });
 
       // 准备数据格式 - 匹配服务器期望的字段
@@ -529,14 +527,14 @@ export class ActivityCollectorService extends BaseService {
         expectedInterval: 600000
       });
 
-      // 警告：如果上传的 interval 与期望不符
-      if (inputActivityData.activityInterval !== 600000) {
-        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Uploading WRONG activityInterval:', inputActivityData.activityInterval);
-        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Expected: 600000ms (10 minutes)');
-        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Config interval:', this.config.activityInterval);
-        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Actual duration:', actualDuration);
+      // 验证：activityInterval应该等于配置值
+      if (inputActivityData.activityInterval === this.config.activityInterval) {
+        logger.info(`[ACTIVITY_COLLECTOR] ✅ Uploading activityInterval: ${inputActivityData.activityInterval}ms`);
       } else {
-        logger.info('[ACTIVITY_COLLECTOR] ✅ Uploading CORRECT activityInterval: 600000ms (10 minutes)');
+        logger.warn('[ACTIVITY_COLLECTOR] ⚠️ activityInterval mismatch:', {
+          uploading: inputActivityData.activityInterval,
+          configured: this.config.activityInterval
+        });
       }
 
       // 优先使用WebSocket上传，失败则使用HTTP
