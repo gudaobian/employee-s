@@ -1010,12 +1010,13 @@ Windows上的辅助功能权限通常通过以下方式管理：
         logger.info(`[WINDOWS] 📊 活动数据采集:`);
         logger.info(`[WINDOWS]   - 键盘事件: ${eventData.keyboard}`);
         logger.info(`[WINDOWS]   - 鼠标点击: ${eventData.mouseClicks}`);
+        logger.info(`[WINDOWS]   - 鼠标滚动: ${eventData.mouseScrolls}`);
         logger.info(`[WINDOWS]   - 空闲时间: ${eventData.idleTime}ms`);
         logger.info(`[WINDOWS]   - 监控状态: ${eventData.isMonitoring ? '✅ 活跃' : '❌ 未激活'}`);
         logger.info(`[WINDOWS]   - Hook状态: 键盘=${eventData.keyboardHookInstalled ? '✅' : '❌'}, 鼠标=${eventData.mouseHookInstalled ? '✅' : '❌'}`);
 
         // 如果计数为0但Hook已安装，提示可能的原因
-        if (eventData.keyboard === 0 && eventData.mouseClicks === 0 &&
+        if (eventData.keyboard === 0 && eventData.mouseClicks === 0 && eventData.mouseScrolls === 0 &&
             eventData.keyboardHookInstalled && eventData.mouseHookInstalled) {
           logger.info('[WINDOWS]   ℹ️  计数为0可能是正常的（用户没有操作）');
         }
@@ -1025,6 +1026,7 @@ Windows上的辅助功能权限通常通过以下方式管理：
           activeWindow: activeWindow || undefined,
           keystrokes: eventData.keyboard,
           mouseClicks: eventData.mouseClicks,
+          mouseScrolls: eventData.mouseScrolls || 0, // 鼠标滚轮滚动次数
           mouseMovements: 0, // 不监控鼠标移动以避免过多事件
           idleTime: eventData.idleTime
         };
@@ -1038,6 +1040,7 @@ Windows上的辅助功能权限通常通过以下方式管理：
       activeWindow: activeWindow || undefined,
       keystrokes: 0, // 需要特殊权限
       mouseClicks: 0, // 需要特殊权限
+      mouseScrolls: 0, // 需要特殊权限
       mouseMovements: 0, // 需要特殊权限
       idleTime: 0 // 需要特殊权限
     };

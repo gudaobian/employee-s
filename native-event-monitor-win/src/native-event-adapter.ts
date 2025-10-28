@@ -196,6 +196,7 @@ class WindowsNativeEventAdapter {
     keyboard: number;
     mouse: number;
     mouseClicks: number;
+    mouseScrolls: number;  // 添加鼠标滚动计数
     idleTime: number;
     isMonitoring: boolean;
     keyboardHookInstalled: boolean;
@@ -210,6 +211,7 @@ class WindowsNativeEventAdapter {
         keyboard: 0,
         mouse: 0,
         mouseClicks: 0,
+        mouseScrolls: 0,  // 添加默认值
         idleTime: 0,
         isMonitoring: false,
         keyboardHookInstalled: false,
@@ -221,6 +223,7 @@ class WindowsNativeEventAdapter {
         keyboard: 0,
         mouse: 0,
         mouseClicks: 0,
+        mouseScrolls: 0,  // 添加默认值
         idleTime: 0,
         isMonitoring: false,
         keyboardHookInstalled: false,
