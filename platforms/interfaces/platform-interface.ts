@@ -89,6 +89,7 @@ export interface ActivityData {
   keystrokes?: number;
   mouseClicks?: number;
   mouseMovements?: number;
+  mouseScrolls?: number; // 鼠标滚轮滚动次数
   idleTime?: number;
 }
 
