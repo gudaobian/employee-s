@@ -17,6 +17,11 @@ mac:
   entitlementsInherit: null
   hardenedRuntime: false
   gatekeeperAssess: false
+  extraResources:
+    - from: installer-scripts/cleanup-macos.sh
+      to: cleanup-macos.sh
+    - from: installer-scripts/uninstall-macos.sh
+      to: uninstall-macos.sh
 
 dmg:
   title: "${productName} ${version}"
@@ -32,9 +37,15 @@ dmg:
       path: /Applications
   window:
     width: 520
-    height: 380
+    height: 450
   iconSize: 100
   format: UDZO
+  additionalDMGOptions:
+    # Include cleanup scripts in DMG
+    files:
+      - installer-scripts/cleanup-macos.sh
+      - installer-scripts/uninstall-macos.sh
+      - installer-scripts/README-macos.md
 
 files:
   - "!**/*.ts"
