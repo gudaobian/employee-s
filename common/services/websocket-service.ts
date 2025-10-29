@@ -441,6 +441,21 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
 
       console.log(`[WEBSOCKET] Sending ${event} (${Math.round(dataSize / 1024)} KB)`);
 
+      // 🔍 详细记录要发送的数据（仅针对 activity 事件）
+      if (event === 'client:activity') {
+        console.log(`[WEBSOCKET] 📤 详细发送数据:`, {
+          timestamp: data.timestamp,
+          keystrokes: data.keystrokes,
+          mouseClicks: data.mouseClicks,
+          mouseScrolls: data.mouseScrolls,
+          isActive: data.isActive,
+          activityInterval: data.activityInterval,
+          allKeys: Object.keys(data),
+          mouseScrollsType: typeof data.mouseScrolls,
+          mouseScrollsValue: data.mouseScrolls
+        });
+      }
+
       // 使用 Promise 包装以支持超时和错误处理
       await new Promise<void>((resolve, reject) => {
         // 设置超时: 截图15秒，进程/活动数据10秒，其他5秒
