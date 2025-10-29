@@ -179,7 +179,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
   private async getMouseScrollCount(): Promise<number> {
     // 检查原生事件适配器状态
     if (this.nativeEventAdapter) {
-      const counts = this.nativeEventAdapter.getCurrentCounts();
+      const counts = this.nativeEventAdapter.getCurrentCounts() as { keyboardCount: number; mouseCount: number; scrollCount: number };
       const scrollCount = counts.scrollCount || 0;
       console.log(`[DARWIN_DEBUG] 返回鼠标滚动计数: ${scrollCount} (原生模块)`);
 
