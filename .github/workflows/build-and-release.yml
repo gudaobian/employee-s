@@ -148,6 +148,31 @@ jobs:
           echo "📋 Final dependency status:"
           npm list --depth=0 2>$null | Out-String | Write-Host
 
+      - name: Rebuild native module
+        run: |
+          Write-Host "========================================="
+          Write-Host "重新编译 Windows 原生模块"
+          Write-Host "========================================="
+          cd native-event-monitor-win
+
+          Write-Host "📦 Installing native module dependencies..."
+          npm install
+
+          Write-Host "🔨 Rebuilding native module..."
+          npm run build
+
+          if (Test-Path "build/Release/event_monitor.node") {
+            $module = Get-Item "build/Release/event_monitor.node"
+            Write-Host "✅ 原生模块编译成功"
+            Write-Host "   大小: $([math]::Round($module.Length / 1KB, 2)) KB"
+          } else {
+            Write-Host "❌ 原生模块编译失败"
+            exit 1
+          }
+
+          cd ..
+          Write-Host "========================================="
+
       - name: Verify precompiled native module
         run: |
           Write-Host "========================================="
