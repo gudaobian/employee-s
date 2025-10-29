@@ -37,15 +37,9 @@ dmg:
       path: /Applications
   window:
     width: 520
-    height: 450
+    height: 380
   iconSize: 100
   format: UDZO
-  additionalDMGOptions:
-    # Include cleanup scripts in DMG
-    files:
-      - installer-scripts/cleanup-macos.sh
-      - installer-scripts/uninstall-macos.sh
-      - installer-scripts/README-macos.md
 
 files:
   - "!**/*.ts"
