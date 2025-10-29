@@ -3,6 +3,7 @@
 
 // 全局变量定义
 DWORD mouseClickCount = 0;
+DWORD mouseScrollCount = 0; // 鼠标滚轮滚动计数
 HHOOK mouseHook = NULL;
 
 // 鼠标Hook回调函数实现
@@ -17,7 +18,17 @@ LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
                 // 诊断日志：每10次点击记录一次
                 if (mouseClickCount % 10 == 0) {
-                    std::cout << "[MOUSE_HOOK] ✅ Callback working - Count: " << mouseClickCount << std::endl;
+                    std::cout << "[MOUSE_HOOK] ✅ Callback working - Clicks: " << mouseClickCount << std::endl;
+                }
+                break;
+
+            case WM_MOUSEWHEEL:
+                // 鼠标滚轮滚动事件
+                mouseScrollCount++;
+
+                // 诊断日志：每10次滚动记录一次
+                if (mouseScrollCount % 10 == 0) {
+                    std::cout << "[MOUSE_HOOK] ✅ Scroll detected - Scrolls: " << mouseScrollCount << std::endl;
                 }
                 break;
 

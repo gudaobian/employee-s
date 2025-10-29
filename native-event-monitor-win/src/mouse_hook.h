@@ -5,6 +5,7 @@
 
 // 鼠标Hook相关函数声明
 extern DWORD mouseClickCount;
+extern DWORD mouseScrollCount; // 鼠标滚轮滚动计数
 extern HHOOK mouseHook;
 
 // 鼠标Hook回调函数

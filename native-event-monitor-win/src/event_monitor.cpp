@@ -16,6 +16,7 @@ static MessagePump* messagePump = nullptr;
 // 使用外部定义的变量和钩子句柄
 extern DWORD keyboardCount;
 extern DWORD mouseClickCount;
+extern DWORD mouseScrollCount; // 鼠标滚轮计数
 extern HHOOK keyboardHook;
 extern HHOOK mouseHook;
 
@@ -119,6 +120,11 @@ void GetCounts(const FunctionCallbackInfo<Value>& args) {
         String::NewFromUtf8(isolate, "mouseClicks").ToLocalChecked(),
         Number::New(isolate, mouseClickCount));
 
+    // 添加鼠标滚轮滚动计数
+    result->Set(context,
+        String::NewFromUtf8(isolate, "mouseScrolls").ToLocalChecked(),
+        Number::New(isolate, mouseScrollCount));
+
     // 添加系统空闲时间
     DWORD idleTime = GetSystemIdleTime();
     result->Set(context,
@@ -148,7 +154,8 @@ void GetCounts(const FunctionCallbackInfo<Value>& args) {
     DWORD currentTime = GetTickCount();
     if (currentTime - lastLogTime >= 10000) { // 每10秒记录一次
         std::cout << "[EVENT_MONITOR] Status - Keyboard: " << keyboardCount
-                  << ", Mouse: " << mouseClickCount
+                  << ", Mouse Clicks: " << mouseClickCount
+                  << ", Mouse Scrolls: " << mouseScrollCount
                   << ", Monitoring: " << (isMonitoring ? "YES" : "NO")
                   << ", Hooks: " << (keyboardHook != NULL ? "✅" : "❌")
                   << "/" << (mouseHook != NULL ? "✅" : "❌")
@@ -163,10 +170,11 @@ void GetCounts(const FunctionCallbackInfo<Value>& args) {
 // 重置计数
 void ResetCounts(const FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
-    
+
     keyboardCount = 0;
     mouseClickCount = 0;
-    
+    mouseScrollCount = 0; // 重置滚轮计数
+
     args.GetReturnValue().Set(Boolean::New(isolate, true));
 }
 
