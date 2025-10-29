@@ -99,7 +99,7 @@ export interface ActivityData {
   keystrokes?: number;
   mouseClicks?: number;
   mouseMovement?: number;
-  scrollEvents?: number;
+  mouseScrolls?: number;
   activeWindow?: WindowInfo;
   systemMetrics?: SystemMetrics;
 }

@@ -13,7 +13,7 @@ export interface ActivityData {
   keystrokes: number;
   mouseClicks: number;
   mouseMoves: number;
-  scrollEvents: number;
+  mouseScrolls: number;
   activeTime: number; // 活跃时间（毫秒）
   idleTime: number; // 空闲时间（毫秒）
   intervalDuration: number; // 收集间隔（毫秒）
@@ -383,7 +383,7 @@ export class ActivityCollectorService extends BaseService {
         this.accumulatedData.mouseMoves++;
         break;
       case 'scroll':
-        this.accumulatedData.scrollEvents++;
+        this.accumulatedData.mouseScrolls++;
         break;
     }
 
@@ -459,7 +459,7 @@ export class ActivityCollectorService extends BaseService {
       keystrokes: 0,
       mouseClicks: 0,
       mouseMoves: 0,
-      scrollEvents: 0,
+      mouseScrolls: 0,
       activeTime: 0,
       idleTime: 0,
       intervalDuration: this.config.activityInterval,
@@ -477,10 +477,10 @@ export class ActivityCollectorService extends BaseService {
   }
 
   private hasAccumulatedData(): boolean {
-    return this.accumulatedData.keystrokes > 0 || 
-           this.accumulatedData.mouseClicks > 0 || 
+    return this.accumulatedData.keystrokes > 0 ||
+           this.accumulatedData.mouseClicks > 0 ||
            this.accumulatedData.mouseMoves > 0 ||
-           this.accumulatedData.scrollEvents > 0 ||
+           this.accumulatedData.mouseScrolls > 0 ||
            this.accumulatedData.activeTime > 0;
   }
 
@@ -503,6 +503,7 @@ export class ActivityCollectorService extends BaseService {
       logger.info('[ACTIVITY_COLLECTOR] Uploading accumulated data:', {
         keystrokes: this.accumulatedData.keystrokes,
         mouseClicks: this.accumulatedData.mouseClicks,
+        mouseScrolls: this.accumulatedData.mouseScrolls,
         activeTime: this.accumulatedData.activeTime,
         duration: this.config.activityInterval
       });
@@ -513,6 +514,7 @@ export class ActivityCollectorService extends BaseService {
         isActive: true, // 必需: 活动状态（有键盘鼠标事件即为活动）
         keystrokes: this.accumulatedData.keystrokes,
         mouseClicks: this.accumulatedData.mouseClicks,
+        mouseScrolls: this.accumulatedData.mouseScrolls,
         idleTime: this.accumulatedData.idleTime,
         activeWindow: this.accumulatedData.windowTitle,
         activeWindowProcess: this.accumulatedData.processName,
