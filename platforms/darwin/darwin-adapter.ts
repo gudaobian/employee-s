@@ -127,7 +127,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
     const nativeStatus = this.nativeEventAdapter ? {
       isMonitoring: this.nativeEventAdapter.isMonitoring(),
       counts: this.nativeEventAdapter.getCurrentCounts()
-    } : { isMonitoring: false, counts: { keyboardCount: 0, mouseCount: 0 } };
+    } : { isMonitoring: false, counts: { keyboardCount: 0, mouseCount: 0, scrollCount: 0 } };
 
     console.log(`[DARWIN_DEBUG] 键盘计数详情:`);
     console.log(`  - 当前周期计数: ${this.currentPeriodKeystrokes}`);
@@ -162,7 +162,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
     const nativeStatus = this.nativeEventAdapter ? {
       isMonitoring: this.nativeEventAdapter.isMonitoring(),
       counts: this.nativeEventAdapter.getCurrentCounts()
-    } : { isMonitoring: false, counts: { keyboardCount: 0, mouseCount: 0 } };
+    } : { isMonitoring: false, counts: { keyboardCount: 0, mouseCount: 0, scrollCount: 0 } };
 
     console.log(`[DARWIN_DEBUG] 返回鼠标计数: ${this.currentPeriodMouseClicks} (当前周期)`);
 
@@ -174,6 +174,23 @@ export class DarwinAdapter extends PlatformAdapterBase {
     }
 
     return this.currentPeriodMouseClicks;
+  }
+
+  private async getMouseScrollCount(): Promise<number> {
+    // 检查原生事件适配器状态
+    const nativeStatus = this.nativeEventAdapter ? {
+      isMonitoring: this.nativeEventAdapter.isMonitoring(),
+      counts: this.nativeEventAdapter.getCurrentCounts()
+    } : { isMonitoring: false, counts: { keyboardCount: 0, mouseCount: 0, scrollCount: 0 } };
+
+    console.log(`[DARWIN_DEBUG] 返回鼠标滚动计数: ${nativeStatus.counts.scrollCount} (原生模块)`);
+
+    // 直接使用原生模块的滚动计数
+    if (nativeStatus.isMonitoring && nativeStatus.counts.scrollCount > 0) {
+      return nativeStatus.counts.scrollCount;
+    }
+
+    return 0;
   }
 
   // 重置计数器 - 在数据上传成功后调用
@@ -333,27 +350,29 @@ export class DarwinAdapter extends PlatformAdapterBase {
   private async collectActivityData(): Promise<any> {
     const timestamp = new Date();
     const activeWindow = await this.getActiveWindow();
-    
+
     // 获取系统空闲时间
     const idleTime = await this.getSystemIdleTime();
-    
+
     // 获取键盘和鼠标活动
     const keystrokes = await this.getKeystrokeCount();
     const mouseClicks = await this.getMouseClickCount();
-    
+    const mouseScrolls = await this.getMouseScrollCount();
+
     // 创建活动数据
     const activityData = {
       timestamp,
       activeWindow: activeWindow || undefined,
       keystrokes,
       mouseClicks,
+      mouseScrolls, // 鼠标滚轮滚动次数
       mouseMovements: 0, // TODO: 实现鼠标移动监控
       idleTime
     };
-    
+
     // 注意：不在这里重置计数器！应该等数据上传成功后再重置
     // this.resetActivityCounters(); // 移除错误的重置时机
-    
+
     return activityData;
   }
 
@@ -485,6 +504,13 @@ export class DarwinAdapter extends PlatformAdapterBase {
           eventEmitter.emit('mouse', {
             type: 'click',
             count: activityData.mouseClicks
+          });
+        }
+
+        if (options.mouse && activityData.mouseScrolls > 0) {
+          eventEmitter.emit('mouse', {
+            type: 'scroll',
+            count: activityData.mouseScrolls
           });
         }
 

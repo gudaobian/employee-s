@@ -543,6 +543,13 @@ Windows 截屏权限指导：
           });
         }
 
+        if (options.mouse && activityData.mouseScrolls > 0) {
+          eventEmitter.emit('mouse', {
+            type: 'scroll',
+            count: activityData.mouseScrolls
+          });
+        }
+
         if (options.idle && activityData.idleTime > 0) {
           const isIdle = activityData.idleTime > 30000; // 30秒阈值
           eventEmitter.emit('idle', isIdle);
