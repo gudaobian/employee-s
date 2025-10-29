@@ -80,7 +80,7 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: assets/icons/icon.ico
+  # icon: assets/icons/icon.ico  # Temporarily disabled - icon must be 256x256
 
 nsis:
   oneClick: false
@@ -91,10 +91,10 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: "Employee Safety"
   include: installer-scripts/installer.nsh
-  installerIcon: assets/icons/icon.ico
-  uninstallerIcon: assets/icons/icon.ico
-  installerHeader: assets/icons/icon.ico
-  installerHeaderIcon: assets/icons/icon.ico
+  # installerIcon: assets/icons/icon.ico  # Disabled - requires 256x256
+  # uninstallerIcon: assets/icons/icon.ico
+  # installerHeader: assets/icons/icon.ico
+  # installerHeaderIcon: assets/icons/icon.ico
   displayLanguageSelector: false
   runAfterFinish: true
   allowElevation: true
