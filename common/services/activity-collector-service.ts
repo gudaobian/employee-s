@@ -495,7 +495,8 @@ export class ActivityCollectorService extends BaseService {
       try {
         const windowInfo = await this.platformAdapter.getActiveWindow();
         this.accumulatedData.windowTitle = windowInfo?.title;
-        this.accumulatedData.processName = windowInfo?.processName;
+        // 修复: 使用 application 字段（统一接口定义），兼容旧的 processName
+        this.accumulatedData.processName = windowInfo?.application || (windowInfo as any)?.processName;
       } catch (error) {
         logger.warn('[ACTIVITY_COLLECTOR] Failed to get window info:', error);
       }

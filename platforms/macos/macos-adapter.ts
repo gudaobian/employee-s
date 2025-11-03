@@ -239,7 +239,7 @@ export class MacOSAdapter extends BasePlatformAdapter {
             return {
               id: window.id.toString(),
               title: window.title,
-              processName: window.owner.name,
+              application: window.owner.name,
               processId: window.owner.processId,
               bounds: {
                 x: window.bounds.x,
@@ -441,7 +441,7 @@ export class MacOSAdapter extends BasePlatformAdapter {
       return {
         id: `${appName}-${title}`,
         title,
-        processName: appName,
+        application: appName,
         processId: 0, // AppleScript无法直接获取PID
         bounds: {
           x: parseInt(x) || 0,

@@ -31,6 +31,7 @@ export class DataCollectStateHandler extends BaseStateHandler {
   private appInstance?: EventEmitter; // 应用实例引用，用于发射事件
   private activityCollectorService?: ActivityCollectorService; // 活动收集服务
   private websocketService?: IWebSocketService; // WebSocket服务
+  private dataSyncService?: any; // 数据同步服务（用于离线数据恢复上传）
   private isCollecting = false;
   private collectionInterval?: NodeJS.Timeout;
   // 独立的定时器，用于不同类型的数据采集
@@ -58,7 +59,8 @@ export class DataCollectStateHandler extends BaseStateHandler {
     platformAdapter: IPlatformAdapter,
     appInstance?: EventEmitter,
     activityCollectorService?: ActivityCollectorService,
-    websocketService?: IWebSocketService
+    websocketService?: IWebSocketService,
+    dataSyncService?: any
   ) {
     super('DataCollectStateHandler', [DeviceState.DATA_COLLECT]);
     this.configService = configService;
@@ -66,6 +68,7 @@ export class DataCollectStateHandler extends BaseStateHandler {
     this.appInstance = appInstance;
     this.activityCollectorService = activityCollectorService;
     this.websocketService = websocketService;
+    this.dataSyncService = dataSyncService;
 
     // 初始化网络相关服务
     this.offlineCacheService = new OfflineCacheService();
@@ -74,10 +77,10 @@ export class DataCollectStateHandler extends BaseStateHandler {
 
     // 设置网络监控事件监听
     this.setupNetworkEventListeners();
-    
+
     // 监听配置更新事件
     this.configService.on?.('config-updated', this.handleConfigUpdate.bind(this));
-    
+
     // 如果应用实例存在，同时监听WebSocket配置更新事件
     if (this.appInstance) {
       this.appInstance.on('config-update', this.handleConfigUpdate.bind(this));
@@ -211,11 +214,22 @@ export class DataCollectStateHandler extends BaseStateHandler {
       logger.info('[DATA_COLLECT] 🕐 Starting independent collection timers...');
       this.startIndependentCollectionTimers(screenshotInterval, activityInterval, processInterval, enableScreenshot, enableActivity, enableProcess);
 
-      // 立即执行第一次数据收集
-      logger.info('[DATA_COLLECT] 🚀 Performing initial data collection...');
-      await this.performInitialDataCollection();
+      // 注释掉立即数据收集，让定时器自然触发第一次采集
+      // 这符合"按后端配置间隔上传"的业务规则
+      // await this.performInitialDataCollection();
 
-      logger.info('[DATA_COLLECT] ✅✅ Data collection started successfully');
+      logger.info('[DATA_COLLECT] ⏰ Collection timers started. First collections will occur at:');
+      if (enableActivity) {
+        logger.info(`[DATA_COLLECT]   - Activity: after ${activityInterval}ms (${(activityInterval/1000).toFixed(0)} seconds)`);
+      }
+      if (enableProcess) {
+        logger.info(`[DATA_COLLECT]   - Process: after ${processInterval}ms (${(processInterval/1000).toFixed(0)} seconds)`);
+      }
+      if (enableScreenshot) {
+        logger.info(`[DATA_COLLECT]   - Screenshot: after ${screenshotInterval}ms (${(screenshotInterval/1000).toFixed(0)} seconds)`);
+      }
+
+      logger.info('[DATA_COLLECT] ✅✅ Data collection timers initialized successfully');
       return { success: true };
 
     } catch (error: any) {
@@ -443,7 +457,7 @@ export class DataCollectStateHandler extends BaseStateHandler {
           if (windowInfo) {
             activeWindowInfo = {
               title: windowInfo.title || 'Unknown',
-              application: (windowInfo as any).application || windowInfo.processName || 'Unknown',
+              application: windowInfo.application || (windowInfo as any).processName || 'Unknown',
               pid: (windowInfo as any).pid || windowInfo.processId || 0,
               timestamp: Date.now()
             };
@@ -499,8 +513,10 @@ export class DataCollectStateHandler extends BaseStateHandler {
       logger.info('[DATA_COLLECT] Attempting screenshot directly (permissions verified by startup check)...');
 
       const screenshotResult = await this.platformAdapter.takeScreenshot({
-        quality: screenshotConfig.quality || 80,
-        format: screenshotConfig.format || 'jpg'
+        quality: screenshotConfig.quality || 20,
+        format: screenshotConfig.format || 'jpg',
+        maxWidth: screenshotConfig.maxWidth || 1920,
+        maxHeight: screenshotConfig.maxHeight || 1080
       });
 
       if (screenshotResult.success && screenshotResult.data) {
@@ -1062,16 +1078,25 @@ export class DataCollectStateHandler extends BaseStateHandler {
           idleTime: Math.max(0, activityData.userActivity?.idleTime || 0),
           keystrokes: Math.max(0, activityData.keystrokes || 0),
           mouseClicks: Math.max(0, activityData.mouseClicks || 0),
-          activeWindow: activityData.activeWindow?.application || activityData.activeWindow?.title || 'Unknown',
-          activeWindowProcess: activityData.activeWindow?.application || activityData.activeWindow?.title || 'Unknown',
+          activeWindow: activityData.activeWindow?.title || 'Unknown',
+          activeWindowProcess: activityData.activeWindow?.application || 'Unknown',
           messageId: `activity_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         };
-        
+
+        // 数据校验：检查 activeWindowProcess 是否错误地等于 activeWindow
+        if (data.activeWindowProcess === data.activeWindow && data.activeWindow !== 'Unknown') {
+          logger.warn('[DATA_COLLECT] ⚠️ activeWindowProcess equals activeWindow, possible data error', {
+            activeWindow: data.activeWindow,
+            activeWindowProcess: data.activeWindowProcess
+          });
+        }
+
         logger.info(`[DATA_COLLECT] 发送活动数据 - 事件: ${event}, 确认事件: ${ackEvent}`);
         logger.info('[DATA_COLLECT] 数据内容', {
           keystrokes: data.keystrokes,
           mouseClicks: data.mouseClicks,
           activeWindow: data.activeWindow,
+          activeWindowProcess: data.activeWindowProcess,
           isActive: data.isActive
         });
         
@@ -1300,8 +1325,10 @@ export class DataCollectStateHandler extends BaseStateHandler {
       // 执行截图采集 - 使用原有的截图逻辑
       const screenshotConfig = config.monitoring?.screenshotInterval ? {
         enabled: true,
-        quality: 80,
-        format: 'jpg'
+        quality: 20,        // 降低质量以减小文件大小
+        format: 'jpg',
+        maxWidth: 1920,     // 最大宽度限制
+        maxHeight: 1080     // 最大高度限制
       } : undefined;
       const screenshotResult = await this.collectScreenshotData(screenshotConfig);
       if (screenshotResult && screenshotResult.data) {
@@ -1915,10 +1942,10 @@ export class DataCollectStateHandler extends BaseStateHandler {
         return await this.handleOfflineCollection(context);
       }
 
-      // 2. 执行完整恢复流程
+      // 2. 执行完整恢复流程（传递dataSyncService用于上传离线数据）
       const recoveryResult = await this.errorRecoveryService.performRecovery(
         config.serverUrl,
-        this.getWebSocketService()
+        this.getDataSyncService()
       );
 
       if (recoveryResult.success) {
@@ -2048,12 +2075,10 @@ export class DataCollectStateHandler extends BaseStateHandler {
   }
 
   /**
-   * 获取WebSocket服务实例
+   * 获取DataSyncService实例（用于离线数据恢复上传）
    */
-  private getWebSocketService(): any {
-    // 尝试从应用实例获取WebSocket服务
-    // 这个方法可能需要根据实际的服务管理器结构调整
-    return null; // 暂时返回null，后续会通过服务管理器集成
+  private getDataSyncService(): any {
+    return this.dataSyncService;
   }
 
   // =========================

@@ -10,6 +10,7 @@ static CFRunLoopSourceRef runLoopSource = nullptr;
 static bool isMonitoring = false;
 static int keyboardCount = 0;
 static int mouseCount = 0;
+static int scrollCount = 0; // 鼠标滚轮滚动计数
 
 // 事件回调函数
 CGEventRef EventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void* refcon) {
@@ -18,17 +19,22 @@ CGEventRef EventCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef eve
         case kCGEventKeyUp:
             keyboardCount++;
             break;
-            
+
         case kCGEventLeftMouseDown:
         case kCGEventRightMouseDown:
         case kCGEventOtherMouseDown:
             mouseCount++;
             break;
-            
+
+        case kCGEventScrollWheel:
+            // 鼠标滚轮滚动事件
+            scrollCount++;
+            break;
+
         default:
             break;
     }
-    
+
     return event;
 }
 
@@ -61,11 +67,12 @@ void Start(const FunctionCallbackInfo<Value>& args) {
     
     // 创建事件监听
     CGEventMask eventMask = (
-        CGEventMaskBit(kCGEventKeyDown) | 
+        CGEventMaskBit(kCGEventKeyDown) |
         CGEventMaskBit(kCGEventKeyUp) |
         CGEventMaskBit(kCGEventLeftMouseDown) |
         CGEventMaskBit(kCGEventRightMouseDown) |
-        CGEventMaskBit(kCGEventOtherMouseDown)
+        CGEventMaskBit(kCGEventOtherMouseDown) |
+        CGEventMaskBit(kCGEventScrollWheel) // 添加滚轮事件
     );
     
     eventTap = CGEventTapCreate(
@@ -119,18 +126,21 @@ void Stop(const FunctionCallbackInfo<Value>& args) {
 void GetCounts(const FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
     Local<Context> context = isolate->GetCurrentContext();
-    
+
     Local<Object> result = Object::New(isolate);
-    (void)result->Set(context, 
-                String::NewFromUtf8(isolate, "keyboard").ToLocalChecked(), 
+    (void)result->Set(context,
+                String::NewFromUtf8(isolate, "keyboard").ToLocalChecked(),
                 Number::New(isolate, keyboardCount));
-    (void)result->Set(context, 
-                String::NewFromUtf8(isolate, "mouse").ToLocalChecked(), 
+    (void)result->Set(context,
+                String::NewFromUtf8(isolate, "mouse").ToLocalChecked(),
                 Number::New(isolate, mouseCount));
-    (void)result->Set(context, 
-                String::NewFromUtf8(isolate, "isMonitoring").ToLocalChecked(), 
+    (void)result->Set(context,
+                String::NewFromUtf8(isolate, "scrolls").ToLocalChecked(),
+                Number::New(isolate, scrollCount));
+    (void)result->Set(context,
+                String::NewFromUtf8(isolate, "isMonitoring").ToLocalChecked(),
                 v8::Boolean::New(isolate, isMonitoring));
-    
+
     args.GetReturnValue().Set(result);
 }
 
@@ -138,6 +148,7 @@ void GetCounts(const FunctionCallbackInfo<Value>& args) {
 void ResetCounts(const FunctionCallbackInfo<Value>& args) {
     keyboardCount = 0;
     mouseCount = 0;
+    scrollCount = 0; // 重置滚轮计数
     args.GetReturnValue().Set(v8::Boolean::New(args.GetIsolate(), true));
 }
 

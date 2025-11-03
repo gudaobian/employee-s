@@ -355,8 +355,27 @@ Windows 截屏权限指导：
         const originalSize = imgBuffer.length;
         logger.info(`[WINDOWS] 原始截图大小: ${originalSize} bytes`);
 
+        // 获取原始图片尺寸
+        const metadata = await sharp(imgBuffer).metadata();
+        logger.info(`[WINDOWS] Original screenshot size: ${metadata.width}x${metadata.height}`);
+
+        // 创建 sharp 实例
+        let image = sharp(imgBuffer);
+
+        // 如果设置了分辨率控制，进行缩放
+        const maxWidth = options.maxWidth || 1920;
+        const maxHeight = options.maxHeight || 1080;
+
+        if (metadata.width && metadata.height && (metadata.width > maxWidth || metadata.height > maxHeight)) {
+          image = image.resize(maxWidth, maxHeight, {
+            fit: 'inside',              // 保持比例，不超过目标
+            withoutEnlargement: true    // 不放大小图
+          });
+          logger.info(`[WINDOWS] Resizing screenshot to max ${maxWidth}x${maxHeight}`);
+        }
+
         // 使用 sharp 压缩图片
-        const compressedBuffer = await sharp(imgBuffer)
+        const compressedBuffer = await image
           .jpeg({
             quality: quality,
             mozjpeg: true  // 使用 mozjpeg 引擎获得更好的压缩率
@@ -367,6 +386,7 @@ Windows 截屏权限指导：
         const compressionRatio = ((1 - compressedSize / originalSize) * 100).toFixed(2);
 
         logger.info(`[WINDOWS] ✅ 截图已压缩: ${compressedSize} bytes (压缩率: ${compressionRatio}%)`);
+        logger.info(`[WINDOWS] Screenshot compressed with quality ${quality}, mozjpeg enabled`);
 
         return {
           success: true,

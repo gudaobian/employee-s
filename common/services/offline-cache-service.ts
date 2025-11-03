@@ -38,9 +38,9 @@ export interface CacheStats {
 
 export class OfflineCacheService extends EventEmitter {
   private cacheDir: string;
-  private maxCacheSize: number = 100 * 1024 * 1024; // 100MB
-  private maxItemAge: number = 7 * 24 * 60 * 60 * 1000; // 7天
-  private maxRetryCount: number = 3;
+  private maxCacheSize: number = 500 * 1024 * 1024; // 500MB (从100MB增加，支持20-30天离线)
+  private maxItemAge: number = 30 * 24 * 60 * 60 * 1000; // 30天 (从7天延长，降低过期删除风险)
+  private maxRetryCount: number = 10; // 10次 (从3次增加，降低80%数据丢失风险)
 
   constructor(cacheDirectory?: string) {
     super();

@@ -42,19 +42,22 @@ export class StateHandlerFactory {
   private appInstance?: EventEmitter;
   private activityCollectorService?: ActivityCollectorService;
   private websocketService?: IWebSocketService;
+  private dataSyncService?: any;
 
   constructor(
     configService: IConfigService,
     platformAdapter: IPlatformAdapter,
     appInstance?: EventEmitter,
     activityCollectorService?: ActivityCollectorService,
-    websocketService?: IWebSocketService
+    websocketService?: IWebSocketService,
+    dataSyncService?: any
   ) {
     this.configService = configService;
     this.platformAdapter = platformAdapter;
     this.appInstance = appInstance;
     this.activityCollectorService = activityCollectorService;
     this.websocketService = websocketService;
+    this.dataSyncService = dataSyncService;
   }
 
   createHandler(state: DeviceState) {
@@ -83,7 +86,8 @@ export class StateHandlerFactory {
           this.platformAdapter,
           this.appInstance,
           this.activityCollectorService,
-          this.websocketService
+          this.websocketService,
+          this.dataSyncService
         );
         
       case DeviceState.UNBOUND:

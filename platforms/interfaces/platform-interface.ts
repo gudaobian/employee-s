@@ -61,6 +61,8 @@ export interface ScreenshotOptions {
   width?: number;
   height?: number;
   displayId?: number;
+  maxWidth?: number;  // 最大宽度（用于分辨率控制）
+  maxHeight?: number; // 最大高度（用于分辨率控制）
 }
 
 export interface ScreenshotResult {

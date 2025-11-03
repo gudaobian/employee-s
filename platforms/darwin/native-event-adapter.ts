@@ -4,7 +4,7 @@ import { logger } from '../../common/utils/logger';
 interface MacOSEventMonitor {
     start(): boolean;
     stop(): boolean;
-    getCounts(): { keyboard: number; mouse: number; isMonitoring: boolean };
+    getCounts(): { keyboard: number; mouse: number; scrolls: number; isMonitoring: boolean };
     resetCounts(): boolean;
     isMonitoring(): boolean;
 }
@@ -13,7 +13,7 @@ export class NativeEventAdapter extends EventEmitter {
     private monitor: MacOSEventMonitor | null = null;
     private isInitialized = false;
     private checkInterval: NodeJS.Timeout | null = null;
-    private lastCounts = { keyboard: 0, mouse: 0 };
+    private lastCounts = { keyboard: 0, mouse: 0, scrolls: 0 };
     private instanceId: string;
 
     constructor() {
@@ -222,20 +222,21 @@ export class NativeEventAdapter extends EventEmitter {
         }
     }
 
-    getCurrentCounts(): { keyboardCount: number; mouseCount: number } {
+    getCurrentCounts(): { keyboardCount: number; mouseCount: number; scrollCount: number } {
         if (!this.monitor) {
-            return { keyboardCount: 0, mouseCount: 0 };
+            return { keyboardCount: 0, mouseCount: 0, scrollCount: 0 };
         }
 
         try {
             const counts = this.monitor.getCounts();
             return {
                 keyboardCount: counts.keyboard,
-                mouseCount: counts.mouse
+                mouseCount: counts.mouse,
+                scrollCount: counts.scrolls || 0
             };
         } catch (error) {
             logger.error('获取事件计数时出错:', error);
-            return { keyboardCount: 0, mouseCount: 0 };
+            return { keyboardCount: 0, mouseCount: 0, scrollCount: 0 };
         }
     }
 
@@ -247,7 +248,7 @@ export class NativeEventAdapter extends EventEmitter {
         try {
             const result = this.monitor.resetCounts();
             if (result) {
-                this.lastCounts = { keyboard: 0, mouse: 0 };
+                this.lastCounts = { keyboard: 0, mouse: 0, scrolls: 0 };
                 logger.debug('原生事件计数器已重置');
             }
             return result;
@@ -282,22 +283,28 @@ export class NativeEventAdapter extends EventEmitter {
                 const counts = this.monitor.getCounts();
                 
                 // 检查是否有新的事件
-                if (counts.keyboard !== this.lastCounts.keyboard || 
-                    counts.mouse !== this.lastCounts.mouse) {
-                    
+                if (counts.keyboard !== this.lastCounts.keyboard ||
+                    counts.mouse !== this.lastCounts.mouse ||
+                    (counts.scrolls || 0) !== this.lastCounts.scrolls) {
+
                     const newKeyboard = counts.keyboard - this.lastCounts.keyboard;
                     const newMouse = counts.mouse - this.lastCounts.mouse;
-                    
+                    const newScrolls = (counts.scrolls || 0) - this.lastCounts.scrolls;
+
                     if (newKeyboard > 0) {
                         this.emit('keyboard-events', newKeyboard);
                     }
                     if (newMouse > 0) {
                         this.emit('mouse-events', newMouse);
                     }
-                    
+                    if (newScrolls > 0) {
+                        this.emit('scroll-events', newScrolls);
+                    }
+
                     this.lastCounts = {
                         keyboard: counts.keyboard,
-                        mouse: counts.mouse
+                        mouse: counts.mouse,
+                        scrolls: counts.scrolls || 0
                     };
                 }
             } catch (error) {

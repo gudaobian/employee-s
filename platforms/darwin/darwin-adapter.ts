@@ -9,6 +9,7 @@ import * as path from 'path';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import * as si from 'systeminformation';
+import sharp from 'sharp';
 
 import { PlatformAdapterBase } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
@@ -998,19 +999,42 @@ export class DarwinAdapter extends PlatformAdapterBase {
         };
       }
 
-      // 步骤2: 使用 macOS 原生 sips 命令压缩图片
+      // 步骤2: 使用 sharp 进行分辨率缩放和压缩
       const tempJpgPath = `/tmp/screenshot-compressed-${timestamp}.${format}`;
 
-      // 使用 sips 转换 PNG 到 JPEG 并压缩
-      // -s format jpeg: 转换为 JPEG 格式
-      // -s formatOptions [quality]: 设置 JPEG 质量
       try {
-        execSync(`sips -s format jpeg -s formatOptions ${quality} "${tempPngPath}" --out "${tempJpgPath}"`, {
-          stdio: 'pipe'
-        });
-      } catch (sipsError: any) {
-        logger.error(`[DARWIN] sips compression failed: ${sipsError.message}`);
-        // 如果 sips 失败，直接使用原始 PNG
+        // 获取原始图片尺寸
+        const metadata = await sharp(tempPngPath).metadata();
+        logger.info(`[DARWIN] Original screenshot size: ${metadata.width}x${metadata.height}`);
+
+        // 创建 sharp 实例
+        let image = sharp(tempPngPath);
+
+        // 如果设置了分辨率控制，进行缩放
+        const maxWidth = options.maxWidth || 1920;
+        const maxHeight = options.maxHeight || 1080;
+
+        if (metadata.width && metadata.height && (metadata.width > maxWidth || metadata.height > maxHeight)) {
+          image = image.resize(maxWidth, maxHeight, {
+            fit: 'inside',              // 保持比例，不超过目标
+            withoutEnlargement: true    // 不放大小图
+          });
+          logger.info(`[DARWIN] Resizing screenshot to max ${maxWidth}x${maxHeight}`);
+        }
+
+        // 转换为 JPEG 并压缩
+        await image
+          .jpeg({
+            quality: quality,
+            mozjpeg: true              // 使用 mozjpeg 引擎获得更好的压缩
+          })
+          .toFile(tempJpgPath);
+
+        logger.info(`[DARWIN] Screenshot compressed with quality ${quality}, mozjpeg enabled`);
+
+      } catch (sharpError: any) {
+        logger.error(`[DARWIN] sharp compression failed: ${sharpError.message}`);
+        // 如果 sharp 失败，直接使用原始 PNG
         fs.copyFileSync(tempPngPath, tempJpgPath);
       }
 

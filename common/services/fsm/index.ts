@@ -46,7 +46,8 @@ export class FSMServiceManager extends EventEmitter {
     platformAdapter: IPlatformAdapter,
     appInstance?: EventEmitter,
     activityCollectorService?: ActivityCollectorService,
-    websocketService?: IWebSocketService
+    websocketService?: IWebSocketService,
+    dataSyncService?: any
   ) {
     super();
     this.configService = configService;
@@ -66,9 +67,10 @@ export class FSMServiceManager extends EventEmitter {
       platformAdapter,
       appInstance,
       activityCollectorService,
-      websocketService
+      websocketService,
+      dataSyncService
     );
-    
+
     // 设置配置更新事件转发
     this.on('config-update', (configData) => {
       console.log('[FSMServiceManager] Forwarding config-update to app instance');

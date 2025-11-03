@@ -36,6 +36,7 @@ import { FSMServiceManager } from './fsm';
 
 import { IPlatformAdapter } from '../interfaces/platform-interface';
 import { IConfigService } from '../interfaces/service-interfaces';
+import { createLogger } from '../utils/logger';
 
 export class ServiceManager {
   // 服务实例
@@ -46,15 +47,16 @@ export class ServiceManager {
   private webSocketService: WebSocketService;
   private activityCollectorService: ActivityCollectorService;
   private fsmServiceManager: FSMServiceManager;
-  
+
   // 网络相关服务
   private offlineCacheService: OfflineCacheService;
   private networkMonitor: NetworkMonitor;
   private errorRecoveryService: ErrorRecoveryService;
-  
+
   private platformAdapter: IPlatformAdapter;
   private isInitialized = false;
   private isRunning = false;
+  private logger = createLogger('ServiceManager');
 
   constructor(platformAdapter: IPlatformAdapter, configService?: IConfigService, appInstance?: any) {
     this.platformAdapter = platformAdapter;
@@ -62,22 +64,25 @@ export class ServiceManager {
     // 创建服务实例
     this.configService = configService as ConfigService || ConfigService.getInstance();
     this.authService = new AuthService(this.configService);
-    this.dataSyncService = new DataSyncService(this.configService, this.platformAdapter);
-    this.deviceInfoService = new DeviceInfoService(this.configService, this.platformAdapter);
-    this.webSocketService = new WebSocketService(this.configService);
-    this.activityCollectorService = new ActivityCollectorService(this.configService, this.dataSyncService, this.platformAdapter, this.webSocketService);
-    
-    // 初始化网络相关服务
+
+    // 初始化网络相关服务（需要先创建，供其他服务使用）
     this.offlineCacheService = new OfflineCacheService();
     this.networkMonitor = new NetworkMonitor();
     this.errorRecoveryService = new ErrorRecoveryService(this.networkMonitor, this.offlineCacheService);
+
+    // 创建数据同步服务（集成离线缓存服务，支持内存队列持久化）
+    this.dataSyncService = new DataSyncService(this.configService, this.platformAdapter, this.offlineCacheService);
+    this.deviceInfoService = new DeviceInfoService(this.configService, this.platformAdapter);
+    this.webSocketService = new WebSocketService(this.configService);
+    this.activityCollectorService = new ActivityCollectorService(this.configService, this.dataSyncService, this.platformAdapter, this.webSocketService);
 
     this.fsmServiceManager = new FSMServiceManager(
       this.configService,
       this.platformAdapter,
       appInstance,
       this.activityCollectorService,
-      this.webSocketService
+      this.webSocketService,
+      this.dataSyncService
     );
   }
 

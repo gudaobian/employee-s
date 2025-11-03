@@ -7,6 +7,7 @@ import { BaseService } from '../utils/base-service';
 import { IConfigService, IDataSyncService } from '../interfaces/service-interfaces';
 import { IPlatformAdapter } from '../interfaces/platform-interface';
 import { createLogger } from '../utils/logger';
+import { OfflineCacheService } from './offline-cache-service';
 
 interface QueuedData {
   id: string;
@@ -22,6 +23,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
   private authService: any;
   private dataTransformer: any;
   private platformAdapter: IPlatformAdapter;
+  private offlineCacheService?: OfflineCacheService; // 离线缓存服务（可选，用于内存队列持久化）
   private syncQueue: QueuedData[] = [];
   private maxQueueSize = 1000;
   private maxRetries = 3;
@@ -32,25 +34,34 @@ export class DataSyncService extends BaseService implements IDataSyncService {
   private syncIntervalMs = 30000; // 30秒
   private logger = createLogger('DataSync');
 
-  constructor(configService: IConfigService, platformAdapter: IPlatformAdapter) {
+  constructor(
+    configService: IConfigService,
+    platformAdapter: IPlatformAdapter,
+    offlineCacheService?: OfflineCacheService // 可选：离线缓存服务
+  ) {
     super();
     this.configService = configService;
     this.platformAdapter = platformAdapter;
+    this.offlineCacheService = offlineCacheService;
+
+    if (this.offlineCacheService) {
+      this.logger.info('Offline cache service integrated for queue persistence');
+    }
   }
 
   initialize(config: any, auth: any, transformer: any): void {
     this.authService = auth;
     this.dataTransformer = transformer;
-    console.log('[DATA_SYNC] Service initialized with config, auth, and transformer');
+    this.logger.info('Service initialized with config, auth, and transformer');
   }
 
   async collectData(): Promise<any> {
     try {
       const data = await this.platformAdapter.collectMonitoringData();
-      console.log('[DATA_SYNC] Data collected successfully');
+      this.logger.info('Data collected successfully');
       return data;
     } catch (error: any) {
-      console.error('[DATA_SYNC] Failed to collect data:', error);
+      this.logger.error('Failed to collect data', error);
       throw error;
     }
   }
@@ -60,33 +71,33 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       const queueItem = this.createQueueItem('activity', data);
       await this.addToQueue(queueItem);
       await this.performSync();
-      console.log('[DATA_SYNC] Data uploaded successfully');
+      this.logger.info('Data uploaded successfully');
     } catch (error: any) {
-      console.error('[DATA_SYNC] Failed to upload data:', error);
+      this.logger.error('Failed to upload data', error);
       throw error;
     }
   }
 
   startSync(): void {
     this.start().catch(error => {
-      console.error('[DATA_SYNC] Failed to start sync:', error);
+      this.logger.error('Failed to start sync', error);
     });
   }
 
   stopSync(): void {
     this.stop().catch(error => {
-      console.error('[DATA_SYNC] Failed to stop sync:', error);
+      this.logger.error('Failed to stop sync', error);
     });
   }
 
   async start(): Promise<void> {
     if (this.isRunning) {
-      console.warn('[DATA_SYNC] Service already running');
+      this.logger.warn('Service already running');
       return;
     }
 
     try {
-      console.log('[DATA_SYNC] Starting data sync service...');
+      this.logger.info('Starting data sync service...');
       
       this.isRunning = true;
       
@@ -97,10 +108,10 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       setTimeout(() => this.performSync(), 5000);
 
       this.emit('service-started');
-      console.log('[DATA_SYNC] Data sync service started successfully');
+      this.logger.info('Data sync service started successfully');
 
     } catch (error: any) {
-      console.error('[DATA_SYNC] Failed to start service:', error);
+      this.logger.error('Failed to start service', error);
       this.isRunning = false;
       throw error;
     }
@@ -112,7 +123,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
     }
 
     try {
-      console.log('[DATA_SYNC] Stopping data sync service...');
+      this.logger.info('Stopping data sync service...');
 
       this.isRunning = false;
 
@@ -124,15 +135,15 @@ export class DataSyncService extends BaseService implements IDataSyncService {
 
       // 尝试同步剩余数据
       if (this.syncQueue.length > 0) {
-        console.log(`[DATA_SYNC] Syncing ${this.syncQueue.length} remaining items...`);
+        this.logger.info(`Syncing ${this.syncQueue.length} remaining items...`);
         await this.performSync();
       }
 
       this.emit('service-stopped');
-      console.log('[DATA_SYNC] Data sync service stopped');
+      this.logger.info('Data sync service stopped');
 
     } catch (error: any) {
-      console.error('[DATA_SYNC] Error stopping service:', error);
+      this.logger.error('Error stopping service', error);
     }
   }
 
@@ -156,7 +167,6 @@ export class DataSyncService extends BaseService implements IDataSyncService {
 
     } catch (error: any) {
       this.logger.error('Failed to add activity data', error, { data });
-      console.error('[DATA_SYNC] Failed to add activity data:', error);
       throw error;
     }
   }
@@ -166,7 +176,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       // 检查队列中截图数量，避免内存堆积
       const screenshotCount = this.syncQueue.filter(item => item.type === 'screenshot').length;
       if (screenshotCount >= 10) {
-        console.warn('[DATA_SYNC] Too many screenshots in queue, skipping this one');
+        this.logger.warn('Too many screenshots in queue, skipping this one');
         return;
       }
 
@@ -174,7 +184,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       await this.addToQueue(queueItem);
 
     } catch (error: any) {
-      console.error('[DATA_SYNC] Failed to add screenshot data:', error);
+      this.logger.error('Failed to add screenshot data', error);
       throw error;
     }
   }
@@ -185,7 +195,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       await this.addToQueue(queueItem);
 
     } catch (error: any) {
-      console.error('[DATA_SYNC] Failed to add system data:', error);
+      this.logger.error('Failed to add system data', error);
       throw error;
     }
   }
@@ -193,11 +203,11 @@ export class DataSyncService extends BaseService implements IDataSyncService {
   // 强制同步
   async forceSync(): Promise<void> {
     if (this.isSyncing) {
-      console.log('[DATA_SYNC] Sync already in progress');
+      this.logger.info('Sync already in progress');
       return;
     }
 
-    console.log('[DATA_SYNC] Force sync requested');
+    this.logger.info('Force sync requested');
     await this.performSync();
   }
 
@@ -227,10 +237,10 @@ export class DataSyncService extends BaseService implements IDataSyncService {
   async clearQueue(): Promise<number> {
     const removedCount = this.syncQueue.length;
     this.syncQueue = [];
-    
-    console.log(`[DATA_SYNC] Cleared queue (${removedCount} items removed)`);
+
+    this.logger.info(`Cleared queue (${removedCount} items removed)`);
     this.emit('queue-cleared', removedCount);
-    
+
     return removedCount;
   }
 
@@ -242,7 +252,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
         try {
           await this.performSync();
         } catch (error) {
-          console.error('[DATA_SYNC] Sync interval error:', error);
+          this.logger.error('Sync interval error', error);
         }
       }
     }, this.syncIntervalMs);
@@ -260,16 +270,47 @@ export class DataSyncService extends BaseService implements IDataSyncService {
   }
 
   private async addToQueue(item: QueuedData): Promise<void> {
-    // 检查队列大小限制
-    if (this.syncQueue.length >= this.maxQueueSize) {
-      // 移除最旧的项目
+    // 检查是否需要持久化到文件缓存（队列满或离线缓存服务可用）
+    if (this.offlineCacheService && this.syncQueue.length >= this.maxQueueSize) {
+      try {
+        // 队列满，直接写入文件缓存，不加入内存队列
+        const config = this.configService.getConfig();
+        await this.offlineCacheService.cacheData(
+          item.type as any, // 'system' 会被映射为 'process'
+          config.deviceId || 'unknown',
+          item.data
+        );
+
+        this.logger.info('Queue full, data cached to disk instead', {
+          id: item.id,
+          type: item.type,
+          queueSize: this.syncQueue.length,
+          diskCached: true
+        });
+
+        this.emit('data-disk-cached', {
+          type: item.type,
+          itemId: item.id,
+          reason: 'queue-full'
+        });
+
+        return; // 不加入内存队列
+      } catch (error: any) {
+        this.logger.error('Failed to cache to disk, falling back to queue', error);
+        // 降级：移除最旧的项目，加入新数据
+        const removed = this.syncQueue.shift();
+        this.logger.warn(`Queue full, removed oldest item: ${removed?.id}`);
+      }
+    } else if (this.syncQueue.length >= this.maxQueueSize) {
+      // 没有离线缓存服务，直接移除最旧项目
       const removed = this.syncQueue.shift();
-      console.warn(`[DATA_SYNC] Queue full, removed oldest item: ${removed?.id}`);
+      this.logger.warn(`Queue full (no offline cache), removed oldest item: ${removed?.id}`);
     }
 
+    // 加入内存队列
     this.syncQueue.push(item);
-    
-    console.log(`[DATA_SYNC] Added ${item.type} data to queue`, {
+
+    this.logger.debug(`Added ${item.type} data to queue`, {
       id: item.id,
       queueSize: this.syncQueue.length,
       dataSize: item.size
@@ -291,12 +332,12 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       this.isSyncing = true;
       this.emit('sync-started');
 
-      console.log(`[DATA_SYNC] Starting sync process with ${this.syncQueue.length} items`);
+      this.logger.info(`Starting sync process with ${this.syncQueue.length} items`);
 
       // 批量处理数据
       const batchSize = Math.min(10, this.syncQueue.length);
       const batch = this.syncQueue.splice(0, batchSize);
-      
+
       // 按类型分组数据
       const groupedData = this.groupDataByType(batch);
 
@@ -323,13 +364,13 @@ export class DataSyncService extends BaseService implements IDataSyncService {
         if (item.retryCount <= this.maxRetries) {
           this.syncQueue.push(item);
         } else {
-          console.error(`[DATA_SYNC] Dropping item after ${this.maxRetries} retries: ${item.id}`);
+          this.logger.error(`Dropping item after ${this.maxRetries} retries: ${item.id}`);
         }
       }
 
       this.lastSyncTime = Date.now();
 
-      console.log(`[DATA_SYNC] Sync completed`, {
+      this.logger.info('Sync completed', {
         processed: batch.length,
         failed: failedItems.length,
         remaining: this.syncQueue.length
@@ -342,7 +383,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       });
 
     } catch (error: any) {
-      console.error('[DATA_SYNC] Sync operation failed:', error);
+      this.logger.error('Sync operation failed', error);
       this.emit('sync-error', error);
     } finally {
       this.isSyncing = false;
@@ -361,7 +402,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
 
   private async syncDataBatch(type: 'activity' | 'screenshot' | 'system', items: QueuedData[]): Promise<void> {
     try {
-      console.log(`[DATA_SYNC] Syncing ${items.length} ${type} items`);
+      this.logger.info(`Syncing ${items.length} ${type} items`);
 
       const config = this.configService.getConfig();
       const uploadUrl = this.buildUploadUrl(config.serverUrl, type);
@@ -388,7 +429,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
       const response = await this.sendDataToServer(uploadUrl, dataToSync);
 
       if (response.success) {
-        console.log(`[DATA_SYNC] Successfully synced ${items.length} ${type} items`);
+        this.logger.info(`Successfully synced ${items.length} ${type} items`);
 
         // 记录上传成功
         if (type === 'activity') {
@@ -414,7 +455,7 @@ export class DataSyncService extends BaseService implements IDataSyncService {
           errorMessage: error.message
         });
       }
-      console.error(`[DATA_SYNC] Failed to sync ${type} data:`, error);
+      this.logger.error(`Failed to sync ${type} data`, error);
       throw error;
     }
   }

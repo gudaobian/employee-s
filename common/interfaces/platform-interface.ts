@@ -40,6 +40,8 @@ export interface ScreenshotOptions {
   format?: 'png' | 'jpg' | 'bmp';
   quality?: number;
   screen?: number;
+  maxWidth?: number;  // 最大宽度（用于分辨率控制）
+  maxHeight?: number; // 最大高度（用于分辨率控制）
 }
 
 export interface ScreenshotResult {
@@ -83,7 +85,7 @@ export interface ProcessInfo {
 export interface WindowInfo {
   id: string;
   title: string;
-  processName: string;
+  application: string;  // 应用程序名（进程名） - 统一使用 application
   processId: number;
   bounds: {
     x: number;
