@@ -50,6 +50,7 @@ export class ActivityCollectorService extends BaseService {
     enableIdleDetection: true,
     idleThreshold: 30000 // 30秒空闲阈值
   };
+  private pendingConfig?: Partial<ActivityCollectorConfig>; // 待应用的配置（等待当前周期完成）
 
   // 收集状态
   private isCollecting = false;
@@ -184,7 +185,18 @@ export class ActivityCollectorService extends BaseService {
 
       // 如果间隔时间发生变化，需要处理当前收集的数据
       if (newInterval && newInterval !== oldInterval && this.isCollecting) {
-        // 先上传当前累积的数据
+        // 如果定时器正在运行，延迟应用配置（等待当前周期完成）
+        if (this.uploadInterval) {
+          this.pendingConfig = newConfig;
+          logger.info(`[ACTIVITY_COLLECTOR] ⏳ Config update pending (timer running): ${oldInterval}ms -> ${newInterval}ms`);
+          logger.info('[ACTIVITY_COLLECTOR] Will apply config after current collection cycle completes');
+          return; // 不立即应用，等待定时器触发上传时应用
+        }
+
+        // 定时器未运行，立即应用配置
+        logger.info('[ACTIVITY_COLLECTOR] Timer not running, applying config immediately');
+
+        // 先上传当前累积的数据（如果有）
         if (this.hasAccumulatedData()) {
           await this.uploadAccumulatedData();
         }
@@ -198,9 +210,9 @@ export class ActivityCollectorService extends BaseService {
         // 重启上传定时器
         this.restartUploadTimer();
 
-        logger.info(`[ACTIVITY_COLLECTOR] Collection interval updated: ${oldInterval}ms -> ${newInterval}ms`);
+        logger.info(`[ACTIVITY_COLLECTOR] ✅ Collection interval updated immediately: ${oldInterval}ms -> ${newInterval}ms`);
       } else {
-        // 仅更新配置
+        // 间隔未变化，仅更新其他配置项
         this.config = { ...this.config, ...newConfig };
       }
 
@@ -212,23 +224,6 @@ export class ActivityCollectorService extends BaseService {
         } else if (!newConfig.enableActivity && this.config.enableActivity) {
           // 禁用监控
           await this.stop();
-        }
-      }
-
-      // 详细的成功日志
-      logger.info('[ACTIVITY_COLLECTOR] ✅ Config updated successfully:', {
-        oldInterval,
-        newInterval,
-        currentInterval: this.config.activityInterval,
-        changed: oldInterval !== newInterval,
-        isCollecting: this.isCollecting
-      });
-
-      if (newInterval && newInterval !== oldInterval) {
-        if (newInterval === 600000) {
-          logger.info('[ACTIVITY_COLLECTOR] ✅ Now using CORRECT interval: 600000ms (10 minutes)');
-        } else if (newInterval === 60000) {
-          logger.warn('[ACTIVITY_COLLECTOR] ⚠️ Still using 60000ms (1 minute), expected 600000ms (10 minutes)');
         }
       }
 
@@ -594,6 +589,24 @@ export class ActivityCollectorService extends BaseService {
         logger.info('[ACTIVITY_COLLECTOR] 🔄 Uploading via HTTP API (fallback)');
         await this.dataSyncService.addActivityData(inputActivityData);
         logger.info('[ACTIVITY_COLLECTOR] ✅ HTTP upload successful');
+      }
+
+      // 检查是否有待应用的配置（在上传完成后应用）
+      if (this.pendingConfig) {
+        const oldInterval = this.config.activityInterval;
+        const newInterval = this.pendingConfig.activityInterval;
+
+        logger.info('[ACTIVITY_COLLECTOR] ✅ Applying pending config after upload completed');
+        logger.info(`[ACTIVITY_COLLECTOR] Interval change: ${oldInterval}ms -> ${newInterval}ms`);
+
+        // 应用待定配置
+        this.config = { ...this.config, ...this.pendingConfig };
+        this.pendingConfig = undefined;
+
+        // 重启上传定时器（使用新间隔）
+        this.restartUploadTimer();
+
+        logger.info('[ACTIVITY_COLLECTOR] ✅ Pending config applied, timer restarted with new interval');
       }
 
       // 重置累积数据
