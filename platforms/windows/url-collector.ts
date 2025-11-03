@@ -58,8 +58,10 @@ export class WindowsURLCollector {
   async getActiveURL(browserName: string): Promise<WindowsURLInfo | null> {
     try {
       const normalizedName = browserName.toLowerCase();
+      logger.debug(`[WindowsURLCollector] Attempting URL collection for: ${normalizedName}`);
 
       // 尝试 UI Automation 方法
+      logger.debug(`[WindowsURLCollector] Trying UI Automation method...`);
       const urlFromAutomation = await this.getURLViaUIAutomation(normalizedName);
       if (urlFromAutomation) {
         return {
@@ -71,6 +73,7 @@ export class WindowsURLCollector {
       }
 
       // 降级到窗口标题方法
+      logger.debug(`[WindowsURLCollector] UI Automation failed, trying window title fallback...`);
       const urlFromTitle = await this.getURLFromWindowTitle(normalizedName);
       if (urlFromTitle) {
         return {

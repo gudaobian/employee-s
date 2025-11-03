@@ -1181,12 +1181,15 @@ Windows上的辅助功能权限通常通过以下方式管理：
    */
   async getActiveURL(browserName: string): Promise<string | null> {
     try {
+      logger.debug(`[Windows] Starting URL collection for browser: ${browserName}`);
+
       // 动态导入 URL 采集器
       const { WindowsURLCollector } = await import('./url-collector');
       const collector = new WindowsURLCollector();
 
       // 将浏览器显示名转换为进程名
       const processName = this.browserNameToProcessName(browserName);
+      logger.debug(`[Windows] Browser process name: ${processName}`);
 
       // 采集 URL
       const urlInfo = await collector.getActiveURL(processName);
