@@ -58,10 +58,10 @@ export class WindowsURLCollector {
   async getActiveURL(browserName: string): Promise<WindowsURLInfo | null> {
     try {
       const normalizedName = browserName.toLowerCase();
-      logger.debug(`[WindowsURLCollector] Attempting URL collection for: ${normalizedName}`);
+      logger.info(`[WindowsURLCollector] Attempting URL collection for: ${normalizedName}`);
 
       // 尝试 UI Automation 方法
-      logger.debug(`[WindowsURLCollector] Trying UI Automation method...`);
+      logger.info(`[WindowsURLCollector] Trying UI Automation method...`);
       const urlFromAutomation = await this.getURLViaUIAutomation(normalizedName);
       if (urlFromAutomation) {
         return {
@@ -73,7 +73,7 @@ export class WindowsURLCollector {
       }
 
       // 降级到窗口标题方法
-      logger.debug(`[WindowsURLCollector] UI Automation failed, trying window title fallback...`);
+      logger.info(`[WindowsURLCollector] UI Automation failed, trying window title fallback...`);
       const urlFromTitle = await this.getURLFromWindowTitle(normalizedName);
       if (urlFromTitle) {
         return {
@@ -100,7 +100,7 @@ export class WindowsURLCollector {
     try {
       const config = WindowsURLCollector.BROWSER_CONFIG[browserName];
       if (!config) {
-        logger.debug(`[WindowsURLCollector] No config for browser: ${browserName}`);
+        logger.info(`[WindowsURLCollector] No config for browser: ${browserName}`);
         return null;
       }
 
@@ -111,22 +111,22 @@ export class WindowsURLCollector {
       const { stdout, stderr } = await this.executePowerShell(script, WindowsURLCollector.TIMEOUT);
 
       if (stderr) {
-        logger.debug(`[WindowsURLCollector] PowerShell stderr: ${stderr}`);
+        logger.info(`[WindowsURLCollector] PowerShell stderr: ${stderr}`);
       }
 
       const url = stdout.trim();
 
       // 验证 URL 格式
       if (url && this.isValidURL(url)) {
-        logger.debug(`[WindowsURLCollector] ✅ Got URL via UI Automation: ${url}`);
+        logger.info(`[WindowsURLCollector] ✅ Got URL via UI Automation: ${url}`);
         return url;
       }
 
-      logger.debug(`[WindowsURLCollector] Invalid or empty URL from UI Automation`);
+      logger.info(`[WindowsURLCollector] Invalid or empty URL from UI Automation`);
       return null;
 
     } catch (error) {
-      logger.debug(`[WindowsURLCollector] UI Automation failed:`, error);
+      logger.error(`[WindowsURLCollector] UI Automation failed:`, error);
       return null;
     }
   }
@@ -257,14 +257,14 @@ public class WindowHelper {
       const title = stdout.trim();
 
       if (title) {
-        logger.debug(`[WindowsURLCollector] Window title: ${title}`);
+        logger.info(`[WindowsURLCollector] Window title: ${title}`);
         return `[Title] ${title}`;
       }
 
       return null;
 
     } catch (error) {
-      logger.debug(`[WindowsURLCollector] Failed to get window title:`, error);
+      logger.error(`[WindowsURLCollector] Failed to get window title:`, error);
       return null;
     }
   }

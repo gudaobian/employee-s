@@ -1181,7 +1181,7 @@ Windows上的辅助功能权限通常通过以下方式管理：
    */
   async getActiveURL(browserName: string): Promise<string | null> {
     try {
-      logger.debug(`[Windows] Starting URL collection for browser: ${browserName}`);
+      logger.info(`[Windows] Starting URL collection for browser: ${browserName}`);
 
       // 动态导入 URL 采集器
       const { WindowsURLCollector } = await import('./url-collector');
@@ -1189,13 +1189,13 @@ Windows上的辅助功能权限通常通过以下方式管理：
 
       // 将浏览器显示名转换为进程名
       const processName = this.browserNameToProcessName(browserName);
-      logger.debug(`[Windows] Browser process name: ${processName}`);
+      logger.info(`[Windows] Browser process name: ${processName}`);
 
       // 采集 URL
       const urlInfo = await collector.getActiveURL(processName);
 
       if (urlInfo) {
-        logger.debug(`[Windows] ✅ URL collected via ${urlInfo.collectionMethod}: ${urlInfo.url}`);
+        logger.info(`[Windows] ✅ URL collected via ${urlInfo.collectionMethod}: ${urlInfo.url}`);
 
         // 记录到 URL 采集日志
         const { logURLCollected } = await import('../../common/utils/url-collect-logger');
@@ -1207,7 +1207,7 @@ Windows上的辅助功能权限通常通过以下方式管理：
 
         return urlInfo.url;
       } else {
-        logger.debug(`[Windows] ❌ Failed to collect URL for ${browserName}`);
+        logger.info(`[Windows] ❌ Failed to collect URL for ${browserName}`);
 
         // 记录失败
         const { logURLCollectFailed } = await import('../../common/utils/url-collect-logger');
