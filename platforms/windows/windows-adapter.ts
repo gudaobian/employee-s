@@ -21,6 +21,7 @@ import {
 } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
 import WindowsNativeEventAdapter from '../../native-event-monitor-win/src/native-event-adapter';
+import { WindowsPermissionChecker } from './permission-checker';
 
 const execAsync = promisify(exec);
 
@@ -28,6 +29,13 @@ export class WindowsAdapter extends PlatformAdapterBase {
   private activityMonitorTimer?: NodeJS.Timeout;
   private lastActivityData: ActivityData | null = null;
   private nativeEventAdapter: WindowsNativeEventAdapter;
+  private permissionChecker: WindowsPermissionChecker;
+  private permissionChecked = false;
+
+  constructor() {
+    super();
+    this.permissionChecker = new WindowsPermissionChecker();
+  }
 
   protected async performInitialization(): Promise<void> {
     logger.info('Initializing Windows platform adapter');
@@ -1097,6 +1105,110 @@ Windows上的辅助功能权限通常通过以下方式管理：
       return true;
     } catch (error) {
       return false;
+    }
+  }
+
+  // === 权限检查助手方法 ===
+
+  /**
+   * 检查并确保 UI Automation 服务可用
+   * 在执行需要 UI Automation 的操作前调用此方法
+   *
+   * @throws {Error} 如果服务不可用，抛出包含详细指南的错误
+   * @example
+   * ```typescript
+   * // 在URL收集或窗口信息获取前使用
+   * async getActiveURL(browserName: string): Promise<string | null> {
+   *   await this.ensureUIAutomationAvailable();
+   *   // 继续执行需要UI Automation的操作
+   * }
+   * ```
+   */
+  async ensureUIAutomationAvailable(): Promise<void> {
+    // 如果已经检查过，直接返回（避免重复检查）
+    if (this.permissionChecked) {
+      return;
+    }
+
+    logger.info('[Windows] 检查 UI Automation 服务状态...');
+    const result = await this.permissionChecker.checkUIAutomationAvailability();
+    this.permissionChecked = true;
+
+    if (!result.available) {
+      logger.warn('[Windows] UI Automation 服务不可用');
+      logger.info(result.message);
+
+      // 抛出特定的错误类型，便于上层处理
+      const error = new Error('UI_AUTOMATION_UNAVAILABLE');
+      (error as any).setupGuide = result.message;
+      throw error;
+    }
+
+    logger.info('[Windows] ✅ UI Automation 服务检查通过');
+  }
+
+  /**
+   * 获取 UI Automation 设置的详细指南
+   * 可用于向用户显示设置说明
+   */
+  async getUIAutomationGuide(): Promise<string> {
+    const result = await this.permissionChecker.checkUIAutomationAvailability();
+    return result.message;
+  }
+
+  /**
+   * 尝试打开服务管理器
+   * 方便用户快速配置服务
+   */
+  async openServicesManager(): Promise<boolean> {
+    return await this.permissionChecker.openServicesManager();
+  }
+
+  /**
+   * 检查是否有管理员权限
+   * 某些操作需要管理员权限
+   */
+  async checkAdminPrivileges(): Promise<boolean> {
+    return await this.permissionChecker.checkAdminPrivileges();
+  }
+
+  // === 浏览器URL采集 ===
+
+  /**
+   * 获取活动浏览器的URL
+   * @param browserName 浏览器名称 (Chrome, Firefox, Edge, Brave等)
+   * @returns URL字符串，失败返回null
+   */
+  async getActiveURL(browserName: string): Promise<string | null> {
+    try {
+      // Windows平台URL采集：通过窗口标题提取
+      // 大多数浏览器在标题中包含URL或页面标题
+      const windowInfo = await this.getActiveWindow();
+
+      if (!windowInfo || !windowInfo.title) {
+        logger.debug('[Windows] No active window or title found');
+        return null;
+      }
+
+      // 从窗口标题中提取URL（浏览器通常将URL显示在标题中）
+      // 格式通常为: "页面标题 - Google Chrome" 或 "页面标题 - Mozilla Firefox"
+      const title = windowInfo.title;
+
+      // 简单实现：返回窗口标题作为URL标识
+      // 注意：Windows平台完整URL采集需要使用UI Automation或浏览器扩展
+      // 当前实现仅返回窗口标题，可作为占位符
+      logger.debug(`[Windows] Browser window title: ${title}`);
+
+      // TODO: 实现完整的Windows URL采集
+      // 方案1: 使用UI Automation API读取地址栏
+      // 方案2: 使用浏览器原生消息传递API
+      // 方案3: 解析窗口标题中的URL（部分浏览器）
+
+      return null; // 暂时返回null，待完整实现
+
+    } catch (error) {
+      logger.error('[Windows] Failed to get active URL:', error);
+      return null;
     }
   }
 }
