@@ -8,6 +8,7 @@ import { IConfigService, IDataSyncService, IWebSocketService } from '../interfac
 import { IPlatformAdapter } from '../interfaces/platform-interface';
 import { BaseService } from '../utils/base-service';
 import { logger } from '../utils';
+import { URLCollectorService } from './url-collector-service';
 
 export interface ActivityData {
   keystrokes: number;
@@ -19,6 +20,7 @@ export interface ActivityData {
   intervalDuration: number; // 收集间隔（毫秒）
   windowTitle?: string;
   processName?: string;
+  activeUrl?: string; // 活动窗口的URL（如果是浏览器）
   timestamp: Date;
   sessionId?: string;
 }
@@ -39,6 +41,7 @@ export class ActivityCollectorService extends BaseService {
   private dataSyncService: IDataSyncService;
   private websocketService?: IWebSocketService;
   private platformAdapter: IPlatformAdapter;
+  private urlCollectorService?: URLCollectorService;
 
   // 配置相关
   private config: ActivityCollectorConfig = {
@@ -73,6 +76,9 @@ export class ActivityCollectorService extends BaseService {
     this.dataSyncService = dataSyncService;
     this.platformAdapter = platformAdapter;
     this.websocketService = websocketService;
+
+    // 初始化URL采集服务
+    this.urlCollectorService = new URLCollectorService();
   }
 
   async start(): Promise<void> {
@@ -97,6 +103,11 @@ export class ActivityCollectorService extends BaseService {
 
       // 初始化累积数据
       this.resetAccumulatedData();
+
+      // 初始化URL采集服务
+      if (this.urlCollectorService) {
+        await this.urlCollectorService.initialize(this.platformAdapter);
+      }
 
       // 启动原生事件监听
       await this.startNativeEventListener();
@@ -497,6 +508,24 @@ export class ActivityCollectorService extends BaseService {
         this.accumulatedData.windowTitle = windowInfo?.title;
         // 修复: 使用 application 字段（统一接口定义），兼容旧的 processName
         this.accumulatedData.processName = windowInfo?.application || (windowInfo as any)?.processName;
+
+        // 采集浏览器URL（仅当活动窗口是浏览器时）
+        if (windowInfo?.application && this.isBrowserApplication(windowInfo.application)) {
+          try {
+            if (this.urlCollectorService) {
+              const urlInfo = await this.urlCollectorService.collectActiveURL();
+              if (urlInfo) {
+                this.accumulatedData.activeUrl = urlInfo.url;
+                logger.debug('[ACTIVITY_COLLECTOR] Collected browser URL:', {
+                  browser: windowInfo.application,
+                  url: urlInfo.url
+                });
+              }
+            }
+          } catch (error) {
+            logger.debug('[ACTIVITY_COLLECTOR] Failed to collect URL from browser:', error);
+          }
+        }
       } catch (error) {
         logger.warn('[ACTIVITY_COLLECTOR] Failed to get window info:', error);
       }
@@ -519,6 +548,7 @@ export class ActivityCollectorService extends BaseService {
         idleTime: this.accumulatedData.idleTime,
         activeWindow: this.accumulatedData.windowTitle,
         activeWindowProcess: this.accumulatedData.processName,
+        activeUrl: this.accumulatedData.activeUrl, // 浏览器URL（已脱敏）
         activityInterval: this.accumulatedData.intervalDuration
       };
 
@@ -598,5 +628,29 @@ export class ActivityCollectorService extends BaseService {
       lastActivityTime: new Date(this.lastActivityTime),
       accumulatedData: { ...this.accumulatedData }
     };
+  }
+
+  /**
+   * 判断应用是否为浏览器
+   */
+  private isBrowserApplication(appName: string): boolean {
+    if (!appName) return false;
+
+    const lowerAppName = appName.toLowerCase();
+    const browserNames = [
+      'safari',
+      'chrome',
+      'google chrome',
+      'firefox',
+      'edge',
+      'microsoft edge',
+      'brave',
+      'brave browser',
+      'opera',
+      'vivaldi',
+      'arc'
+    ];
+
+    return browserNames.some(browser => lowerAppName.includes(browser));
   }
 }
