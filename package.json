@@ -1,6 +1,6 @@
 {
   "name": "employee-safety-client",
-  "version": "1.0.53",
+  "version": "1.0.54",
   "description": "Employee Safety Client - Comprehensive Employee Security Solution",
   "main": "electron/main-minimal.js",
   "bin": {
@@ -21,6 +21,11 @@
     "pack:mac:builder": "npm run build:mac && npx electron-builder --mac --config electron-builder.yml",
     "pack:win": "node scripts/build-windows.js",
     "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:performance": "ts-node test/performance/benchmark.ts",
+    "test:integration": "jest --testPathPattern=test/integration",
+    "test:unit": "jest --testPathPattern=test/unit",
     "lint": "eslint **/*.ts",
     "lint:fix": "eslint **/*.ts --fix",
     "typecheck": "tsc --noEmit --project tsconfig.json"
