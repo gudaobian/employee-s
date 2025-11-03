@@ -1181,35 +1181,71 @@ Windows上的辅助功能权限通常通过以下方式管理：
    */
   async getActiveURL(browserName: string): Promise<string | null> {
     try {
-      // Windows平台URL采集：通过窗口标题提取
-      // 大多数浏览器在标题中包含URL或页面标题
-      const windowInfo = await this.getActiveWindow();
+      // 动态导入 URL 采集器
+      const { WindowsURLCollector } = await import('./url-collector');
+      const collector = new WindowsURLCollector();
 
-      if (!windowInfo || !windowInfo.title) {
-        logger.debug('[Windows] No active window or title found');
+      // 将浏览器显示名转换为进程名
+      const processName = this.browserNameToProcessName(browserName);
+
+      // 采集 URL
+      const urlInfo = await collector.getActiveURL(processName);
+
+      if (urlInfo) {
+        logger.debug(`[Windows] ✅ URL collected via ${urlInfo.collectionMethod}: ${urlInfo.url}`);
+
+        // 记录到 URL 采集日志
+        const { logURLCollected } = await import('../../common/utils/url-collect-logger');
+        logURLCollected(browserName, urlInfo.url, {
+          collectionMethod: urlInfo.collectionMethod,
+          quality: urlInfo.quality,
+          privacyLevel: 'full'
+        });
+
+        return urlInfo.url;
+      } else {
+        logger.debug(`[Windows] ❌ Failed to collect URL for ${browserName}`);
+
+        // 记录失败
+        const { logURLCollectFailed } = await import('../../common/utils/url-collect-logger');
+        logURLCollectFailed(browserName, 'No URL found via UI Automation or window title');
+
         return null;
       }
 
-      // 从窗口标题中提取URL（浏览器通常将URL显示在标题中）
-      // 格式通常为: "页面标题 - Google Chrome" 或 "页面标题 - Mozilla Firefox"
-      const title = windowInfo.title;
-
-      // 简单实现：返回窗口标题作为URL标识
-      // 注意：Windows平台完整URL采集需要使用UI Automation或浏览器扩展
-      // 当前实现仅返回窗口标题，可作为占位符
-      logger.debug(`[Windows] Browser window title: ${title}`);
-
-      // TODO: 实现完整的Windows URL采集
-      // 方案1: 使用UI Automation API读取地址栏
-      // 方案2: 使用浏览器原生消息传递API
-      // 方案3: 解析窗口标题中的URL（部分浏览器）
-
-      return null; // 暂时返回null，待完整实现
-
     } catch (error) {
       logger.error('[Windows] Failed to get active URL:', error);
+
+      // 记录失败
+      try {
+        const { logURLCollectFailed } = await import('../../common/utils/url-collect-logger');
+        logURLCollectFailed(browserName, error instanceof Error ? error.message : 'Unknown error');
+      } catch (logError) {
+        // 忽略日志错误
+      }
+
       return null;
     }
+  }
+
+  /**
+   * 将浏览器显示名转换为进程名
+   */
+  private browserNameToProcessName(browserName: string): string {
+    const mapping: Record<string, string> = {
+      'chrome': 'chrome.exe',
+      'google chrome': 'chrome.exe',
+      'edge': 'msedge.exe',
+      'microsoft edge': 'msedge.exe',
+      'firefox': 'firefox.exe',
+      'mozilla firefox': 'firefox.exe',
+      'brave': 'brave.exe',
+      'brave browser': 'brave.exe',
+      'opera': 'opera.exe'
+    };
+
+    const normalized = browserName.toLowerCase();
+    return mapping[normalized] || `${normalized}.exe`;
   }
 }
 

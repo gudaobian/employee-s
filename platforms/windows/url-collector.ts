@@ -1,0 +1,279 @@
+/**
+ * Windows URL 采集器 - 使用 UI Automation
+ * 通过 PowerShell 调用 UI Automation API 获取浏览器地址栏 URL
+ */
+
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { logger } from '../../common/utils';
+
+const execAsync = promisify(exec);
+
+export interface WindowsURLInfo {
+  url: string;
+  browserName: string;
+  collectionMethod: 'ui_automation' | 'window_title' | 'fallback';
+  quality: 'full_url' | 'domain_only' | 'title_only';
+}
+
+/**
+ * Windows URL 采集器
+ * 使用 UI Automation API 读取浏览器地址栏
+ */
+export class WindowsURLCollector {
+  private static readonly TIMEOUT = 5000; // 5秒超时
+  private static readonly BROWSER_CONFIG = {
+    'chrome.exe': {
+      className: 'Chrome_WidgetWin_1',
+      addressBarName: 'Address and search bar',
+      automationId: null
+    },
+    'msedge.exe': {
+      className: 'Chrome_WidgetWin_1',
+      addressBarName: 'Address and search bar',
+      automationId: null
+    },
+    'brave.exe': {
+      className: 'Chrome_WidgetWin_1',
+      addressBarName: 'Address and search bar',
+      automationId: null
+    },
+    'firefox.exe': {
+      className: 'MozillaWindowClass',
+      addressBarName: 'Search with Google or enter address',
+      automationId: null
+    },
+    'opera.exe': {
+      className: 'Chrome_WidgetWin_1',
+      addressBarName: 'Address field',
+      automationId: null
+    }
+  };
+
+  /**
+   * 获取活动浏览器的 URL
+   * @param browserName 浏览器进程名（如 chrome.exe）
+   * @returns URL 信息对象，失败返回 null
+   */
+  async getActiveURL(browserName: string): Promise<WindowsURLInfo | null> {
+    try {
+      const normalizedName = browserName.toLowerCase();
+
+      // 尝试 UI Automation 方法
+      const urlFromAutomation = await this.getURLViaUIAutomation(normalizedName);
+      if (urlFromAutomation) {
+        return {
+          url: urlFromAutomation,
+          browserName,
+          collectionMethod: 'ui_automation',
+          quality: 'full_url'
+        };
+      }
+
+      // 降级到窗口标题方法
+      const urlFromTitle = await this.getURLFromWindowTitle(normalizedName);
+      if (urlFromTitle) {
+        return {
+          url: urlFromTitle,
+          browserName,
+          collectionMethod: 'window_title',
+          quality: 'title_only'
+        };
+      }
+
+      return null;
+
+    } catch (error) {
+      logger.error(`[WindowsURLCollector] Failed to get URL for ${browserName}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 使用 UI Automation API 获取 URL
+   * 通过 PowerShell 调用 .NET Framework 的 UI Automation
+   */
+  private async getURLViaUIAutomation(browserName: string): Promise<string | null> {
+    try {
+      const config = WindowsURLCollector.BROWSER_CONFIG[browserName];
+      if (!config) {
+        logger.debug(`[WindowsURLCollector] No config for browser: ${browserName}`);
+        return null;
+      }
+
+      // PowerShell 脚本：使用 UI Automation 获取地址栏内容
+      const script = this.generateUIAutomationScript(config.className, config.addressBarName);
+
+      // 执行 PowerShell 脚本
+      const { stdout, stderr } = await this.executePowerShell(script, WindowsURLCollector.TIMEOUT);
+
+      if (stderr) {
+        logger.debug(`[WindowsURLCollector] PowerShell stderr: ${stderr}`);
+      }
+
+      const url = stdout.trim();
+
+      // 验证 URL 格式
+      if (url && this.isValidURL(url)) {
+        logger.debug(`[WindowsURLCollector] ✅ Got URL via UI Automation: ${url}`);
+        return url;
+      }
+
+      logger.debug(`[WindowsURLCollector] Invalid or empty URL from UI Automation`);
+      return null;
+
+    } catch (error) {
+      logger.debug(`[WindowsURLCollector] UI Automation failed:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 生成 PowerShell UI Automation 脚本
+   */
+  private generateUIAutomationScript(className: string, addressBarName: string): string {
+    return `
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+try {
+    # 创建 UI Automation 实例
+    $automation = [System.Windows.Automation.AutomationElement]
+
+    # 获取桌面根元素
+    $desktop = $automation::RootElement
+
+    # 查找浏览器窗口
+    $condition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ClassNameProperty,
+        "${className}"
+    )
+
+    $browserWindow = $desktop.FindFirst(
+        [System.Windows.Automation.TreeScope]::Children,
+        $condition
+    )
+
+    if ($null -eq $browserWindow) {
+        Write-Error "Browser window not found"
+        exit 1
+    }
+
+    # 查找地址栏（通过 Name 或 AutomationId）
+    $addressBarCondition = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::NameProperty,
+        "${addressBarName}"
+    )
+
+    $addressBar = $browserWindow.FindFirst(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        $addressBarCondition
+    )
+
+    if ($null -eq $addressBar) {
+        Write-Error "Address bar not found"
+        exit 1
+    }
+
+    # 获取地址栏的值（使用 Value Pattern）
+    $valuePattern = $addressBar.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+    $url = $valuePattern.Current.Value
+
+    if ($url) {
+        Write-Output $url
+    } else {
+        Write-Error "URL is empty"
+        exit 1
+    }
+
+} catch {
+    Write-Error $_.Exception.Message
+    exit 1
+}
+`.trim();
+  }
+
+  /**
+   * 执行 PowerShell 脚本
+   */
+  private async executePowerShell(script: string, timeout: number): Promise<{ stdout: string; stderr: string }> {
+    // 将脚本编码为 Base64（避免引号转义问题）
+    const scriptBase64 = Buffer.from(script, 'utf16le').toString('base64');
+
+    // 使用 -EncodedCommand 参数执行
+    const command = `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${scriptBase64}`;
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error('PowerShell execution timeout'));
+      }, timeout);
+
+      exec(command, { encoding: 'utf8', maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+        clearTimeout(timer);
+
+        if (error) {
+          // 即使有错误，也返回 stdout 和 stderr（可能包含有用信息）
+          resolve({ stdout: stdout || '', stderr: stderr || error.message });
+        } else {
+          resolve({ stdout, stderr });
+        }
+      });
+    });
+  }
+
+  /**
+   * 从窗口标题提取 URL（降级方法）
+   */
+  private async getURLFromWindowTitle(browserName: string): Promise<string | null> {
+    try {
+      // 使用 PowerShell 获取活动窗口标题
+      const script = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WindowHelper {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int count);
+
+    public static string GetActiveWindowTitle() {
+        IntPtr handle = GetForegroundWindow();
+        System.Text.StringBuilder title = new System.Text.StringBuilder(256);
+        GetWindowText(handle, title, 256);
+        return title.ToString();
+    }
+}
+"@
+
+[WindowHelper]::GetActiveWindowTitle()
+`.trim();
+
+      const { stdout } = await this.executePowerShell(script, 3000);
+      const title = stdout.trim();
+
+      if (title) {
+        logger.debug(`[WindowsURLCollector] Window title: ${title}`);
+        return `[Title] ${title}`;
+      }
+
+      return null;
+
+    } catch (error) {
+      logger.debug(`[WindowsURLCollector] Failed to get window title:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 验证 URL 格式
+   */
+  private isValidURL(url: string): boolean {
+    // 检查基本 URL 格式
+    const urlPattern = /^(https?:\/\/|chrome:\/\/|edge:\/\/|about:|file:\/\/)/i;
+    return urlPattern.test(url) && url.length > 10;
+  }
+}
+
+export default WindowsURLCollector;
