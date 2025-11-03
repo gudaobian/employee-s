@@ -14,6 +14,8 @@ import sharp from 'sharp';
 import { PlatformAdapterBase } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
 import { NativeEventAdapter } from './native-event-adapter';
+import { MacOSPermissionChecker } from '../macos/permission-checker';
+import { logURLCollected, logURLCollectFailed } from '../../common/utils/url-collect-logger';
 
 const execAsync = promisify(exec);
 
@@ -31,6 +33,13 @@ export class DarwinAdapter extends PlatformAdapterBase {
   private eventMonitorProcess: any = null;
   private activityMonitorTimer?: NodeJS.Timeout;
   private nativeEventAdapter: NativeEventAdapter | null = null;
+  private permissionChecker: MacOSPermissionChecker;
+  private permissionChecked = false;
+
+  constructor() {
+    super();
+    this.permissionChecker = new MacOSPermissionChecker();
+  }
 
   // === 初始化方法 ===
 
@@ -1216,6 +1225,113 @@ export class DarwinAdapter extends PlatformAdapterBase {
     }
   }
 
+  // === 权限检查助手方法 ===
+
+  /**
+   * 检查并确保有辅助功能权限
+   * 在执行需要辅助功能权限的操作前调用此方法
+   *
+   * @throws {Error} 如果权限未授予，抛出包含详细指南的错误
+   * @example
+   * ```typescript
+   * // 在URL收集或窗口信息获取前使用
+   * async getActiveURL(browserName: string): Promise<string | null> {
+   *   await this.ensureAccessibilityPermission();
+   *   // 继续执行需要权限的操作
+   * }
+   * ```
+   */
+  async ensureAccessibilityPermission(): Promise<void> {
+    // 如果已经检查过，直接返回（避免重复检查）
+    if (this.permissionChecked) {
+      return;
+    }
+
+    logger.info('[macOS] 检查辅助功能权限...');
+    const result = await this.permissionChecker.checkAccessibilityPermission();
+    this.permissionChecked = true;
+
+    if (!result.granted) {
+      logger.error('[macOS] 辅助功能权限未授权');
+      logger.info(result.message);
+
+      // 抛出特定的错误类型，便于上层处理
+      const error = new Error('ACCESSIBILITY_PERMISSION_REQUIRED');
+      (error as any).permissionGuide = result.message;
+      throw error;
+    }
+
+    logger.info('[macOS] ✅ 辅助功能权限检查通过');
+  }
+
+  /**
+   * 获取辅助功能权限的详细指南
+   * 可用于向用户显示权限设置说明
+   */
+  async getPermissionGuide(): Promise<string> {
+    const result = await this.permissionChecker.checkAccessibilityPermission();
+    return result.message;
+  }
+
+  /**
+   * 尝试打开系统偏好设置到辅助功能页面
+   * 方便用户快速授权
+   */
+  async openPermissionSettings(): Promise<boolean> {
+    return await this.permissionChecker.openAccessibilitySettings();
+  }
+
+  // === 浏览器URL采集 ===
+
+  /**
+   * 获取活动浏览器的URL
+   * @param browserName 浏览器名称 (Safari, Chrome, Firefox, Edge, Brave等)
+   * @returns URL字符串，失败返回null
+   */
+  async getActiveURL(browserName: string): Promise<string | null> {
+    try {
+      // 确保有辅助功能权限
+      await this.ensureAccessibilityPermission();
+
+      // 动态导入URL采集器
+      const { DarwinURLCollector } = await import('./url-collector');
+      const collector = new DarwinURLCollector();
+
+      // 采集URL
+      const urlInfo = await collector.getActiveURL(browserName);
+
+      if (urlInfo) {
+        // 记录成功的URL采集
+        logURLCollected(browserName, urlInfo.url, {
+          collectionMethod: urlInfo.collectionMethod,
+          quality: urlInfo.quality,
+          privacyLevel: 'full' // darwin-adapter层面认为是完整URL
+        });
+        return urlInfo.url;
+      } else {
+        // 记录采集失败
+        logURLCollectFailed(browserName, 'URL collector returned null');
+        return null;
+      }
+
+    } catch (error: any) {
+      const errorMsg = error.message || String(error);
+
+      if (error.message === 'ACCESSIBILITY_PERMISSION_REQUIRED') {
+        logger.error('[URL Collection] 需要辅助功能权限');
+        logger.info(error.permissionGuide);
+        logURLCollectFailed(browserName, 'Accessibility permission required');
+
+        // 可选：自动打开设置
+        // await this.openPermissionSettings();
+      } else {
+        logger.error('[URL Collection] 获取URL失败:', error);
+        logURLCollectFailed(browserName, errorMsg);
+      }
+      return null;
+    }
+  }
+
   // === 平台能力 ===
 
   getPlatformCapabilities(): string[] {
@@ -1227,7 +1343,8 @@ export class DarwinAdapter extends PlatformAdapterBase {
       'network_monitoring',
       'real_event_monitoring', // 新增：真实事件监听能力
       'accessibility_check',
-      'native_permissions'
+      'native_permissions',
+      'browser_url_collection' // 新增：浏览器URL采集能力
     ];
   }
 
