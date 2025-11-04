@@ -39,6 +39,7 @@
     "platforms/**/*",
     "electron/**/*",
     "types/**/*",
+    "native-event-monitor-win/**/*",
     "*.ts"
   ],
   "typeRoots": [
