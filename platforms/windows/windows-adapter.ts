@@ -27,7 +27,7 @@ const execAsync = promisify(exec);
 
 export class WindowsAdapter extends PlatformAdapterBase {
   // 版本标识 - 用于验证是否加载了最新代码
-  public readonly VERSION = '1.0.73-rebuild-fixed';
+  public readonly VERSION = '1.0.74-precompiled';
 
   private activityMonitorTimer?: NodeJS.Timeout;
   private lastActivityData: ActivityData | null = null;
