@@ -347,20 +347,26 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
     });
 
     // ✅ 新增：传输升级事件（engine 级别）
-    this.socket.io.engine.on('upgrade', (transport: any) => {
-      console.log('[WEBSOCKET] 🚀 Transport upgraded', {
-        from: 'polling',
-        to: transport.name
-      });
-    });
+    // 注意：engine 只在连接建立后才可用，需要在 connect 事件中设置
+    this.socket.once('connect', () => {
+      if (this.socket?.io?.engine) {
+        this.socket.io.engine.on('upgrade', (transport: any) => {
+          console.log('[WEBSOCKET] 🚀 Transport upgraded', {
+            from: 'polling',
+            to: transport.name
+          });
+        });
 
-    // ✅ 新增：Ping/Pong 监控（engine 级别）
-    this.socket.io.engine.on('ping', () => {
-      console.log('[WEBSOCKET] 📶 Ping sent');
-    });
+        this.socket.io.engine.on('ping', () => {
+          console.log('[WEBSOCKET] 📶 Ping sent');
+        });
 
-    this.socket.io.engine.on('pong', () => {
-      console.log('[WEBSOCKET] 📶 Pong received');
+        this.socket.io.engine.on('pong', () => {
+          console.log('[WEBSOCKET] 📶 Pong received');
+        });
+      } else {
+        console.warn('[WEBSOCKET] ⚠️ Engine not available, skipping engine-level event listeners');
+      }
     });
 
     // Socket.IO 事件监听 - 监听后端发送的 'client:config-updated' 事件
