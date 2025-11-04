@@ -305,9 +305,15 @@ jobs:
           Write-Host "📦 Installing native module dependencies..."
           npm install
 
-          # 重新编译
-          Write-Host "🔨 Compiling native module..."
-          npm run build
+          # 🔴 关键：使用electron-rebuild而不是node-gyp
+          Write-Host "🔨 Rebuilding for Electron 28 (ABI 108)..."
+          Write-Host "   Using electron-rebuild to compile for Electron's Node.js ABI"
+
+          cd ..
+          npx electron-rebuild --version=28.2.10 --force --module-dir=native-event-monitor-win
+
+          cd native-event-monitor-win
+          Write-Host "✅ Native module rebuilt for Electron 28"
 
           # 验证新编译的文件（检查时间戳）
           Write-Host "🔍 Verifying newly compiled module..."
