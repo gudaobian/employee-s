@@ -81,13 +81,18 @@ export class URLCollectorService extends EventEmitter {
 
       // 3. 获取原始URL
       logger.info(`[URLCollector] Calling platform adapter getActiveURL for: ${browserName}`);
+
+      // 验证适配器版本
+      const adapterVersion = (this.platformAdapter as any).VERSION;
+      logger.info(`[URLCollector] Platform adapter version: ${adapterVersion || 'UNKNOWN (old version)'}`);
       logger.info(`[URLCollector] getActiveURL method exists: ${typeof this.platformAdapter.getActiveURL === 'function'}`);
 
       if (typeof this.platformAdapter.getActiveURL !== 'function') {
         logger.error('[URLCollector] ❌ getActiveURL method not found on platform adapter!');
+        logger.error('[URLCollector] ⚠️ This indicates you are running an OLD version of WindowsAdapter');
         logger.error('[URLCollector] Platform adapter type:', Object.prototype.toString.call(this.platformAdapter));
         logger.error('[URLCollector] Available methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.platformAdapter)));
-        logURLCollectFailed(browserName, 'getActiveURL method not implemented in platform adapter');
+        logURLCollectFailed(browserName, 'getActiveURL method not implemented - OLD WindowsAdapter version');
         return null;
       }
 

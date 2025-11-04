@@ -26,6 +26,9 @@ import { WindowsPermissionChecker } from './permission-checker';
 const execAsync = promisify(exec);
 
 export class WindowsAdapter extends PlatformAdapterBase {
+  // 版本标识 - 用于验证是否加载了最新代码
+  public readonly VERSION = '1.0.62-with-getActiveURL';
+
   private activityMonitorTimer?: NodeJS.Timeout;
   private lastActivityData: ActivityData | null = null;
   private nativeEventAdapter: WindowsNativeEventAdapter;
@@ -35,6 +38,7 @@ export class WindowsAdapter extends PlatformAdapterBase {
   constructor() {
     super();
     this.permissionChecker = new WindowsPermissionChecker();
+    logger.info(`[WindowsAdapter] Constructor called - VERSION: ${this.VERSION}`);
   }
 
   protected async performInitialization(): Promise<void> {
