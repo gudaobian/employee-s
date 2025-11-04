@@ -218,6 +218,7 @@ jobs:
 
       - name: Build TypeScript
         run: |
+          npm run clean
           npm run compile
 
       - name: Rebuild Windows native module for Electron 28
@@ -447,6 +448,7 @@ jobs:
 
       - name: Build TypeScript
         run: |
+          npm run clean
           npm run compile
 
       - name: Build native modules for macOS
