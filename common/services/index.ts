@@ -11,6 +11,7 @@ export { DeviceInfoService } from './device-info-service';
 export { WebSocketService } from './websocket-service';
 export { ActivityCollectorService } from './activity-collector-service';
 export { OfflineCacheService } from './offline-cache-service';
+export { PersistentCacheService } from './persistent-cache-service';
 
 // 网络相关服务
 export { NetworkMonitor } from '../utils/network-monitor';
@@ -113,6 +114,10 @@ export class ServiceManager {
 
       // 设置服务间依赖关系
       this.setupServiceIntegrations();
+
+      // 加载离线缓存快照（如果存在）
+      await this.offlineCacheService.loadFromSnapshot();
+      console.log('[SERVICE_MANAGER] Offline cache snapshot loaded');
 
       this.isInitialized = true;
       console.log('[SERVICE_MANAGER] All services initialized successfully');
@@ -245,6 +250,10 @@ export class ServiceManager {
       // 7. 停止设备信息服务
       await this.deviceInfoService.stop();
       console.log('[SERVICE_MANAGER] Device info service stopped');
+
+      // 8. 关闭离线缓存服务（保存快照）
+      await this.offlineCacheService.shutdown();
+      console.log('[SERVICE_MANAGER] Offline cache service shutdown');
 
       this.isRunning = false;
       console.log('[SERVICE_MANAGER] All services stopped');

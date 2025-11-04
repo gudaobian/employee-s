@@ -33,6 +33,9 @@ export * from './resource-manager';
 // 路径助手
 export * from './path-helper';
 
+// 内存监控器
+export * from './memory-monitor';
+
 // 便捷导出 - 常用工具的实例
 export { logger } from './logger';
 export { timerManager, managedSetTimeout, managedSetInterval, managedClear, delay } from './timer-manager';

@@ -8,7 +8,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { EventEmitter } from 'events';
 import { logger } from '../utils';
-import { PersistentCacheService } from './persistent-cache-service';
 
 export interface CachedData {
   id: string;
@@ -18,8 +17,6 @@ export interface CachedData {
   data: any;
   fingerprint: string; // 用于去重
   retryCount: number;
-  priority: number; // 优先级权重
-  size: number; // 数据大小(bytes)
 }
 
 export interface SyncResult {
@@ -44,31 +41,11 @@ export class OfflineCacheService extends EventEmitter {
   private maxCacheSize: number = 500 * 1024 * 1024; // 500MB (从100MB增加，支持20-30天离线)
   private maxItemAge: number = 30 * 24 * 60 * 60 * 1000; // 30天 (从7天延长，降低过期删除风险)
   private maxRetryCount: number = 10; // 10次 (从3次增加，降低80%数据丢失风险)
-  private readonly MAX_CACHE_ITEMS = 500; // 最大缓存项数
-  private readonly MAX_CACHE_AGE = 5 * 60 * 60 * 1000; // 5小时缓存过期时间（快速同步场景）
-  private readonly MAX_CACHE_MEMORY_MB = 100; // 最大内存使用100MB
-
-  // 优先级权重配置
-  private readonly PRIORITY_WEIGHTS = {
-    screenshot: 3, // 截图最高优先级
-    activity: 2,   // 活动记录中优先级
-    process: 1,    // 进程信息低优先级
-    other: 0       // 其他数据最低优先级
-  };
-
-  private persistentCache: PersistentCacheService;
-  private autoSaveInterval: NodeJS.Timeout | null = null;
 
   constructor(cacheDirectory?: string) {
     super();
     this.cacheDir = cacheDirectory || this.getDefaultCacheDirectory();
     this.ensureCacheDirectory();
-
-    // 初始化持久化缓存服务
-    this.persistentCache = new PersistentCacheService(this.cacheDir);
-
-    // 启动自动保存快照
-    this.startAutoSave();
   }
 
   /**
@@ -110,7 +87,6 @@ export class OfflineCacheService extends EventEmitter {
    */
   async cacheData(type: CachedData['type'], deviceId: string, data: any): Promise<string> {
     try {
-      const dataString = JSON.stringify(data);
       const cachedItem: CachedData = {
         id: this.generateId(),
         type,
@@ -118,9 +94,7 @@ export class OfflineCacheService extends EventEmitter {
         deviceId,
         data,
         fingerprint: this.generateFingerprint(type, data),
-        retryCount: 0,
-        priority: this.PRIORITY_WEIGHTS[type] || 0,
-        size: this.estimateDataSize(data)
+        retryCount: 0
       };
 
       // 检查是否重复
@@ -137,13 +111,10 @@ export class OfflineCacheService extends EventEmitter {
         });
       });
 
-      logger.debug(`[OFFLINE_CACHE] Cached ${type} data: ${cachedItem.id}`, {
-        priority: cachedItem.priority,
-        size: cachedItem.size
-      });
-      this.emit('data-cached', { id: cachedItem.id, type, size: cachedItem.size });
+      logger.debug(`[OFFLINE_CACHE] Cached ${type} data: ${cachedItem.id}`);
+      this.emit('data-cached', { id: cachedItem.id, type, size: JSON.stringify(cachedItem).length });
 
-      // 检查缓存大小和清理旧数据（使用增强的优先级清理）
+      // 检查缓存大小和清理旧数据
       await this.cleanupIfNeeded();
 
       return cachedItem.id;
@@ -362,133 +333,35 @@ export class OfflineCacheService extends EventEmitter {
   }
 
   /**
-   * 清理过期和超大缓存（增强优先级清理）
+   * 清理过期和超大缓存
    */
   private async cleanupIfNeeded(): Promise<void> {
     try {
+      const stats = await this.getCacheStats();
+      
+      // 清理过期数据
+      const now = Date.now();
       const allData = await this.getAllCachedData();
-
-      // 按数量清理
-      if (allData.length > this.MAX_CACHE_ITEMS) {
-        await this.cleanupByCount(allData);
+      const expiredIds = allData
+        .filter(item => now - item.timestamp > this.maxItemAge)
+        .map(item => item.id);
+      
+      if (expiredIds.length > 0) {
+        await this.removeCachedData(expiredIds);
+        logger.info(`[OFFLINE_CACHE] Cleaned up ${expiredIds.length} expired cache items`);
       }
 
-      // 按年龄清理（使用快速同步5小时策略）
-      await this.cleanupByAge(allData);
-
-      // 按内存清理
-      await this.cleanupByMemory(allData);
-
-      // 清理长期过期数据（30天备份策略）
-      await this.cleanupLongTermExpired(allData);
+      // 如果缓存超过最大大小，删除最旧的数据
+      if (stats.cacheSize > this.maxCacheSize) {
+        const sortedData = allData.sort((a, b) => a.timestamp - b.timestamp);
+        const itemsToRemove = Math.ceil(sortedData.length * 0.2); // 删除20%最旧的数据
+        const idsToRemove = sortedData.slice(0, itemsToRemove).map(item => item.id);
+        
+        await this.removeCachedData(idsToRemove);
+        logger.info(`[OFFLINE_CACHE] Cleaned up ${itemsToRemove} cache items due to size limit`);
+      }
     } catch (error) {
       logger.error('[OFFLINE_CACHE] Failed to cleanup cache:', error);
-    }
-  }
-
-  /**
-   * 按数量清理：超过500项时删除低优先级旧数据
-   */
-  private async cleanupByCount(allData: CachedData[]): Promise<void> {
-    const overCount = allData.length - this.MAX_CACHE_ITEMS;
-    if (overCount <= 0) return;
-
-    // 排序：优先级低的排前面，同优先级按时间旧的排前面
-    const sorted = allData.sort((a, b) => {
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority;
-      }
-      return a.timestamp - b.timestamp;
-    });
-
-    const idsToRemove = sorted.slice(0, overCount).map(item => item.id);
-    await this.removeCachedData(idsToRemove);
-
-    logger.info('[OFFLINE_CACHE] Cleaned by count', {
-      removed: idsToRemove.length,
-      remaining: allData.length - idsToRemove.length
-    });
-  }
-
-  /**
-   * 按年龄清理：超过5小时的数据（快速同步策略）
-   */
-  private async cleanupByAge(allData: CachedData[]): Promise<void> {
-    const now = Date.now();
-    const expiredIds = allData
-      .filter(item => now - item.timestamp > this.MAX_CACHE_AGE)
-      .map(item => item.id);
-
-    if (expiredIds.length > 0) {
-      await this.removeCachedData(expiredIds);
-      logger.info('[OFFLINE_CACHE] Cleaned by age (5h)', {
-        removed: expiredIds.length
-      });
-    }
-  }
-
-  /**
-   * 按内存清理：超过100MB时删除低优先级大文件
-   */
-  private async cleanupByMemory(allData: CachedData[]): Promise<void> {
-    const stats = await this.getCacheStats();
-    const totalSizeMB = stats.cacheSize / 1024 / 1024;
-
-    if (totalSizeMB <= this.MAX_CACHE_MEMORY_MB) return;
-
-    // 计算每项的评分：优先级高 - 大小小 = 分数高（保留）
-    const scored = allData.map(item => ({
-      ...item,
-      score: item.priority - (item.size / 1024 / 1024)
-    }));
-
-    // 分数低的排前面（优先删除）
-    scored.sort((a, b) => a.score - b.score);
-
-    const targetSizeMB = this.MAX_CACHE_MEMORY_MB * 0.8; // 清理到80%
-    let currentSizeMB = totalSizeMB;
-    const idsToRemove: string[] = [];
-
-    for (const item of scored) {
-      if (currentSizeMB <= targetSizeMB) break;
-      idsToRemove.push(item.id);
-      currentSizeMB -= item.size / 1024 / 1024;
-    }
-
-    if (idsToRemove.length > 0) {
-      await this.removeCachedData(idsToRemove);
-      logger.info('[OFFLINE_CACHE] Cleaned by memory', {
-        removed: idsToRemove.length,
-        freedMB: (totalSizeMB - currentSizeMB).toFixed(2)
-      });
-    }
-  }
-
-  /**
-   * 清理长期过期数据：超过30天的备份数据
-   */
-  private async cleanupLongTermExpired(allData: CachedData[]): Promise<void> {
-    const now = Date.now();
-    const expiredIds = allData
-      .filter(item => now - item.timestamp > this.maxItemAge)
-      .map(item => item.id);
-
-    if (expiredIds.length > 0) {
-      await this.removeCachedData(expiredIds);
-      logger.info('[OFFLINE_CACHE] Cleaned long-term expired (30d)', {
-        removed: expiredIds.length
-      });
-    }
-  }
-
-  /**
-   * 估算数据大小
-   */
-  private estimateDataSize(data: any): number {
-    try {
-      return JSON.stringify(data).length;
-    } catch {
-      return 0;
     }
   }
 
@@ -524,95 +397,5 @@ export class OfflineCacheService extends EventEmitter {
 
   private getDataFilePath(id: string): string {
     return path.join(this.cacheDir, `${id}.json`);
-  }
-
-  /**
-   * 启动自动保存快照（每5分钟）
-   */
-  private startAutoSave(): void {
-    // 每5分钟保存一次缓存快照
-    this.autoSaveInterval = setInterval(async () => {
-      try {
-        const allData = await this.getAllCachedData();
-        await this.persistentCache.saveCache(allData);
-        logger.debug('[OFFLINE_CACHE] Auto-save snapshot completed', {
-          items: allData.length
-        });
-      } catch (error) {
-        logger.error('[OFFLINE_CACHE] Auto-save failed:', error);
-      }
-    }, 5 * 60 * 1000);
-
-    logger.info('[OFFLINE_CACHE] Auto-save started (5min interval)');
-  }
-
-  /**
-   * 加载持久化快照（应用启动时调用）
-   */
-  public async loadFromSnapshot(): Promise<void> {
-    try {
-      const snapshot = await this.persistentCache.loadCache();
-
-      if (snapshot.length === 0) {
-        logger.info('[OFFLINE_CACHE] No snapshot to restore');
-        return;
-      }
-
-      // 恢复快照中的缓存项到文件系统
-      let restored = 0;
-      for (const item of snapshot) {
-        try {
-          const filePath = this.getDataFilePath(item.id);
-
-          // 如果文件已存在，跳过
-          if (fs.existsSync(filePath)) {
-            continue;
-          }
-
-          await fs.promises.writeFile(filePath, JSON.stringify(item), 'utf8');
-          restored++;
-        } catch (error) {
-          logger.warn('[OFFLINE_CACHE] Failed to restore item from snapshot:', error);
-        }
-      }
-
-      logger.info('[OFFLINE_CACHE] Snapshot restored', {
-        total: snapshot.length,
-        restored,
-        skipped: snapshot.length - restored
-      });
-    } catch (error) {
-      logger.error('[OFFLINE_CACHE] Failed to load from snapshot:', error);
-    }
-  }
-
-  /**
-   * 关闭服务（保存快照并清理）
-   */
-  public async shutdown(): Promise<void> {
-    try {
-      // 停止自动保存
-      if (this.autoSaveInterval) {
-        clearInterval(this.autoSaveInterval);
-        this.autoSaveInterval = null;
-      }
-
-      // 最后一次保存快照
-      const allData = await this.getAllCachedData();
-      await this.persistentCache.saveCache(allData);
-
-      logger.info('[OFFLINE_CACHE] Service shutdown completed', {
-        savedItems: allData.length
-      });
-    } catch (error) {
-      logger.error('[OFFLINE_CACHE] Shutdown error:', error);
-    }
-  }
-
-  /**
-   * 获取快照信息
-   */
-  public async getSnapshotInfo() {
-    return await this.persistentCache.getSnapshotInfo();
   }
 }

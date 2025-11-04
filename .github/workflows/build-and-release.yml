@@ -263,19 +263,37 @@ jobs:
           }
           npm run clean  # 再次确保清理
 
-          # 2. 清理所有 electron-builder 缓存位置
-          Write-Host "🧹 Cleaning all electron-builder caches..."
+          # 2. 清理所有 electron-builder 缓存位置（包括NSIS相关）
+          Write-Host "🧹 Cleaning all electron-builder caches (including NSIS)..."
 
           # 全局缓存
           if (Test-Path "$env:LOCALAPPDATA\electron-builder") {
             Remove-Item "$env:LOCALAPPDATA\electron-builder" -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "   ✅ Global cache cleared"
+            Write-Host "   ✅ Global electron-builder cache cleared"
+          }
+
+          # electron缓存
+          if (Test-Path "$env:LOCALAPPDATA\electron") {
+            Remove-Item "$env:LOCALAPPDATA\electron" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ Electron cache cleared"
+          }
+
+          # Temp目录中的electron-builder缓存
+          if (Test-Path "$env:TEMP\electron-builder-*") {
+            Remove-Item "$env:TEMP\electron-builder-*" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ Temp cache cleared"
           }
 
           # 项目缓存
           if (Test-Path "node_modules\.cache\electron-builder") {
             Remove-Item "node_modules\.cache\electron-builder" -Recurse -Force -ErrorAction SilentlyContinue
             Write-Host "   ✅ Project cache cleared"
+          }
+
+          # NSIS特定缓存
+          if (Test-Path "$env:LOCALAPPDATA\electron-builder\Cache\nsis") {
+            Remove-Item "$env:LOCALAPPDATA\electron-builder\Cache\nsis" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ NSIS cache cleared"
           }
 
           # 3. 清理 release 目录
@@ -495,77 +513,118 @@ jobs:
 
           Write-Host "========================================="
 
-      - name: Verify packaged app.asar contains getActiveURL (CRITICAL)
+      - name: Verify NSIS installer contains getActiveURL (CRITICAL)
         run: |
           Write-Host "========================================="
-          Write-Host "验证app.asar中的WindowsAdapter（关键步骤）"
+          Write-Host "验证NSIS安装包中的WindowsAdapter（关键步骤）"
           Write-Host "========================================="
 
-          # 安装asar工具
-          Write-Host "📦 Installing asar tool..."
+          # 安装必要工具
+          Write-Host "📦 Installing tools..."
           npm install -g asar
+          choco install 7zip -y --no-progress
 
-          # 提取app.asar
-          $asarPath = "release/win-unpacked/resources/app.asar"
-          if (Test-Path $asarPath) {
-            Write-Host "📂 Extracting app.asar..."
-            asar extract $asarPath temp-asar-extracted
+          # 找到NSIS .exe安装包
+          $exePath = Get-ChildItem "release" -Filter "*.exe" | Where-Object { $_.Name -match "Setup" } | Select-Object -First 1
 
-            # 检查WindowsAdapter
-            $extractedAdapter = "temp-asar-extracted/dist/platforms/windows/windows-adapter.js"
-            if (Test-Path $extractedAdapter) {
-              $content = Get-Content $extractedAdapter -Raw
-
-              Write-Host ""
-              Write-Host "🔍 Checking for getActiveURL method..."
-              if ($content -match "getActiveURL\s*\(") {
-                Write-Host "✅✅✅ SUCCESS: getActiveURL method found in packaged app.asar!"
-              } else {
-                Write-Host "❌❌❌ CRITICAL FAILURE: getActiveURL NOT found in packaged app.asar!"
-                Write-Host "🚨 This means electron-builder packaged OLD CODE despite clean build!"
-                Write-Host "🚨 Build MUST be aborted - users would receive broken version!"
-
-                # 显示实际内容预览
-                Write-Host ""
-                Write-Host "File preview (first 500 chars):"
-                Write-Host $content.Substring(0, [Math]::Min(500, $content.Length))
-
-                # 清理并退出
-                Remove-Item temp-asar-extracted -Recurse -Force
-                exit 1
-              }
-
-              # 检查VERSION标识
-              Write-Host ""
-              Write-Host "🔍 Checking VERSION identifier..."
-              if ($content -match 'VERSION\s*=\s*[''"]([^''"]+)[''"]') {
-                $version = $matches[1]
-                Write-Host "✅ Packaged VERSION: $version"
-
-                if ($version -match "1\.0\.6[0-9]-with-getActiveURL") {
-                  Write-Host "✅✅✅ PERFECT: Version identifier is correct!"
-                } else {
-                  Write-Host "⚠️ WARNING: Version identifier unexpected: $version"
-                }
-              } else {
-                Write-Host "⚠️ VERSION identifier not found (code might be minified)"
-              }
-
-              Write-Host ""
-              Write-Host "✅ app.asar content verification PASSED"
-            } else {
-              Write-Host "❌ WindowsAdapter not found in extracted asar at: $extractedAdapter"
-              Remove-Item temp-asar-extracted -Recurse -Force
-              exit 1
-            }
-
-            # 清理提取的文件
-            Remove-Item temp-asar-extracted -Recurse -Force
-            Write-Host "🧹 Cleanup complete"
-          } else {
-            Write-Host "❌ app.asar not found at: $asarPath"
+          if (-not $exePath) {
+            Write-Host "❌ NSIS installer not found!"
             exit 1
           }
+
+          Write-Host "📦 Found installer: $($exePath.FullName)"
+          Write-Host "   Size: $([math]::Round($exePath.Length / 1MB, 2)) MB"
+
+          # 使用7zip解压NSIS安装包
+          Write-Host "📂 Extracting NSIS installer..."
+          & "C:\Program Files\7-Zip\7z.exe" x $exePath.FullName -o"temp-nsis-extracted" -y | Out-Null
+
+          # 查找app.asar（可能在不同位置）
+          Write-Host "🔍 Searching for app.asar in extracted installer..."
+          $asarFiles = Get-ChildItem "temp-nsis-extracted" -Recurse -Filter "app.asar" -ErrorAction SilentlyContinue
+
+          if ($asarFiles.Count -eq 0) {
+            Write-Host "❌ app.asar not found in NSIS installer!"
+            Write-Host "Extracted structure:"
+            Get-ChildItem "temp-nsis-extracted" -Recurse | Select-Object -First 20 | Format-Table
+            Remove-Item "temp-nsis-extracted" -Recurse -Force
+            exit 1
+          }
+
+          Write-Host "✅ Found $($asarFiles.Count) app.asar file(s)"
+
+          # 验证第一个找到的app.asar（通常只有一个）
+          $asarPath = $asarFiles[0].FullName
+          Write-Host "📂 Extracting app.asar from installer..."
+          asar extract $asarPath temp-installer-asar-extracted
+
+          # 检查WindowsAdapter
+          $extractedAdapter = "temp-installer-asar-extracted/dist/platforms/windows/windows-adapter.js"
+          if (-not (Test-Path $extractedAdapter)) {
+            Write-Host "❌ WindowsAdapter not found at: $extractedAdapter"
+            Write-Host "Available files:"
+            Get-ChildItem "temp-installer-asar-extracted" -Recurse | Select-Object -First 20 | Format-Table
+            Remove-Item "temp-nsis-extracted" -Recurse -Force
+            Remove-Item "temp-installer-asar-extracted" -Recurse -Force
+            exit 1
+          }
+
+          $content = Get-Content $extractedAdapter -Raw
+
+          Write-Host ""
+          Write-Host "🔍 Checking for getActiveURL method in NSIS installer..."
+          if ($content -match "getActiveURL\s*\(") {
+            Write-Host "✅✅✅ SUCCESS: getActiveURL method found in NSIS installer!"
+          } else {
+            Write-Host "❌❌❌ CRITICAL FAILURE: getActiveURL NOT found in NSIS installer!"
+            Write-Host "🚨 This means the .exe installer contains OLD CODE!"
+            Write-Host "🚨 Users who download this will receive broken version!"
+            Write-Host ""
+            Write-Host "File preview (first 500 chars):"
+            Write-Host $content.Substring(0, [Math]::Min(500, $content.Length))
+            Write-Host ""
+            Write-Host "🔍 Comparing with win-unpacked version..."
+
+            # 对比win-unpacked版本
+            $unpackedAdapter = "release/win-unpacked/dist/platforms/windows/windows-adapter.js"
+            if (Test-Path $unpackedAdapter) {
+              $unpackedContent = Get-Content $unpackedAdapter -Raw
+              if ($unpackedContent -match "getActiveURL\s*\(") {
+                Write-Host "⚠️ win-unpacked has getActiveURL but NSIS installer does NOT!"
+                Write-Host "🚨 This confirms electron-builder NSIS packaging is using cached/old files!"
+              }
+            }
+
+            # 清理并退出
+            Remove-Item "temp-nsis-extracted" -Recurse -Force
+            Remove-Item "temp-installer-asar-extracted" -Recurse -Force
+            exit 1
+          }
+
+          # 检查VERSION标识
+          Write-Host ""
+          Write-Host "🔍 Checking VERSION identifier in NSIS installer..."
+          if ($content -match 'VERSION\s*=\s*[''"]([^''"]+)[''"]') {
+            $version = $matches[1]
+            Write-Host "✅ NSIS installer VERSION: $version"
+
+            if ($version -match "1\.0\.6[0-9]-with-getActiveURL") {
+              Write-Host "✅✅✅ PERFECT: Version identifier is correct!"
+            } else {
+              Write-Host "⚠️ WARNING: Version identifier unexpected: $version"
+            }
+          } else {
+            Write-Host "⚠️ VERSION identifier not found (code might be minified)"
+          }
+
+          Write-Host ""
+          Write-Host "✅ NSIS installer content verification PASSED"
+          Write-Host "✅ Users will receive correct code!"
+
+          # 清理提取的文件
+          Remove-Item "temp-nsis-extracted" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "temp-installer-asar-extracted" -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "🧹 Cleanup complete"
 
           Write-Host "========================================="
 

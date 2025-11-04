@@ -7,7 +7,6 @@ import { EventEmitter } from 'events';
 import { DeviceState, DeviceFSMService } from '../common/services/fsm/device-fsm-service';
 import { ServiceManager } from '../common/services';
 import { TamperDetectionService, TamperEvent } from '../common/services/tamper-detection-service';
-import { PowerEventService } from '../common/services/power-event-service';
 import { createPlatformAdapter, platformFactory } from '../platforms';
 import { IPlatformAdapter as PlatformIPlatformAdapter } from '../platforms/interfaces/platform-interface';
 import { IPlatformAdapter } from '../common/interfaces/platform-interface';
@@ -39,7 +38,6 @@ export class EmployeeMonitorApp extends EventEmitter {
   private platformAdapter?: IPlatformAdapter;
   private stateMachine?: DeviceFSMService;
   private tamperDetectionService?: TamperDetectionService;
-  private powerEventService?: PowerEventService;
   private healthCheckTimer?: string;
 
   constructor(config: Partial<AppConfig> = {}) {
@@ -127,10 +125,6 @@ export class EmployeeMonitorApp extends EventEmitter {
       this.emitProgress('正在启动安全监控...', 95);
       this.initializeTamperDetection();
 
-      // 6. 初始化电源事件服务
-      this.emitProgress('正在启动电源事件监控...', 97);
-      this.initializePowerEventService();
-
       this.setState(AppState.RUNNING);
       logger.info('Employee Monitor App started successfully');
       this.emitProgress('应用程序启动成功！', 100);
@@ -170,12 +164,6 @@ export class EmployeeMonitorApp extends EventEmitter {
       // 停止篡改检测服务
       if (this.tamperDetectionService) {
         this.tamperDetectionService.stop();
-      }
-
-      // 停止电源事件服务
-      if (this.powerEventService) {
-        this.powerEventService.removeAllListeners();
-        this.powerEventService = undefined;
       }
 
       // 停止状态机
@@ -534,85 +522,6 @@ export class EmployeeMonitorApp extends EventEmitter {
     } catch (error) {
       logger.error('[TamperDetection] Failed to initialize service:', error);
       // 不抛出异常，允许应用继续运行
-    }
-  }
-
-  /**
-   * 初始化电源事件服务
-   */
-  private initializePowerEventService(): void {
-    try {
-      logger.info('[POWER_EVENT] Initializing service...');
-
-      // 创建电源事件服务实例
-      this.powerEventService = new PowerEventService();
-
-      // 监听系统唤醒事件
-      this.powerEventService.on('system-resume', (event) => {
-        this.handleSystemResume(event);
-      });
-
-      // 监听系统休眠事件
-      this.powerEventService.on('system-suspend', (event) => {
-        this.handleSystemSuspend(event);
-      });
-
-      logger.info('[POWER_EVENT] Service started successfully');
-    } catch (error) {
-      logger.error('[POWER_EVENT] Failed to initialize service:', error);
-      // 不抛出异常，允许应用继续运行
-    }
-  }
-
-  /**
-   * 处理系统唤醒事件
-   */
-  private async handleSystemResume(event: {
-    timestamp: number;
-    suspendDuration: number
-  }): Promise<void> {
-    logger.info('[APP] Handling system resume', {
-      suspendDuration: `${Math.round(event.suspendDuration / 1000)}s`
-    });
-
-    // 等待 2 秒让网络稳定
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // 检查 WebSocket 连接状态
-    const wsService = this.serviceManager?.getWebSocketService();
-    if (wsService) {
-      const isConnected = wsService.isConnected();
-
-      if (!isConnected) {
-        logger.warn('[APP] WebSocket disconnected after resume, triggering reconnection');
-
-        try {
-          await wsService.connect();
-          logger.info('[APP] ✅ WebSocket reconnected successfully');
-        } catch (error) {
-          logger.error('[APP] ❌ Failed to reconnect WebSocket:', error);
-        }
-      } else {
-        logger.info('[APP] ✅ WebSocket already connected');
-      }
-    }
-
-    // 触发状态机检查
-    if (this.stateMachine) {
-      this.stateMachine.emit('network-recovered');
-    }
-  }
-
-  /**
-   * 处理系统休眠事件
-   */
-  private handleSystemSuspend(event: { timestamp: number }): void {
-    logger.info('[APP] Handling system suspend');
-
-    const wsService = this.serviceManager?.getWebSocketService();
-    if (wsService) {
-      const isConnected = wsService.isConnected();
-      logger.info('[APP] WebSocket state before suspend:', { isConnected });
     }
   }
 

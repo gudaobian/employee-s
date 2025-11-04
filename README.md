@@ -178,6 +178,90 @@ employee-monitor-new config show
 4. 编写单元测试
 5. 更新文档
 
+## 🌐 Browser URL Collection
+
+### Features
+
+- ✅ Privacy-first URL sanitization
+- ✅ Cross-platform permission detection
+- ✅ Firefox multi-level fallback strategy
+- ✅ Tamper detection and monitoring
+- ✅ GDPR-compliant data handling
+
+### Quick Start
+
+```bash
+# Verify system requirements
+npm run test:health
+
+# Run URL collection
+npm run dev
+
+# Run integration tests
+npm test
+
+# Performance benchmarks
+npm run test:performance
+```
+
+### Platform Support
+
+| Platform | Browser | Success Rate | Notes |
+|----------|---------|--------------|-------|
+| macOS | Safari | 85-95% | Requires Accessibility permission |
+| macOS | Chrome | 80-90% | Requires Accessibility permission |
+| macOS | Firefox | 40-60% | Best effort, multi-fallback |
+| macOS | Edge | 75-85% | Requires Accessibility permission |
+| Windows | Chrome | 75-85% | Requires UI Automation |
+| Windows | Edge | 75-85% | Requires UI Automation |
+| Windows | Firefox | 50-70% | Best effort |
+
+### Privacy Protection
+
+All URLs are sanitized:
+- Query parameters stripped (except whitelist)
+- Sensitive domains redacted (email, banking, healthcare)
+- Pattern-based filtering (tokens, passwords, API keys)
+- Configurable privacy levels (Minimal, Default, Strict)
+
+**Example**:
+```typescript
+// Input
+https://example.com/api?token=abc123&page=1
+
+// Output (with DEFAULT_PRIVACY_CONFIG)
+https://example.com/api?page=1
+
+// Sensitive domain input
+https://mail.google.com/mail/u/0/#inbox
+
+// Output
+[REDACTED_SENSITIVE]
+```
+
+### Documentation
+
+- 📖 [Deployment Guide](docs/deployment-guide.md) - Complete deployment instructions for macOS and Windows
+- 🔧 [Troubleshooting Guide](docs/troubleshooting.md) - Solutions for common issues
+- 🧪 [Testing Guide](test/integration/browser-url-collection.test.ts) - Integration test examples
+
+### Testing
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- test/integration/browser-url-collection.test.ts
+npm test -- test/integration/firefox-collection.test.ts
+npm test -- test/unit/privacy-helper.test.ts
+
+# Performance benchmarks
+npm run test:performance
+```
+
+---
+
 ## 📄 许可证
 
 MIT License

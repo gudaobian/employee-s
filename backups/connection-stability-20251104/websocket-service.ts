@@ -186,48 +186,35 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
     try {
       const url = this.websocketUrl!;
       const config = this.configService.getConfig();
-
+      
       // 确保 deviceId 存在
       if (!config.deviceId) {
         throw new Error('Device ID is required for Socket.IO connection');
       }
-
-      // Socket.IO 连接选项 - 增强的重连配置
+      
+      // Socket.IO 连接选项 - 针对打包环境优化
       const options = {
-        // ✅ 增强传输配置 - 支持降级到轮询
-        transports: ['websocket', 'polling'], // WebSocket优先，失败时降级到polling
+        transports: ['polling', 'websocket'], // 先尝试 polling，再升级到 websocket
         upgrade: true, // 允许传输升级
-        rememberUpgrade: true, // ✅ 记住升级，提高性能
-
-        // 连接超时配置
+        rememberUpgrade: false, // 不记住升级，避免缓存问题
         timeout: 20000, // 连接超时 20 秒
-
-        // ✅ 增强重连配置 - 无限重试
         reconnection: true, // 启用自动重连
-        reconnectionAttempts: Infinity, // ✅ 无限重试（原来是 5）
+        reconnectionAttempts: 5, // 最大重连次数
         reconnectionDelay: 1000, // 重连延迟
-        reconnectionDelayMax: 10000, // ✅ 最大重连延迟 10s（原来是 5s）
+        reconnectionDelayMax: 5000, // 最大重连延迟
         randomizationFactor: 0.5, // 重连延迟随机化
-
-        // ✅ 新增配置 - 连接管理优化
-        forceNew: false, // ✅ 复用连接（原来是 true）
-        multiplex: true, // ✅ 启用多路复用
-
-        // 消息缓冲配置
-        maxHttpBufferSize: 10 * 1024 * 1024, // 增加最大消息大小到 10MB（用于截图传输）
-
-        // 认证配置
+        maxHttpBufferSize: 10 * 1024 * 1024, // 🔧 增加最大消息大小到 10MB（用于截图传输）
         auth: {
           deviceId: config.deviceId,
           // token 是可选的，设备可以无token连接
           token: (config as any).authToken || (config as any).token || undefined
         },
-
-        autoConnect: false
+        autoConnect: false,
+        // 强制使用新连接，避免缓存问题
+        forceNew: true
       };
-
+      
       console.log(`[WEBSOCKET] Creating Socket.IO client for device: ${config.deviceId}`);
-      console.log(`[WEBSOCKET] Enhanced reconnection config: reconnectionAttempts=Infinity, reconnectionDelayMax=10000ms`);
       return io(url, options);
     } catch (error) {
       console.error('[WEBSOCKET] Failed to create Socket.IO client:', error);
@@ -269,11 +256,8 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
     if (!this.socket) return;
 
     this.socket.on('connect', () => {
-      console.log('[WEBSOCKET] ✅ Socket.IO connection established', {
-        socketId: this.socket?.id,
-        transport: this.socket?.io.engine.transport.name
-      });
-
+      console.log('[WEBSOCKET] Socket.IO connection established');
+      
       this.isConnecting = false;
       this.reconnectAttempts = 0;
       this.stats.connectedAt = new Date();
@@ -290,9 +274,9 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
 
     this.socket.on('disconnect', (reason: string) => {
       console.log(`[WEBSOCKET] Socket.IO disconnected: ${reason}`);
-
+      
       this.isConnecting = false;
-
+      
       this.emit('disconnected', { reason });
 
       // 自动重连
@@ -329,38 +313,6 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
 
       this.isConnecting = false;
       this.handleConnectionError(error);
-    });
-
-    // ✅ 新增：重连尝试事件
-    this.socket.on('reconnect_attempt', (attemptNumber: number) => {
-      this.reconnectAttempts = attemptNumber;
-      console.log('[WEBSOCKET] 🔄 Reconnect attempt', { attemptNumber });
-    });
-
-    // ✅ 新增：重连成功事件
-    this.socket.on('reconnect', (attemptNumber: number) => {
-      console.log('[WEBSOCKET] ✅ Reconnected successfully', {
-        attempts: attemptNumber,
-        transport: this.socket?.io.engine.transport.name
-      });
-      this.emit('reconnected');
-    });
-
-    // ✅ 新增：传输升级事件（engine 级别）
-    this.socket.io.engine.on('upgrade', (transport: any) => {
-      console.log('[WEBSOCKET] 🚀 Transport upgraded', {
-        from: 'polling',
-        to: transport.name
-      });
-    });
-
-    // ✅ 新增：Ping/Pong 监控（engine 级别）
-    this.socket.io.engine.on('ping', () => {
-      console.log('[WEBSOCKET] 📶 Ping sent');
-    });
-
-    this.socket.io.engine.on('pong', () => {
-      console.log('[WEBSOCKET] 📶 Pong received');
     });
 
     // Socket.IO 事件监听 - 监听后端发送的 'client:config-updated' 事件
@@ -825,25 +777,6 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
         }, 2000);
       }
     }
-  }
-
-  /**
-   * 手动触发重连（用于系统唤醒等场景）
-   */
-  async reconnect(): Promise<void> {
-    console.log('[WEBSOCKET] Manual reconnection triggered');
-
-    if (this.socket?.connected) {
-      console.log('[WEBSOCKET] Already connected, no need to reconnect');
-      return;
-    }
-
-    if (this.socket) {
-      this.socket.disconnect();
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    await this.connect();
   }
 
   /**

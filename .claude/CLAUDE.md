@@ -116,3 +116,248 @@ The Employee Client includes platform-specific native modules:
 4. Register in platform factory
 
 This component focuses on cross-platform desktop application development with sophisticated state management and native system integration.
+
+---
+
+## Browser URL Collection System
+
+### Overview
+
+Recent enhancements (2025-11-03) added comprehensive browser URL collection with privacy protection, permission handling, and multi-browser support.
+
+### Key Components
+
+#### 1. Privacy Enhancement Module
+- **File**: `common/utils/privacy-helper.ts`
+- **Features**:
+  - Query parameter stripping with whitelist support
+  - Sensitive domain redaction (email, banking, healthcare)
+  - Pattern-based filtering (tokens, passwords, API keys)
+  - Configurable privacy levels (Minimal, Default, Strict)
+
+```typescript
+// Example usage
+import { sanitizeUrl } from '@common/utils/privacy-helper';
+import { DEFAULT_PRIVACY_CONFIG } from '@common/config/privacy-config';
+
+const rawUrl = 'https://example.com/api?token=abc123&page=1';
+const sanitized = sanitizeUrl(rawUrl, DEFAULT_PRIVACY_CONFIG);
+// Output: 'https://example.com/api?page=1'
+```
+
+#### 2. Permission Detection
+- **macOS**: `platforms/macos/permission-checker.ts`
+  - Checks Accessibility permission
+  - Provides user guidance for granting permission
+  - Returns permission status for UI/logging
+
+- **Windows**: `platforms/windows/permission-checker.ts`
+  - Checks UI Automation service availability
+  - Verifies service running status
+  - Provides troubleshooting guidance
+
+```typescript
+// Example usage
+const checker = new MacOSPermissionChecker();
+const hasPermission = await checker.checkPermission();
+
+if (!hasPermission) {
+  console.log(checker.getPermissionGuidance());
+}
+```
+
+#### 3. Firefox Multi-Level Fallback
+- **File**: `platforms/darwin/url-collector.ts`
+- **Strategy**:
+  1. **Level 1**: AppleScript (30-50% success, best quality)
+  2. **Level 2**: Window title extraction (40-60% success)
+  3. **Level 3**: History fallback (planned, not implemented)
+
+- **Expected Success Rate**: 40-60% combined
+- **Performance**: <5 seconds total (including all fallbacks)
+
+```typescript
+// Fallback implementation (simplified)
+async getFirefoxURL(): Promise<URLResult | null> {
+  // Try AppleScript first
+  const appleScriptResult = await this.tryAppleScript();
+  if (appleScriptResult) return appleScriptResult;
+
+  // Fallback to window title
+  const windowTitleResult = await this.tryWindowTitle();
+  if (windowTitleResult) return windowTitleResult;
+
+  // All methods failed
+  return null;
+}
+```
+
+#### 4. Tamper Detection Service
+- **File**: `common/services/tamper-detection-service.ts`
+- **Features**:
+  - Monitors permission status changes
+  - Detects permission revocation at runtime
+  - Alerts on security-relevant changes
+  - Periodic health checks (every 60 seconds)
+
+```typescript
+// Example usage
+const tamperDetection = new TamperDetectionService();
+
+tamperDetection.on('permission-revoked', () => {
+  console.error('Security Alert: Permission revoked!');
+  // Handle gracefully
+});
+
+await tamperDetection.start();
+```
+
+### Testing Infrastructure
+
+#### 1. Comprehensive Integration Tests
+- **File**: `test/integration/browser-url-collection.test.ts`
+- **Coverage**:
+  - Cross-platform compatibility matrix
+  - Browser-specific collection tests
+  - Permission detection & handling
+  - Privacy protection integration
+  - Performance & reliability tests
+  - Error recovery & fallbacks
+
+```bash
+# Run integration tests
+npm test -- test/integration/browser-url-collection.test.ts
+
+# Run Firefox-specific tests
+npm test -- test/integration/firefox-collection.test.ts
+
+# Run privacy tests
+npm test -- test/unit/privacy-helper.test.ts
+```
+
+#### 2. Performance Benchmarks
+- **File**: `test/performance/benchmark.ts`
+- **Metrics**:
+  - P50, P95, P99 latency percentiles
+  - Throughput (operations per second)
+  - Success rates by browser
+  - Memory usage tracking
+
+```bash
+# Run all performance benchmarks
+npm run test:performance
+
+# Run specific benchmark
+node test/performance/benchmark.ts Chrome
+```
+
+**Performance Targets**:
+- P50: ≤ 60ms
+- P95: ≤ 250ms
+- P99: ≤ 1000ms
+- Throughput: ≥ 20 ops/sec
+- Success Rate: ≥ 70% (except Firefox: ≥40%)
+
+#### 3. Accuracy Metrics System
+- **File**: `common/metrics/accuracy-metrics.ts`
+- **Features**:
+  - Real-time metrics collection
+  - Log parsing and analysis
+  - Daily accuracy reports
+  - Automatic alerting on degraded performance
+  - Historical trend analysis
+
+```bash
+# Generate daily accuracy report
+node common/metrics/accuracy-metrics.js
+
+# Example output:
+# Date: 2025-11-03
+# Overall Success Rate: 82.5%
+# Total Attempts: 1,234
+# Critical Issues: None
+```
+
+### Platform Support & Success Rates
+
+| Platform | Browser | Success Rate | Collection Method | Notes |
+|----------|---------|--------------|-------------------|-------|
+| macOS | Safari | 85-95% | AppleScript | Most reliable |
+| macOS | Chrome | 80-90% | AppleScript | Highly reliable |
+| macOS | Firefox | 40-60% | Multi-fallback | Best effort |
+| macOS | Edge | 75-85% | AppleScript | Chromium-based |
+| Windows | Chrome | 75-85% | UI Automation | Reliable |
+| Windows | Edge | 75-85% | UI Automation | Native browser |
+| Windows | Firefox | 50-70% | Multi-fallback | Best effort |
+
+### Privacy Configuration
+
+#### Default Configuration
+```typescript
+{
+  stripQueryParams: true,
+  queryParamWhitelist: ['page', 'lang', 'tab', 'view'],
+  sensitivePatterns: [
+    /token=/i,
+    /api[_-]?key=/i,
+    /password=/i,
+    /secret=/i,
+    /\d{13,19}/ // Credit cards
+  ]
+}
+```
+
+#### Custom Configuration
+Edit `common/config/privacy-config.ts` to add:
+- Corporate domain whitelist
+- Custom query parameter whitelist
+- Additional sensitive patterns
+- Privacy level adjustments
+
+### Deployment
+
+#### macOS
+1. Request Accessibility permission (System Preferences → Security & Privacy → Privacy → Accessibility)
+2. Restart application after granting permission
+3. Verify with `npm run test:health`
+
+#### Windows
+1. Enable UI Automation service (`services.msc` → "Interactive Services Detection")
+2. Set service to Automatic startup
+3. Verify with `npm run test:health`
+
+### Troubleshooting
+
+Common issues and solutions documented in:
+- 📖 [Deployment Guide](../docs/deployment-guide.md)
+- 🔧 [Troubleshooting Guide](../docs/troubleshooting.md)
+
+Quick diagnostics:
+```bash
+# Health check
+npm run test:health
+
+# Performance check
+npm run test:performance
+
+# View recent logs (macOS)
+tail -f ~/Library/Logs/employee-monitor/url-collection.log
+
+# View recent logs (Windows)
+Get-Content "$env:APPDATA\employee-monitor\logs\url-collection.log" -Tail 20 -Wait
+```
+
+### Known Limitations
+
+1. **Firefox Collection**: 40-60% success rate is expected due to AppleScript instability
+2. **Private/Incognito Windows**: Cannot collect URLs from private browsing (browser security restriction)
+3. **Performance**: P95 latency may exceed 250ms on slower systems or during high load
+4. **Permissions**: User must manually grant system permissions (cannot be automated)
+
+### Future Enhancements
+
+- [ ] Browser extension for enterprise deployments (100% Firefox reliability)
+- [ ] History-based fallback implementation (Level 3)
+- [ ] Real-time metrics dashboard
+- [ ] Automated permission request flows
+- [ ] Support for additional browsers (Brave, Opera, Vivaldi)

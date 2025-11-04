@@ -15,6 +15,7 @@ import { ActivityCollectorService } from '../../activity-collector-service';
 import { OfflineCacheService } from '../../offline-cache-service';
 import { NetworkMonitor } from '../../../utils/network-monitor';
 import { ErrorRecoveryService } from '../../../utils/error-recovery';
+import { MemoryMonitor } from '../../../utils/memory-monitor';
 import { logger } from '../../../utils';
 import { EventEmitter } from 'events';
 
@@ -285,6 +286,12 @@ export class DataCollectStateHandler extends BaseStateHandler {
 
       // WebSocket连接由全局服务管理,无需在此处断开
       logger.info('[DATA_COLLECT] WebSocket connection managed by global service');
+
+      // Clear temporary data references to help GC
+      this.lastScreenshotData = null;
+
+      // Log memory usage after cleanup
+      MemoryMonitor.logMemoryUsage('数据采集停止后');
 
       logger.info('[DATA_COLLECT] Data collection stopped');
     } catch (error: any) {
@@ -1834,6 +1841,21 @@ export class DataCollectStateHandler extends BaseStateHandler {
     try {
       logger.info('[DATA_COLLECT] 📊 handleOnlineCollection() - isCollecting: ' + this.isCollecting);
 
+      // Check memory usage before collection
+      const memStatus = MemoryMonitor.checkMemoryThreshold();
+      MemoryMonitor.logMemoryUsage('数据采集前');
+
+      if (memStatus === 'critical') {
+        logger.warn('[DATA_COLLECT] ⚠️ 内存使用过高，暂停本次采集');
+        MemoryMonitor.triggerGC();
+        return {
+          success: true,
+          nextState: DeviceState.DATA_COLLECT,
+          reason: 'Memory critical, skipping collection cycle',
+          retryDelay: 60000 // Retry after 1 minute
+        };
+      }
+
       // 确保 WebSocket 持久连接已建立（每次execute都检查）
       logger.info('[DATA_COLLECT] 🔌 Ensuring WebSocket persistent connection...');
       if (!this.websocketService) {
@@ -1892,6 +1914,21 @@ export class DataCollectStateHandler extends BaseStateHandler {
   private async handleOfflineCollection(context: FSMContext): Promise<StateHandlerResult> {
     try {
       logger.info('[DATA_COLLECT] 离线模式数据收集');
+
+      // Check memory usage before collection
+      const memStatus = MemoryMonitor.checkMemoryThreshold();
+      MemoryMonitor.logMemoryUsage('离线数据采集前');
+
+      if (memStatus === 'critical') {
+        logger.warn('[DATA_COLLECT] ⚠️ 内存使用过高，暂停本次离线采集');
+        MemoryMonitor.triggerGC();
+        return {
+          success: true,
+          nextState: DeviceState.DATA_COLLECT,
+          reason: 'Memory critical, skipping offline collection cycle',
+          retryDelay: 60000 // Retry after 1 minute
+        };
+      }
 
       // 1. 启动网络监控（如果尚未启动）
       if (!this.networkCheckInterval) {

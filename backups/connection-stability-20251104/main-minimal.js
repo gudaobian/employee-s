@@ -9,10 +9,6 @@ const os = require('os');
 const { WindowsNativeInstaller } = require('./windows-native-installer');
 const UnifiedLogManager = require('./unified-log-manager');
 
-// Enable manual garbage collection
-app.commandLine.appendSwitch('--expose-gc');
-app.commandLine.appendSwitch('--max-old-space-size=512');
-
 // 全局变量
 let mainWindow = null;
 let permissionWizardWindow = null;
@@ -24,7 +20,6 @@ let currentState = 'INIT';
 let manuallyPaused = false; // 添加手动暂停标志，初始为false允许启动
 let windowsNativeInstaller = null;
 let logManager = null; // 日志管理器
-let memoryMonitorInterval = null;
 
 // 检查启动参数
 const isStartMinimized = process.argv.includes('--start-minimized');
@@ -120,26 +115,7 @@ app.whenReady().then(() => {
             }
         }, 3000); // 等待3秒确保所有组件初始化完成
     }
-
-    // Memory monitoring (every 5 minutes)
-    memoryMonitorInterval = setInterval(() => {
-        const memUsage = process.memoryUsage();
-        const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-        const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
-
-        console.log(`[MEMORY] Heap: ${heapUsedMB}MB / ${heapTotalMB}MB`);
-
-        // Trigger GC if heap usage exceeds 300MB
-        if (heapUsedMB > 300 && global.gc) {
-            console.log('[MEMORY] Triggering GC (heap > 300MB)');
-            global.gc();
-
-            const afterGC = process.memoryUsage();
-            const afterGCMB = Math.round(afterGC.heapUsed / 1024 / 1024);
-            console.log(`[MEMORY] After GC: ${afterGCMB}MB`);
-        }
-    }, 5 * 60 * 1000); // 5 minutes
-
+    
     // 尝试导入主应用
     try {
         sendLogToRenderer('[INIT] 正在尝试加载主应用模块...');
@@ -2427,17 +2403,10 @@ async function gracefulShutdown(signal, error) {
 async function cleanup() {
     console.log('Starting cleanup process...');
     sendLogToRenderer('开始清理资源...');
-
+    
     const cleanupTasks = [];
-
+    
     try {
-        // Clear memory monitor interval
-        if (memoryMonitorInterval) {
-            clearInterval(memoryMonitorInterval);
-            memoryMonitorInterval = null;
-            console.log('[MEMORY] Memory monitor cleared');
-        }
-
         // 恢复日志管理器的原始console方法
         if (logManager) {
             cleanupTasks.push(
