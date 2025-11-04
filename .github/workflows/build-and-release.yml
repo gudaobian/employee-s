@@ -301,24 +301,25 @@ jobs:
           }
           Write-Host "✅ build directory confirmed deleted"
 
-          # 安装依赖
-          Write-Host "📦 Installing native module dependencies..."
-          npm install
-
           # 🔴 关键：使用electron-rebuild而不是node-gyp
           Write-Host "🔨 Rebuilding for Electron 28 (ABI 108)..."
           Write-Host "   Using electron-rebuild to compile for Electron's Node.js ABI"
 
+          # 回到项目根目录执行electron-rebuild
           cd ..
-          npx electron-rebuild --version=28.2.10 --force --module-dir=native-event-monitor-win
 
-          cd native-event-monitor-win
+          # 使用electron-rebuild重新编译原生模块
+          # --force: 强制重新编译
+          # --types: 指定编译prod类型
+          # --module-dir: 指定原生模块目录
+          npx electron-rebuild -f -w native-event-monitor-win
+
           Write-Host "✅ Native module rebuilt for Electron 28"
 
           # 验证新编译的文件（检查时间戳）
           Write-Host "🔍 Verifying newly compiled module..."
-          if (Test-Path "build/Release/event_monitor.node") {
-            $module = Get-Item "build/Release/event_monitor.node"
+          if (Test-Path "native-event-monitor-win/build/Release/event_monitor.node") {
+            $module = Get-Item "native-event-monitor-win/build/Release/event_monitor.node"
             $now = Get-Date
             $ageMinutes = ($now - $module.LastWriteTime).TotalMinutes
 
@@ -343,7 +344,6 @@ jobs:
             exit 1
           }
 
-          cd ..
           Write-Host "========================================="
 
       - name: Verify compiled WindowsAdapter has getActiveURL
