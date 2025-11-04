@@ -32,10 +32,43 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Clean workspace before checkout
+        run: |
+          Write-Host "========================================="
+          Write-Host "彻底清理工作区（防止runner重用导致的缓存问题）"
+          Write-Host "========================================="
+
+          # 删除所有可能残留的构建产物
+          Write-Host "🧹 Cleaning build artifacts..."
+          if (Test-Path "dist") {
+            Remove-Item "dist" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ dist/ removed"
+          }
+          if (Test-Path "release") {
+            Remove-Item "release" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ release/ removed"
+          }
+          if (Test-Path "node_modules") {
+            Remove-Item "node_modules" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ node_modules/ removed"
+          }
+
+          # 清理所有electron-builder缓存
+          Write-Host "🧹 Cleaning electron-builder caches..."
+          if (Test-Path "$env:LOCALAPPDATA\electron-builder") {
+            Remove-Item "$env:LOCALAPPDATA\electron-builder" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ Global electron-builder cache cleared"
+          }
+
+          Write-Host "✅ Workspace cleaned completely"
+          Write-Host "========================================="
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          clean: true        # 清理untracked files
+          force: true        # 强制覆盖本地修改
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -219,32 +252,59 @@ jobs:
       - name: Build TypeScript
         run: |
           Write-Host "========================================="
-          Write-Host "清理并编译 TypeScript"
+          Write-Host "完整清理所有缓存和构建产物"
           Write-Host "========================================="
 
-          # 1. 清理 dist 目录
+          # 1. 清理 dist 目录（双重确保）
           Write-Host "🧹 Cleaning dist directory..."
-          npm run clean
+          if (Test-Path "dist") {
+            Remove-Item "dist" -Recurse -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2  # 等待文件系统完成删除
+          }
+          npm run clean  # 再次确保清理
 
-          # 2. 清理 electron-builder 缓存
-          Write-Host "🧹 Cleaning electron-builder cache..."
-          if (Test-Path "$env:LOCALAPPDATA\electron-builder\cache") {
-            Remove-Item "$env:LOCALAPPDATA\electron-builder\cache" -Recurse -Force
-            Write-Host "   ✅ electron-builder cache cleared"
-          } else {
-            Write-Host "   ℹ️ No electron-builder cache found"
+          # 2. 清理所有 electron-builder 缓存位置
+          Write-Host "🧹 Cleaning all electron-builder caches..."
+
+          # 全局缓存
+          if (Test-Path "$env:LOCALAPPDATA\electron-builder") {
+            Remove-Item "$env:LOCALAPPDATA\electron-builder" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ Global cache cleared"
           }
 
-          # 3. 清理 release 目录（旧的打包文件）
+          # 项目缓存
+          if (Test-Path "node_modules\.cache\electron-builder") {
+            Remove-Item "node_modules\.cache\electron-builder" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ Project cache cleared"
+          }
+
+          # 3. 清理 release 目录
           Write-Host "🧹 Cleaning release directory..."
           if (Test-Path "release") {
-            Remove-Item "release" -Recurse -Force
+            Remove-Item "release" -Recurse -Force -ErrorAction SilentlyContinue
             Write-Host "   ✅ release directory cleared"
           }
 
-          # 4. 编译 TypeScript
+          # 4. 验证清理结果
+          Write-Host "🔍 Verifying cleanup..."
+          if (Test-Path "dist") {
+            Write-Host "❌ CRITICAL: dist still exists after cleanup!"
+            exit 1
+          }
+          Write-Host "   ✅ dist directory confirmed deleted"
+
+          # 5. 编译 TypeScript
           Write-Host "🔨 Compiling TypeScript..."
           npm run compile
+
+          # 6. 验证编译结果
+          Write-Host "🔍 Verifying compilation..."
+          $adapterPath = "dist/platforms/windows/windows-adapter.js"
+          if (-not (Test-Path $adapterPath)) {
+            Write-Host "❌ CRITICAL: WindowsAdapter not compiled!"
+            exit 1
+          }
+          Write-Host "   ✅ WindowsAdapter compiled successfully"
 
           Write-Host "✅ Build preparation complete"
           Write-Host "========================================="
@@ -430,6 +490,80 @@ jobs:
             Write-Host "可能的原因:"
             Write-Host "1. electron-builder 配置错误"
             Write-Host "2. 文件未被包含在 asar.unpacked 中"
+            exit 1
+          }
+
+          Write-Host "========================================="
+
+      - name: Verify packaged app.asar contains getActiveURL (CRITICAL)
+        run: |
+          Write-Host "========================================="
+          Write-Host "验证app.asar中的WindowsAdapter（关键步骤）"
+          Write-Host "========================================="
+
+          # 安装asar工具
+          Write-Host "📦 Installing asar tool..."
+          npm install -g asar
+
+          # 提取app.asar
+          $asarPath = "release/win-unpacked/resources/app.asar"
+          if (Test-Path $asarPath) {
+            Write-Host "📂 Extracting app.asar..."
+            asar extract $asarPath temp-asar-extracted
+
+            # 检查WindowsAdapter
+            $extractedAdapter = "temp-asar-extracted/dist/platforms/windows/windows-adapter.js"
+            if (Test-Path $extractedAdapter) {
+              $content = Get-Content $extractedAdapter -Raw
+
+              Write-Host ""
+              Write-Host "🔍 Checking for getActiveURL method..."
+              if ($content -match "getActiveURL\s*\(") {
+                Write-Host "✅✅✅ SUCCESS: getActiveURL method found in packaged app.asar!"
+              } else {
+                Write-Host "❌❌❌ CRITICAL FAILURE: getActiveURL NOT found in packaged app.asar!"
+                Write-Host "🚨 This means electron-builder packaged OLD CODE despite clean build!"
+                Write-Host "🚨 Build MUST be aborted - users would receive broken version!"
+
+                # 显示实际内容预览
+                Write-Host ""
+                Write-Host "File preview (first 500 chars):"
+                Write-Host $content.Substring(0, [Math]::Min(500, $content.Length))
+
+                # 清理并退出
+                Remove-Item temp-asar-extracted -Recurse -Force
+                exit 1
+              }
+
+              # 检查VERSION标识
+              Write-Host ""
+              Write-Host "🔍 Checking VERSION identifier..."
+              if ($content -match 'VERSION\s*=\s*[''"]([^''"]+)[''"]') {
+                $version = $matches[1]
+                Write-Host "✅ Packaged VERSION: $version"
+
+                if ($version -match "1\.0\.6[0-9]-with-getActiveURL") {
+                  Write-Host "✅✅✅ PERFECT: Version identifier is correct!"
+                } else {
+                  Write-Host "⚠️ WARNING: Version identifier unexpected: $version"
+                }
+              } else {
+                Write-Host "⚠️ VERSION identifier not found (code might be minified)"
+              }
+
+              Write-Host ""
+              Write-Host "✅ app.asar content verification PASSED"
+            } else {
+              Write-Host "❌ WindowsAdapter not found in extracted asar at: $extractedAdapter"
+              Remove-Item temp-asar-extracted -Recurse -Force
+              exit 1
+            }
+
+            # 清理提取的文件
+            Remove-Item temp-asar-extracted -Recurse -Force
+            Write-Host "🧹 Cleanup complete"
+          } else {
+            Write-Host "❌ app.asar not found at: $asarPath"
             exit 1
           }
 
