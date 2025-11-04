@@ -234,11 +234,29 @@ jobs:
           Write-Host "   - disturl: https://electronjs.org/headers"
           Write-Host ""
 
-          # 使用 node-gyp 编译
-          Write-Host "   Running: node-gyp rebuild"
-          npx node-gyp rebuild
+          # 检查编译环境
+          Write-Host ""
+          Write-Host "   Checking build environment..."
+          Write-Host "   Python:"
+          python --version 2>&1 | Write-Host
+          Write-Host "   MSBuild:"
+          where.exe msbuild 2>&1 | Write-Host
+          Write-Host ""
+
+          # 使用 node-gyp 编译（详细输出）
+          Write-Host "   Running: node-gyp rebuild --verbose"
+          npx node-gyp rebuild --verbose 2>&1 | Tee-Object -Variable gypOutput | Write-Host
 
           cd ..
+
+          Write-Host ""
+          Write-Host "🔍 Checking if compilation actually ran..."
+          if ($gypOutput -match "cl\.exe|link\.exe|Creating library") {
+            Write-Host "   ✅ C++ compiler (cl.exe) was invoked - compilation happened!"
+          } else {
+            Write-Host "   ❌ WARNING: No C++ compilation detected in output!"
+            Write-Host "   This means node-gyp skipped compilation for some reason"
+          }
 
           # 🔴 步骤4: 验证编译结果
           Write-Host ""
