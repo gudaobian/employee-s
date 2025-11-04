@@ -218,8 +218,36 @@ jobs:
 
       - name: Build TypeScript
         run: |
+          Write-Host "========================================="
+          Write-Host "清理并编译 TypeScript"
+          Write-Host "========================================="
+
+          # 1. 清理 dist 目录
+          Write-Host "🧹 Cleaning dist directory..."
           npm run clean
+
+          # 2. 清理 electron-builder 缓存
+          Write-Host "🧹 Cleaning electron-builder cache..."
+          if (Test-Path "$env:LOCALAPPDATA\electron-builder\cache") {
+            Remove-Item "$env:LOCALAPPDATA\electron-builder\cache" -Recurse -Force
+            Write-Host "   ✅ electron-builder cache cleared"
+          } else {
+            Write-Host "   ℹ️ No electron-builder cache found"
+          }
+
+          # 3. 清理 release 目录（旧的打包文件）
+          Write-Host "🧹 Cleaning release directory..."
+          if (Test-Path "release") {
+            Remove-Item "release" -Recurse -Force
+            Write-Host "   ✅ release directory cleared"
+          }
+
+          # 4. 编译 TypeScript
+          Write-Host "🔨 Compiling TypeScript..."
           npm run compile
+
+          Write-Host "✅ Build preparation complete"
+          Write-Host "========================================="
 
       - name: Rebuild Windows native module for Electron 28
         run: |
@@ -247,6 +275,46 @@ jobs:
           }
 
           cd ..
+          Write-Host "========================================="
+
+      - name: Verify compiled WindowsAdapter has getActiveURL
+        run: |
+          Write-Host "========================================="
+          Write-Host "验证编译后的 WindowsAdapter"
+          Write-Host "========================================="
+
+          $adapterPath = "dist/platforms/windows/windows-adapter.js"
+
+          if (-not (Test-Path $adapterPath)) {
+            Write-Host "❌ WindowsAdapter not found at: $adapterPath"
+            exit 1
+          }
+
+          $content = Get-Content $adapterPath -Raw
+
+          # 检查是否包含 getActiveURL 方法
+          if ($content -match "getActiveURL\s*\(") {
+            Write-Host "✅ getActiveURL method found in compiled WindowsAdapter"
+          } else {
+            Write-Host "❌ getActiveURL method NOT found in compiled WindowsAdapter"
+            Write-Host "🚨 CRITICAL: Old code was compiled! Build must fail!"
+            exit 1
+          }
+
+          # 检查 VERSION 标识
+          if ($content -match 'VERSION\s*=\s*[''"]([^''"]+)[''"]') {
+            $version = $matches[1]
+            Write-Host "✅ WindowsAdapter VERSION: $version"
+
+            if ($version -match "1\.0\.6[0-9]") {
+              Write-Host "✅ Version identifier looks correct"
+            } else {
+              Write-Host "⚠️ Version identifier unexpected: $version"
+            }
+          } else {
+            Write-Host "⚠️ VERSION identifier not found (might be minified)"
+          }
+
           Write-Host "========================================="
 
       - name: Final verification before packaging
@@ -448,8 +516,36 @@ jobs:
 
       - name: Build TypeScript
         run: |
+          echo "========================================="
+          echo "清理并编译 TypeScript"
+          echo "========================================="
+
+          # 1. 清理 dist 目录
+          echo "🧹 Cleaning dist directory..."
           npm run clean
+
+          # 2. 清理 electron-builder 缓存
+          echo "🧹 Cleaning electron-builder cache..."
+          if [ -d "$HOME/Library/Caches/electron-builder" ]; then
+            rm -rf "$HOME/Library/Caches/electron-builder"
+            echo "   ✅ electron-builder cache cleared"
+          else
+            echo "   ℹ️ No electron-builder cache found"
+          fi
+
+          # 3. 清理 release 目录
+          echo "🧹 Cleaning release directory..."
+          if [ -d "release" ]; then
+            rm -rf release
+            echo "   ✅ release directory cleared"
+          fi
+
+          # 4. 编译 TypeScript
+          echo "🔨 Compiling TypeScript..."
           npm run compile
+
+          echo "✅ Build preparation complete"
+          echo "========================================="
 
       - name: Build native modules for macOS
         run: |
