@@ -505,6 +505,13 @@ export class ActivityCollectorService extends BaseService {
         this.accumulatedData.processName = windowInfo?.application || (windowInfo as any)?.processName;
 
         // 采集浏览器URL（仅当活动窗口是浏览器时）
+        logger.info('[ACTIVITY_COLLECTOR] Window info:', {
+          hasWindowInfo: !!windowInfo,
+          application: windowInfo?.application,
+          isBrowser: windowInfo?.application ? this.isBrowserApplication(windowInfo.application) : false,
+          hasUrlCollector: !!this.urlCollectorService
+        });
+
         if (windowInfo?.application && this.isBrowserApplication(windowInfo.application)) {
           try {
             if (this.urlCollectorService) {
