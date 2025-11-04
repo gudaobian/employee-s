@@ -539,23 +539,43 @@ jobs:
           Write-Host "📂 Extracting NSIS installer..."
           & "C:\Program Files\7-Zip\7z.exe" x $exePath.FullName -o"temp-nsis-extracted" -y | Out-Null
 
-          # 查找app.asar（可能在不同位置）
-          Write-Host "🔍 Searching for app.asar in extracted installer..."
-          $asarFiles = Get-ChildItem "temp-nsis-extracted" -Recurse -Filter "app.asar" -ErrorAction SilentlyContinue
+          # NSIS将应用打包为app-64.7z，需要先解压
+          Write-Host "🔍 Searching for app-64.7z in extracted installer..."
+          $app7z = Get-ChildItem "temp-nsis-extracted" -Recurse -Filter "app-64.7z" -ErrorAction SilentlyContinue | Select-Object -First 1
 
-          if ($asarFiles.Count -eq 0) {
-            Write-Host "❌ app.asar not found in NSIS installer!"
+          if (-not $app7z) {
+            Write-Host "❌ app-64.7z not found in NSIS installer!"
             Write-Host "Extracted structure:"
-            Get-ChildItem "temp-nsis-extracted" -Recurse | Select-Object -First 20 | Format-Table
+            Get-ChildItem "temp-nsis-extracted" -Recurse | Format-Table
             Remove-Item "temp-nsis-extracted" -Recurse -Force
             exit 1
           }
 
-          Write-Host "✅ Found $($asarFiles.Count) app.asar file(s)"
+          Write-Host "✅ Found app-64.7z: $($app7z.FullName)"
+          Write-Host "   Size: $([math]::Round($app7z.Length / 1MB, 2)) MB"
 
-          # 验证第一个找到的app.asar（通常只有一个）
+          # 解压app-64.7z
+          Write-Host "📂 Extracting app-64.7z..."
+          & "C:\Program Files\7-Zip\7z.exe" x $app7z.FullName -o"temp-app-extracted" -y | Out-Null
+
+          # 现在查找app.asar
+          Write-Host "🔍 Searching for app.asar in extracted app-64.7z..."
+          $asarFiles = Get-ChildItem "temp-app-extracted" -Recurse -Filter "app.asar" -ErrorAction SilentlyContinue
+
+          if ($asarFiles.Count -eq 0) {
+            Write-Host "❌ app.asar not found in app-64.7z!"
+            Write-Host "Extracted app-64.7z structure:"
+            Get-ChildItem "temp-app-extracted" -Recurse | Select-Object -First 20 | Format-Table
+            Remove-Item "temp-nsis-extracted" -Recurse -Force
+            Remove-Item "temp-app-extracted" -Recurse -Force
+            exit 1
+          }
+
+          Write-Host "✅ Found $($asarFiles.Count) app.asar file(s) in app-64.7z"
+
+          # 验证第一个找到的app.asar
           $asarPath = $asarFiles[0].FullName
-          Write-Host "📂 Extracting app.asar from installer..."
+          Write-Host "📂 Extracting app.asar from app-64.7z..."
           asar extract $asarPath temp-installer-asar-extracted
 
           # 检查WindowsAdapter
@@ -596,8 +616,9 @@ jobs:
             }
 
             # 清理并退出
-            Remove-Item "temp-nsis-extracted" -Recurse -Force
-            Remove-Item "temp-installer-asar-extracted" -Recurse -Force
+            Remove-Item "temp-nsis-extracted" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item "temp-app-extracted" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item "temp-installer-asar-extracted" -Recurse -Force -ErrorAction SilentlyContinue
             exit 1
           }
 
@@ -623,6 +644,7 @@ jobs:
 
           # 清理提取的文件
           Remove-Item "temp-nsis-extracted" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "temp-app-extracted" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item "temp-installer-asar-extracted" -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "🧹 Cleanup complete"
 
