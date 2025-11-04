@@ -81,7 +81,17 @@ export class URLCollectorService extends EventEmitter {
 
       // 3. 获取原始URL
       logger.info(`[URLCollector] Calling platform adapter getActiveURL for: ${browserName}`);
-      const rawUrl = await this.platformAdapter.getActiveURL?.(browserName);
+      logger.info(`[URLCollector] getActiveURL method exists: ${typeof this.platformAdapter.getActiveURL === 'function'}`);
+
+      if (typeof this.platformAdapter.getActiveURL !== 'function') {
+        logger.error('[URLCollector] ❌ getActiveURL method not found on platform adapter!');
+        logger.error('[URLCollector] Platform adapter type:', Object.prototype.toString.call(this.platformAdapter));
+        logger.error('[URLCollector] Available methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.platformAdapter)));
+        logURLCollectFailed(browserName, 'getActiveURL method not implemented in platform adapter');
+        return null;
+      }
+
+      const rawUrl = await this.platformAdapter.getActiveURL(browserName);
       if (!rawUrl) {
         logger.info(`[URLCollector] ❌ Failed to get URL for ${browserName}`);
         logURLCollectFailed(browserName, 'Failed to get URL from platform adapter');
