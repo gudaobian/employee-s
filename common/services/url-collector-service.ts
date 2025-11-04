@@ -53,25 +53,42 @@ export class URLCollectorService extends EventEmitter {
     }
 
     try {
+      logger.info('[URLCollector] Starting URL collection...');
+
       // 1. 获取活动窗口信息
       const activeWindow = await this.platformAdapter.getActiveWindow();
       if (!activeWindow) {
+        logger.info('[URLCollector] No active window');
         return null;
       }
 
+      logger.info('[URLCollector] Active window:', {
+        application: activeWindow.application,
+        title: activeWindow.title
+      });
+
       // 2. 检查是否为浏览器
       const browserName = this.detectBrowser(activeWindow.application);
+      logger.info('[URLCollector] Browser detection result:', {
+        inputApp: activeWindow.application,
+        detectedBrowser: browserName
+      });
+
       if (!browserName) {
+        logger.info('[URLCollector] Not a browser, skipping URL collection');
         return null; // 不是浏览器，不采集
       }
 
       // 3. 获取原始URL
+      logger.info(`[URLCollector] Calling platform adapter getActiveURL for: ${browserName}`);
       const rawUrl = await this.platformAdapter.getActiveURL?.(browserName);
       if (!rawUrl) {
-        logger.debug(`[URLCollector] Failed to get URL for ${browserName}`);
+        logger.info(`[URLCollector] ❌ Failed to get URL for ${browserName}`);
         logURLCollectFailed(browserName, 'Failed to get URL from platform adapter');
         return null;
       }
+
+      logger.info(`[URLCollector] ✅ Got raw URL: ${rawUrl}`);
 
       // 4. 应用隐私保护
       const sanitizedUrl = sanitizeUrl(rawUrl, this.privacyConfig);
