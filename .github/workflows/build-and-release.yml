@@ -184,7 +184,7 @@ jobs:
       - name: Precompile Windows Native Module for Electron 28
         run: |
           Write-Host "========================================="
-          Write-Host "预编译 Windows 原生模块"
+          Write-Host "预编译 Windows 原生模块 for Electron 28"
           Write-Host "========================================="
           Write-Host ""
 
@@ -198,25 +198,51 @@ jobs:
             Write-Host "   ℹ️  No existing build/ (clean slate)"
           }
 
-          # 🔴 步骤2: 使用 electron-rebuild 编译
+          # 🔴 步骤2: 安装原生模块的依赖
           Write-Host ""
-          Write-Host "🔨 Step 2: Compiling for Electron 28 (Node.js ABI 108)..."
+          Write-Host "📦 Step 2: Installing native module dependencies..."
+          cd native-event-monitor-win
+          npm install
+          cd ..
+          Write-Host "   ✅ Dependencies installed"
+
+          # 🔴 步骤3: 使用 node-gyp 配合 Electron 头文件编译
+          Write-Host ""
+          Write-Host "🔨 Step 3: Compiling with node-gyp for Electron 28..."
+          Write-Host "   Target: Electron 28.2.10 (Node.js ABI 108)"
           Write-Host "   This will take 5-10 minutes for C++ compilation..."
           Write-Host ""
 
-          # 安装 electron-rebuild（如果还没有）
-          if (-not (Test-Path "node_modules\.bin\electron-rebuild.cmd")) {
-            Write-Host "📦 Installing electron-rebuild..."
-            npm install --save-dev @electron/rebuild
-          }
+          cd native-event-monitor-win
 
-          # 使用 electron-rebuild 重新编译所有原生模块
-          # 它会自动检测 Electron 版本并使用正确的 Node.js 头文件
-          npx electron-rebuild --force
+          # 获取 Electron 版本
+          $electronVersion = (Get-Content "..\package.json" -Raw | ConvertFrom-Json).devDependencies.electron
+          $electronVersion = $electronVersion -replace '\^', ''
+          Write-Host "   Electron version: $electronVersion"
 
-          # 🔴 步骤3: 验证编译结果
+          # 设置环境变量指向 Electron
+          $env:npm_config_target = $electronVersion
+          $env:npm_config_arch = "x64"
+          $env:npm_config_target_arch = "x64"
+          $env:npm_config_disturl = "https://electronjs.org/headers"
+          $env:npm_config_runtime = "electron"
+          $env:npm_config_build_from_source = "true"
+
+          Write-Host "   Environment variables set:"
+          Write-Host "   - target: $env:npm_config_target"
+          Write-Host "   - runtime: electron"
+          Write-Host "   - disturl: https://electronjs.org/headers"
           Write-Host ""
-          Write-Host "🔍 Step 3: Verifying compilation result..."
+
+          # 使用 node-gyp 编译
+          Write-Host "   Running: node-gyp rebuild"
+          npx node-gyp rebuild
+
+          cd ..
+
+          # 🔴 步骤4: 验证编译结果
+          Write-Host ""
+          Write-Host "🔍 Step 4: Verifying compilation result..."
 
           $modulePath = "native-event-monitor-win\build\Release\event_monitor.node"
           if (-not (Test-Path $modulePath)) {
@@ -224,24 +250,16 @@ jobs:
             Write-Host "❌ CRITICAL: Native module not found!"
             Write-Host "   Expected: $modulePath"
             Write-Host ""
-            Write-Host "Checking build directory structure:"
+            Write-Host "Checking build directory:"
             if (Test-Path "native-event-monitor-win\build") {
               Get-ChildItem "native-event-monitor-win\build" -Recurse | Format-Table Name, Length, LastWriteTime
             } else {
-              Write-Host "   ❌ build/ directory doesn't exist - compilation failed!"
-            }
-            Write-Host ""
-            Write-Host "Checking if binding.gyp exists:"
-            if (Test-Path "native-event-monitor-win\binding.gyp") {
-              Write-Host "   ✅ binding.gyp found"
-              Get-Content "native-event-monitor-win\binding.gyp"
-            } else {
-              Write-Host "   ❌ binding.gyp not found!"
+              Write-Host "   ❌ build/ doesn't exist - node-gyp failed!"
             }
             exit 1
           }
 
-          # 验证文件时间戳（必须是刚编译的）
+          # 验证文件时间戳
           $module = Get-Item $modulePath
           $ageMinutes = ((Get-Date) - $module.LastWriteTime).TotalMinutes
 
@@ -254,12 +272,11 @@ jobs:
           Write-Host ""
 
           if ($ageMinutes -gt 15) {
-            Write-Host "❌ WARNING: Module seems old (> 15 min)"
-            Write-Host "   This might indicate compilation was skipped!"
+            Write-Host "❌ WARNING: Module is too old (> 15 min)"
             exit 1
           }
 
-          Write-Host "✅ Precompilation complete - native module ready for packaging"
+          Write-Host "✅ Precompilation complete - ready for TypeScript build"
           Write-Host "========================================="
 
       - name: Update package version from git tag
