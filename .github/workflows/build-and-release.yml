@@ -282,68 +282,76 @@ jobs:
       - name: Rebuild Windows native module for Electron 28 (CLEAN BUILD)
         run: |
           Write-Host "========================================="
-          Write-Host "强制清理并重新编译Windows原生模块"
+          Write-Host "使用 electron-rebuild 重新编译 Windows 原生模块"
           Write-Host "========================================="
 
-          cd native-event-monitor-win
-
-          # 🔴 关键：强制删除旧的构建目录
-          Write-Host "🧹 Force removing old build directory..."
-          if (Test-Path "build") {
-            Remove-Item "build" -Recurse -Force
-            Start-Sleep -Seconds 2  # 确保文件系统完成删除
-          }
-
-          # 验证已删除
-          if (Test-Path "build") {
-            Write-Host "❌ CRITICAL: build directory still exists!"
-            exit 1
-          }
-          Write-Host "✅ build directory confirmed deleted"
-
-          # 🔴 关键：使用electron-rebuild而不是node-gyp
-          Write-Host "🔨 Rebuilding for Electron 28 (ABI 108)..."
-          Write-Host "   Using electron-rebuild to compile for Electron's Node.js ABI"
-
-          # 回到项目根目录执行electron-rebuild
-          cd ..
-
-          # 使用electron-rebuild重新编译原生模块
-          # --force: 强制重新编译
-          # --types: 指定编译prod类型
-          # --module-dir: 指定原生模块目录
-          npx electron-rebuild -f -w native-event-monitor-win
-
-          Write-Host "✅ Native module rebuilt for Electron 28"
-
-          # 验证新编译的文件（检查时间戳）
-          Write-Host "🔍 Verifying newly compiled module..."
-          if (Test-Path "native-event-monitor-win/build/Release/event_monitor.node") {
-            $module = Get-Item "native-event-monitor-win/build/Release/event_monitor.node"
-            $now = Get-Date
-            $ageMinutes = ($now - $module.LastWriteTime).TotalMinutes
-
-            Write-Host "Module info:"
-            Write-Host "  Path: $($module.FullName)"
-            Write-Host "  Size: $([math]::Round($module.Length / 1KB, 2)) KB"
-            Write-Host "  Modified: $($module.LastWriteTime)"
-            Write-Host "  Age: $([math]::Round($ageMinutes, 2)) minutes"
-
-            # 🔴 关键：检查文件必须是刚编译的
-            if ($ageMinutes -gt 10) {
-              Write-Host "❌❌❌ CRITICAL: Native module is OLD!"
-              Write-Host "   File was modified $([math]::Round($ageMinutes, 2)) minutes ago"
-              Write-Host "   This means compilation was SKIPPED!"
-              Write-Host "   BUILD MUST FAIL!"
-              exit 1
-            }
-
-            Write-Host "✅ Native module freshly compiled ($([math]::Round($ageMinutes, 2)) min old)"
+          # 🔴 步骤1: 强制删除旧的构建产物
+          Write-Host ""
+          Write-Host "🧹 Step 1: Cleaning old build artifacts..."
+          if (Test-Path "native-event-monitor-win\build") {
+            Remove-Item "native-event-monitor-win\build" -Recurse -Force -ErrorAction Stop
+            Start-Sleep -Seconds 2
+            Write-Host "   ✅ Deleted native-event-monitor-win\build\"
           } else {
-            Write-Host "❌ Native module file not found!"
+            Write-Host "   ℹ️  No existing build directory"
+          }
+
+          # 验证删除成功
+          if (Test-Path "native-event-monitor-win\build") {
+            Write-Host "   ❌ CRITICAL: build directory still exists after deletion!"
             exit 1
           }
 
+          # 🔴 步骤2: 使用 electron-rebuild 重新编译
+          Write-Host ""
+          Write-Host "🔨 Step 2: Rebuilding with electron-rebuild..."
+          Write-Host "   Target: Electron 28.2.10 (Node.js ABI 108)"
+          Write-Host "   Module: native-event-monitor-win"
+          Write-Host ""
+
+          # electron-rebuild 会自动找到 node_modules/electron 的版本
+          # 并为所有原生模块重新编译
+          npx electron-rebuild --force
+
+          # 🔴 步骤3: 验证编译结果
+          Write-Host ""
+          Write-Host "🔍 Step 3: Verifying compilation..."
+
+          $modulePath = "native-event-monitor-win\build\Release\event_monitor.node"
+          if (-not (Test-Path $modulePath)) {
+            Write-Host "❌ CRITICAL: Native module not found at: $modulePath"
+            Write-Host ""
+            Write-Host "Listing native-event-monitor-win\build\ structure:"
+            if (Test-Path "native-event-monitor-win\build") {
+              Get-ChildItem "native-event-monitor-win\build" -Recurse | Select-Object -First 20 | Format-Table
+            } else {
+              Write-Host "   build directory doesn't exist!"
+            }
+            exit 1
+          }
+
+          # 检查文件时间戳
+          $module = Get-Item $modulePath
+          $now = Get-Date
+          $ageMinutes = ($now - $module.LastWriteTime).TotalMinutes
+
+          Write-Host "✅ Native module found!"
+          Write-Host "   Path: $($module.FullName)"
+          Write-Host "   Size: $([math]::Round($module.Length / 1KB, 2)) KB"
+          Write-Host "   Modified: $($module.LastWriteTime)"
+          Write-Host "   Age: $([math]::Round($ageMinutes, 2)) minutes"
+
+          # 验证是刚编译的（< 10分钟）
+          if ($ageMinutes -gt 10) {
+            Write-Host ""
+            Write-Host "❌ CRITICAL: Module is too old!"
+            Write-Host "   This means electron-rebuild SKIPPED compilation!"
+            Write-Host "   Age: $([math]::Round($ageMinutes, 2)) minutes (should be < 10)"
+            exit 1
+          }
+
+          Write-Host ""
+          Write-Host "✅ SUCCESS: Native module freshly compiled for Electron 28"
           Write-Host "========================================="
 
       - name: Verify compiled WindowsAdapter has getActiveURL
