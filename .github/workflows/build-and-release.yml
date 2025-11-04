@@ -455,6 +455,43 @@ jobs:
 
           Write-Host "========================================="
 
+      - name: Verify dist directory before packaging (CRITICAL)
+        run: |
+          Write-Host "========================================="
+          Write-Host "打包前验证dist目录内容（防止打包旧代码）"
+          Write-Host "========================================="
+
+          $adapterPath = "dist/platforms/windows/windows-adapter.js"
+
+          if (-not (Test-Path $adapterPath)) {
+            Write-Host "❌ WindowsAdapter not found at: $adapterPath"
+            exit 1
+          }
+
+          $content = Get-Content $adapterPath -Raw
+
+          Write-Host "🔍 Checking dist/platforms/windows/windows-adapter.js..."
+          if ($content -match "getActiveURL\s*\(") {
+            Write-Host "✅ getActiveURL found in dist/ (pre-packaging)"
+          } else {
+            Write-Host "❌ CRITICAL: getActiveURL NOT found in dist/ before packaging!"
+            Write-Host "This means TypeScript compilation failed or produced wrong output!"
+            exit 1
+          }
+
+          if ($content -match 'VERSION\s*=\s*[''"]([^''"]+)[''"]') {
+            Write-Host "✅ VERSION in dist/: $($matches[1])"
+          }
+
+          Write-Host "✅ dist/ directory verification passed"
+
+          # 计算dist/WindowsAdapter的hash作为参考
+          $hash = (Get-FileHash $adapterPath -Algorithm SHA256).Hash
+          Write-Host "📋 dist/WindowsAdapter SHA256: $hash"
+          Write-Host "This hash will be compared with packaged version"
+
+          Write-Host "========================================="
+
       - name: Create application bundle
         run: |
           npm run pack:win
@@ -462,6 +499,9 @@ jobs:
           # 不设置GH_TOKEN，禁用electron-builder自动发布
           # Release由后续的create-release job统一处理
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          # 完全禁用electron-builder缓存
+          ELECTRON_BUILDER_CACHE: "${{ runner.temp }}/eb-cache-disabled"
+          USE_HARD_LINKS: "false"
 
       - name: Verify packaged native module (CRITICAL)
         run: |
@@ -641,6 +681,31 @@ jobs:
           Write-Host ""
           Write-Host "✅ NSIS installer content verification PASSED"
           Write-Host "✅ Users will receive correct code!"
+
+          # 计算NSIS中WindowsAdapter的hash并对比
+          Write-Host ""
+          Write-Host "📋 Computing hash for verification..."
+          $nsisAdapterHash = (Get-FileHash $extractedAdapter -Algorithm SHA256).Hash
+          Write-Host "NSIS installer WindowsAdapter SHA256: $nsisAdapterHash"
+
+          # 对比原始dist/中的hash
+          $origAdapter = "dist/platforms/windows/windows-adapter.js"
+          if (Test-Path $origAdapter) {
+            $origHash = (Get-FileHash $origAdapter -Algorithm SHA256).Hash
+            Write-Host "Original dist/ WindowsAdapter SHA256:  $origHash"
+
+            if ($nsisAdapterHash -eq $origHash) {
+              Write-Host "✅✅✅ PERFECT: Hashes match! NSIS contains same file as dist/"
+            } else {
+              Write-Host "❌❌❌ CRITICAL: Hash mismatch!"
+              Write-Host "🚨 NSIS installer contains DIFFERENT WindowsAdapter than dist/!"
+              Write-Host "🚨 This proves electron-builder is using cached/old files!"
+              Remove-Item "temp-nsis-extracted" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item "temp-app-extracted" -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item "temp-installer-asar-extracted" -Recurse -Force -ErrorAction SilentlyContinue
+              exit 1
+            }
+          }
 
           # 清理提取的文件
           Remove-Item "temp-nsis-extracted" -Recurse -Force -ErrorAction SilentlyContinue
