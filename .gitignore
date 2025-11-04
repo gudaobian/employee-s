@@ -81,3 +81,5 @@ debug*.js
 *.debug
 
 doc/
+# Native module build artifacts
+native-event-monitor-win/build/

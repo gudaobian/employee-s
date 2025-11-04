@@ -279,28 +279,61 @@ jobs:
           Write-Host "✅ Build preparation complete"
           Write-Host "========================================="
 
-      - name: Rebuild Windows native module for Electron 28
+      - name: Rebuild Windows native module for Electron 28 (CLEAN BUILD)
         run: |
           Write-Host "========================================="
-          Write-Host "重新编译Windows原生模块（Electron 28 ABI 108）"
+          Write-Host "强制清理并重新编译Windows原生模块"
           Write-Host "========================================="
 
           cd native-event-monitor-win
 
+          # 🔴 关键：强制删除旧的构建目录
+          Write-Host "🧹 Force removing old build directory..."
+          if (Test-Path "build") {
+            Remove-Item "build" -Recurse -Force
+            Start-Sleep -Seconds 2  # 确保文件系统完成删除
+          }
+
+          # 验证已删除
+          if (Test-Path "build") {
+            Write-Host "❌ CRITICAL: build directory still exists!"
+            exit 1
+          }
+          Write-Host "✅ build directory confirmed deleted"
+
           # 安装依赖
-          npm install --ignore-scripts
+          Write-Host "📦 Installing native module dependencies..."
+          npm install
 
-          # 使用 electron-rebuild 重新编译（确保ABI 108）
-          npx electron-rebuild --version=28.2.10 --force
+          # 重新编译
+          Write-Host "🔨 Compiling native module..."
+          npm run build
 
-          # 验证重新编译后的文件
+          # 验证新编译的文件（检查时间戳）
+          Write-Host "🔍 Verifying newly compiled module..."
           if (Test-Path "build/Release/event_monitor.node") {
             $module = Get-Item "build/Release/event_monitor.node"
-            Write-Host "✅ 原生模块重新编译成功"
-            Write-Host "   大小: $([math]::Round($module.Length / 1KB, 2)) KB"
-            Write-Host "   修改时间: $($module.LastWriteTime)"
+            $now = Get-Date
+            $ageMinutes = ($now - $module.LastWriteTime).TotalMinutes
+
+            Write-Host "Module info:"
+            Write-Host "  Path: $($module.FullName)"
+            Write-Host "  Size: $([math]::Round($module.Length / 1KB, 2)) KB"
+            Write-Host "  Modified: $($module.LastWriteTime)"
+            Write-Host "  Age: $([math]::Round($ageMinutes, 2)) minutes"
+
+            # 🔴 关键：检查文件必须是刚编译的
+            if ($ageMinutes -gt 10) {
+              Write-Host "❌❌❌ CRITICAL: Native module is OLD!"
+              Write-Host "   File was modified $([math]::Round($ageMinutes, 2)) minutes ago"
+              Write-Host "   This means compilation was SKIPPED!"
+              Write-Host "   BUILD MUST FAIL!"
+              exit 1
+            }
+
+            Write-Host "✅ Native module freshly compiled ($([math]::Round($ageMinutes, 2)) min old)"
           } else {
-            Write-Host "❌ 重新编译失败 - 文件不存在"
+            Write-Host "❌ Native module file not found!"
             exit 1
           }
 
