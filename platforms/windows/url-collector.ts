@@ -21,7 +21,8 @@ export interface WindowsURLInfo {
  * 使用 UI Automation API 读取浏览器地址栏
  */
 export class WindowsURLCollector {
-  private static readonly TIMEOUT = 5000; // 5秒超时
+  private static readonly UI_AUTOMATION_TIMEOUT = 10000; // 10秒超时（UI Automation 较慢）
+  private static readonly WINDOW_TITLE_TIMEOUT = 8000;   // 8秒超时（Window Title 中等速度）
   private static readonly BROWSER_CONFIG = {
     'chrome.exe': {
       className: 'Chrome_WidgetWin_1',
@@ -130,7 +131,7 @@ export class WindowsURLCollector {
       const script = this.generateUIAutomationScript(config.className, config.addressBarNames);
 
       // 执行 PowerShell 脚本
-      const { stdout, stderr } = await this.executePowerShell(script, WindowsURLCollector.TIMEOUT);
+      const { stdout, stderr } = await this.executePowerShell(script, WindowsURLCollector.UI_AUTOMATION_TIMEOUT);
 
       if (stderr) {
         logger.info(`[WindowsURLCollector] PowerShell stderr: ${stderr}`);
@@ -249,8 +250,8 @@ ${script}
     const scriptBase64 = Buffer.from(fullScript, 'utf16le').toString('base64');
 
     // 使用 -EncodedCommand 参数执行，添加 OutputFormat Text 避免 CLIXML
-    // 使用 chcp 65001 设置代码页为 UTF-8
-    const command = `chcp 65001 >nul && powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ${scriptBase64}`;
+    // UTF-8 编码已在脚本内部设置，无需 chcp（避免额外延迟）
+    const command = `powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ${scriptBase64}`;
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -307,7 +308,7 @@ public class WindowHelper {
 [WindowHelper]::GetActiveWindowTitle()
 `.trim();
 
-      const { stdout } = await this.executePowerShell(script, 3000);
+      const { stdout } = await this.executePowerShell(script, WindowsURLCollector.WINDOW_TITLE_TIMEOUT);
       const title = stdout.trim();
 
       if (title) {
