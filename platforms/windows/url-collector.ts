@@ -133,11 +133,18 @@ export class WindowsURLCollector {
       // 执行 PowerShell 脚本
       const { stdout, stderr } = await this.executePowerShell(script, WindowsURLCollector.UI_AUTOMATION_TIMEOUT);
 
+      // 详细日志记录（调试 UI Automation）
+      logger.info(`[WindowsURLCollector] PowerShell 执行完成`);
+      logger.info(`[WindowsURLCollector] stdout 长度: ${stdout.length}`);
+      logger.info(`[WindowsURLCollector] stdout 内容:`, JSON.stringify(stdout));
       if (stderr) {
-        logger.info(`[WindowsURLCollector] PowerShell stderr: ${stderr}`);
+        logger.info(`[WindowsURLCollector] stderr 内容:`, JSON.stringify(stderr));
+      } else {
+        logger.info(`[WindowsURLCollector] stderr: (无)`);
       }
 
       const url = stdout.trim();
+      logger.info(`[WindowsURLCollector] URL after trim:`, JSON.stringify(url));
 
       // 验证 URL 格式
       if (url && this.isValidURL(url)) {
@@ -146,6 +153,7 @@ export class WindowsURLCollector {
       }
 
       logger.info(`[WindowsURLCollector] Invalid or empty URL from UI Automation`);
+      logger.info(`[WindowsURLCollector] isValidURL result: ${this.isValidURL(url)}`);
       return null;
 
     } catch (error) {
