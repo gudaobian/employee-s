@@ -38,14 +38,21 @@ export class WindowsPermissionChecker {
             "UNAVAILABLE"
           }
         } catch {
+          Write-Error $_.Exception.Message
           "UNAVAILABLE"
         }
       `;
 
-      const { stdout } = await execAsync(`powershell -NoProfile -NonInteractive -Command "${script.replace(/"/g, '\\"')}"`, {
+      const { stdout, stderr } = await execAsync(`powershell -NoProfile -NonInteractive -Command "${script.replace(/"/g, '\\"')}"`, {
         timeout: 5000
       });
       const result = stdout.trim();
+
+      // 记录详细输出用于调试
+      logger.debug('[Windows Permission] PowerShell stdout:', stdout);
+      if (stderr) {
+        logger.debug('[Windows Permission] PowerShell stderr:', stderr);
+      }
 
       if (result === 'AVAILABLE') {
         logger.info('[Windows Permission] ✅ UI Automation 可用（.NET Framework 正常）');
@@ -56,12 +63,18 @@ export class WindowsPermissionChecker {
       }
 
       logger.warn('[Windows Permission] ⚠️ UI Automation 不可用（.NET Framework 缺失或损坏）');
+      if (stderr) {
+        logger.warn('[Windows Permission] 错误详情:', stderr);
+      }
       return {
         available: false,
         message: this.getUIASetupGuide()
       };
     } catch (error: any) {
       logger.error('[Windows Permission] ❌ 检查 UI Automation 时出错:', error.message);
+      if (error.stderr) {
+        logger.error('[Windows Permission] PowerShell 错误:', error.stderr);
+      }
 
       return {
         available: false,
