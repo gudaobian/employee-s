@@ -148,8 +148,10 @@ export class WindowsURLCollector {
 
       // 验证 URL 格式
       if (url && this.isValidURL(url)) {
-        logger.info(`[WindowsURLCollector] ✅ Got URL via UI Automation: ${url}`);
-        return url;
+        // 规范化 URL（添加缺失的协议）
+        const normalizedURL = this.normalizeURL(url);
+        logger.info(`[WindowsURLCollector] ✅ Got URL via UI Automation: ${normalizedURL}`);
+        return normalizedURL;
       }
 
       logger.info(`[WindowsURLCollector] Invalid or empty URL from UI Automation`);
@@ -333,12 +335,44 @@ public class WindowHelper {
   }
 
   /**
-   * 验证 URL 格式
+   * 验证并规范化 URL 格式
+   * Chrome 地址栏可能返回没有协议的 URL，需要自动添加
    */
   private isValidURL(url: string): boolean {
-    // 检查基本 URL 格式
-    const urlPattern = /^(https?:\/\/|chrome:\/\/|edge:\/\/|about:|file:\/\/)/i;
-    return urlPattern.test(url) && url.length > 10;
+    if (!url || url.length < 3) {
+      return false;
+    }
+
+    // 检查是否已经有协议
+    const hasProtocol = /^(https?:\/\/|chrome:\/\/|edge:\/\/|about:|file:\/\/)/i.test(url);
+
+    // 如果没有协议，检查是否像域名（包含点或 localhost）
+    if (!hasProtocol) {
+      // 看起来像域名：包含点，或者是 localhost
+      const looksLikeDomain = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+/i.test(url) ||
+                              url.startsWith('localhost');
+      return looksLikeDomain;
+    }
+
+    // 已经有协议，只要长度足够就认为有效
+    return url.length > 10;
+  }
+
+  /**
+   * 规范化 URL（添加缺失的协议）
+   */
+  private normalizeURL(url: string): string {
+    if (!url) {
+      return url;
+    }
+
+    // 如果已经有协议，直接返回
+    if (/^(https?|chrome|edge|about|file):\/?\/?/i.test(url)) {
+      return url;
+    }
+
+    // 没有协议，添加 https://（现代浏览器默认）
+    return `https://${url}`;
   }
 }
 
