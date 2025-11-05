@@ -43,7 +43,9 @@ export class WindowsPermissionChecker {
         }
       `;
 
-      const { stdout, stderr } = await execAsync(`powershell -NoProfile -NonInteractive -Command "${script.replace(/"/g, '\\"')}"`, {
+      // 使用 Base64 编码避免引号转义问题
+      const scriptBase64 = Buffer.from(script, 'utf16le').toString('base64');
+      const { stdout, stderr } = await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${scriptBase64}`, {
         timeout: 5000
       });
       const result = stdout.trim();
