@@ -48,10 +48,16 @@ export class WindowsPermissionChecker {
       });
       const result = stdout.trim();
 
-      // 记录详细输出用于调试
-      logger.debug('[Windows Permission] PowerShell stdout:', stdout);
+      // 记录详细输出用于调试（使用 INFO 级别确保显示）
+      logger.info('[Windows Permission] PowerShell 执行完成');
+      logger.info('[Windows Permission] stdout 长度:', stdout.length);
+      logger.info('[Windows Permission] stdout 内容:', JSON.stringify(stdout));
+      logger.info('[Windows Permission] stdout.trim():', JSON.stringify(result));
+      logger.info('[Windows Permission] 是否等于 AVAILABLE:', result === 'AVAILABLE');
       if (stderr) {
-        logger.debug('[Windows Permission] PowerShell stderr:', stderr);
+        logger.info('[Windows Permission] stderr 内容:', JSON.stringify(stderr));
+      } else {
+        logger.info('[Windows Permission] stderr: (无)');
       }
 
       if (result === 'AVAILABLE') {
@@ -63,9 +69,7 @@ export class WindowsPermissionChecker {
       }
 
       logger.warn('[Windows Permission] ⚠️ UI Automation 不可用（.NET Framework 缺失或损坏）');
-      if (stderr) {
-        logger.warn('[Windows Permission] 错误详情:', stderr);
-      }
+      logger.warn('[Windows Permission] PowerShell 返回结果不是 AVAILABLE，而是:', JSON.stringify(result));
       return {
         available: false,
         message: this.getUIASetupGuide()
