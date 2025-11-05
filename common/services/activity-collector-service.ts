@@ -550,7 +550,7 @@ export class ActivityCollectorService extends BaseService {
         idleTime: this.accumulatedData.idleTime,
         activeWindow: this.accumulatedData.windowTitle,
         activeWindowProcess: this.accumulatedData.processName,
-        activeUrl: this.accumulatedData.activeUrl, // 浏览器URL（已脱敏）
+        url: this.accumulatedData.activeUrl, // 浏览器URL（已脱敏，只保留域名）
         activityInterval: this.accumulatedData.intervalDuration
       };
 
