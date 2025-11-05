@@ -25,27 +25,49 @@ export class WindowsURLCollector {
   private static readonly BROWSER_CONFIG = {
     'chrome.exe': {
       className: 'Chrome_WidgetWin_1',
-      addressBarName: 'Address and search bar',
+      addressBarNames: [
+        'Address and search bar',  // English
+        '地址和搜索栏',            // Chinese Simplified
+        '位址與搜尋列',            // Chinese Traditional
+        'アドレスと検索バー',      // Japanese
+        'Adress- und Suchleiste',  // German
+        'Barre d\'adresse et de recherche', // French
+        'Barra de direcciones y búsqueda'   // Spanish
+      ],
       automationId: null
     },
     'msedge.exe': {
       className: 'Chrome_WidgetWin_1',
-      addressBarName: 'Address and search bar',
+      addressBarNames: [
+        'Address and search bar',
+        '地址和搜索栏',
+        '位址與搜尋列'
+      ],
       automationId: null
     },
     'brave.exe': {
       className: 'Chrome_WidgetWin_1',
-      addressBarName: 'Address and search bar',
+      addressBarNames: [
+        'Address and search bar',
+        '地址和搜索栏'
+      ],
       automationId: null
     },
     'firefox.exe': {
       className: 'MozillaWindowClass',
-      addressBarName: 'Search with Google or enter address',
+      addressBarNames: [
+        'Search with Google or enter address',
+        '使用 Google 搜索或输入地址',
+        'Search or enter address'
+      ],
       automationId: null
     },
     'opera.exe': {
       className: 'Chrome_WidgetWin_1',
-      addressBarName: 'Address field',
+      addressBarNames: [
+        'Address field',
+        '地址字段'
+      ],
       automationId: null
     }
   };
@@ -105,7 +127,7 @@ export class WindowsURLCollector {
       }
 
       // PowerShell 脚本：使用 UI Automation 获取地址栏内容
-      const script = this.generateUIAutomationScript(config.className, config.addressBarName);
+      const script = this.generateUIAutomationScript(config.className, config.addressBarNames);
 
       // 执行 PowerShell 脚本
       const { stdout, stderr } = await this.executePowerShell(script, WindowsURLCollector.TIMEOUT);
@@ -132,9 +154,12 @@ export class WindowsURLCollector {
   }
 
   /**
-   * 生成 PowerShell UI Automation 脚本
+   * 生成 PowerShell UI Automation 脚本（支持多语言地址栏名称）
    */
-  private generateUIAutomationScript(className: string, addressBarName: string): string {
+  private generateUIAutomationScript(className: string, addressBarNames: string[]): string {
+    // 生成多个地址栏名称的数组字符串
+    const namesArray = addressBarNames.map(name => `"${name.replace(/"/g, '""')}"`).join(',');
+
     return `
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -162,19 +187,28 @@ try {
         exit 1
     }
 
-    # 查找地址栏（通过 Name 或 AutomationId）
-    $addressBarCondition = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::NameProperty,
-        "${addressBarName}"
-    )
+    # 尝试多个可能的地址栏名称（支持多语言）
+    $addressBarNames = @(${namesArray})
+    $addressBar = $null
 
-    $addressBar = $browserWindow.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $addressBarCondition
-    )
+    foreach ($name in $addressBarNames) {
+        $addressBarCondition = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::NameProperty,
+            $name
+        )
+
+        $addressBar = $browserWindow.FindFirst(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            $addressBarCondition
+        )
+
+        if ($null -ne $addressBar) {
+            break
+        }
+    }
 
     if ($null -eq $addressBar) {
-        Write-Error "Address bar not found"
+        Write-Error "Address bar not found (tried all language variants)"
         exit 1
     }
 
