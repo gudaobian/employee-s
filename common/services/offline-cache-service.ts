@@ -534,9 +534,28 @@ export class OfflineCacheService extends EventEmitter {
     this.autoSaveInterval = setInterval(async () => {
       try {
         const allData = await this.getAllCachedData();
-        await this.persistentCache.saveCache(allData);
+
+        // 过滤掉大型数据（截图），只保存元数据
+        // 这样避免 JSON.stringify 超过最大字符串长度限制
+        const metadataOnly = allData.map(item => {
+          if (item.type === 'screenshot' && item.data) {
+            // 移除截图的 Base64 数据，只保留元数据
+            return {
+              ...item,
+              data: {
+                ...item.data,
+                imageData: '[EXCLUDED_FROM_SNAPSHOT]' // 标记为已排除
+              },
+              size: item.size // 保留原始大小信息
+            };
+          }
+          return item;
+        });
+
+        await this.persistentCache.saveCache(metadataOnly);
         logger.debug('[OFFLINE_CACHE] Auto-save snapshot completed', {
-          items: allData.length
+          items: allData.length,
+          excludedScreenshots: allData.filter(i => i.type === 'screenshot').length
         });
       } catch (error) {
         logger.error('[OFFLINE_CACHE] Auto-save failed:', error);
@@ -597,12 +616,28 @@ export class OfflineCacheService extends EventEmitter {
         this.autoSaveInterval = null;
       }
 
-      // 最后一次保存快照
+      // 最后一次保存快照（排除大型截图数据）
       const allData = await this.getAllCachedData();
-      await this.persistentCache.saveCache(allData);
+
+      const metadataOnly = allData.map(item => {
+        if (item.type === 'screenshot' && item.data) {
+          return {
+            ...item,
+            data: {
+              ...item.data,
+              imageData: '[EXCLUDED_FROM_SNAPSHOT]'
+            },
+            size: item.size
+          };
+        }
+        return item;
+      });
+
+      await this.persistentCache.saveCache(metadataOnly);
 
       logger.info('[OFFLINE_CACHE] Service shutdown completed', {
-        savedItems: allData.length
+        savedItems: allData.length,
+        excludedScreenshots: allData.filter(i => i.type === 'screenshot').length
       });
     } catch (error) {
       logger.error('[OFFLINE_CACHE] Shutdown error:', error);

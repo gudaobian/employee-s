@@ -16,42 +16,52 @@ export interface PermissionCheckResult {
 
 export class WindowsPermissionChecker {
   /**
-   * 检查 UI Automation 服务可用性
-   * 使用 PowerShell 检查 "UI0Detect" 服务状态
+   * 检查 UI Automation 是否可用
+   * 正确方法：检查 .NET Framework 和 UI Automation 程序集
+   * 注意：UI Automation 不需要任何 Windows 服务！
    */
   async checkUIAutomationAvailability(): Promise<PermissionCheckResult> {
     try {
-      logger.info('[Windows Permission] 检查 UI Automation 服务状态...');
+      logger.info('[Windows Permission] 检查 UI Automation 可用性...');
 
-      // PowerShell 脚本检查 UI Automation 相关服务
-      // Windows 的 UI Automation 依赖于多个服务，这里检查 UI0Detect 作为代表
+      // PowerShell 脚本：尝试加载 UI Automation 程序集
+      // UI Automation 只需要 .NET Framework 4.0+，不需要任何服务
       const script = `
-        $uiaService = Get-Service -Name "UI0Detect" -ErrorAction SilentlyContinue
-        if ($uiaService -and $uiaService.Status -eq "Running") {
-          "AVAILABLE"
-        } else {
+        try {
+          Add-Type -AssemblyName UIAutomationClient -ErrorAction Stop
+          Add-Type -AssemblyName UIAutomationTypes -ErrorAction Stop
+          $automation = [System.Windows.Automation.AutomationElement]
+          $desktop = $automation::RootElement
+          if ($desktop) {
+            "AVAILABLE"
+          } else {
+            "UNAVAILABLE"
+          }
+        } catch {
           "UNAVAILABLE"
         }
       `;
 
-      const { stdout } = await execAsync(`powershell -Command "${script.replace(/"/g, '\\"')}"`);
+      const { stdout } = await execAsync(`powershell -NoProfile -NonInteractive -Command "${script.replace(/"/g, '\\"')}"`, {
+        timeout: 5000
+      });
       const result = stdout.trim();
 
       if (result === 'AVAILABLE') {
-        logger.info('[Windows Permission] ✅ UI Automation 服务可用');
+        logger.info('[Windows Permission] ✅ UI Automation 可用（.NET Framework 正常）');
         return {
           available: true,
-          message: 'UI Automation 服务正在运行'
+          message: 'UI Automation 可用'
         };
       }
 
-      logger.warn('[Windows Permission] ⚠️ UI Automation 服务不可用');
+      logger.warn('[Windows Permission] ⚠️ UI Automation 不可用（.NET Framework 缺失或损坏）');
       return {
         available: false,
         message: this.getUIASetupGuide()
       };
     } catch (error: any) {
-      logger.error('[Windows Permission] ❌ 检查 UI Automation 服务时出错:', error.message);
+      logger.error('[Windows Permission] ❌ 检查 UI Automation 时出错:', error.message);
 
       return {
         available: false,
@@ -62,51 +72,53 @@ export class WindowsPermissionChecker {
 
   /**
    * 获取 UI Automation 设置指南
-   * 返回详细的设置步骤
+   * 返回详细的解决步骤
    */
   private getUIASetupGuide(): string {
     return `
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  🔐 Windows UI Automation 服务不可用
+  🔐 UI Automation 不可用
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  为了监控浏览器活动窗口和 URL，本应用需要 UI Automation 服务。
+  为了监控浏览器活动窗口和 URL，本应用需要 UI Automation API。
 
-  📋 检查服务状态：
+  ⚠️ 原因：.NET Framework 缺失或损坏
 
-  1️⃣  按 Win + R，输入 services.msc，按回车
-  2️⃣  在服务列表中找到 "Interactive Services Detection"
-  3️⃣  右键点击，选择"属性"
-  4️⃣  检查"启动类型"，建议设置为"自动"
-  5️⃣  点击"启动"按钮启动服务
-  6️⃣  点击"确定"保存设置
+  UI Automation 是通过 .NET Framework 提供的，不需要任何 Windows 服务。
 
-  ⚙️ 如果服务被禁用（企业环境）：
+  📋 解决方案：
 
-  某些企业环境可能通过组策略禁用了 UI Automation 服务。
-  请联系 IT 管理员请求启用以下服务：
+  1️⃣  下载并安装 .NET Framework 4.5 或更高版本
+      下载地址: https://dotnet.microsoft.com/download/dotnet-framework
 
-  - Interactive Services Detection (UI0Detect)
-  - Windows Management Instrumentation
+  2️⃣  推荐版本：
+      - .NET Framework 4.8 (最新稳定版)
+      - Windows 10/11 通常已预装
 
-  📝 注册表配置（仅供高级用户）：
-
-  服务配置路径：
-  HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\UI0Detect
-
-  可能需要的配置：
-  - Start = 2 (自动启动)
-  - 确保服务未被禁用
+  3️⃣  安装后重启应用程序
 
   ⚡ PowerShell 快速检查命令：
 
-  Get-Service -Name "UI0Detect" | Format-List
+  # 检查 .NET Framework 版本
+  Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP' -Recurse |
+    Get-ItemProperty -Name Version -EA 0 |
+    Where-Object { $_.PSChildName -match '^(?!S)\\p{L}'} |
+    Select-Object PSChildName, Version
+
+  # 测试 UI Automation
+  Add-Type -AssemblyName UIAutomationClient
+  Add-Type -AssemblyName UIAutomationTypes
+  [System.Windows.Automation.AutomationElement]::RootElement
 
   💡 提示：
 
-  - 在企业环境中，可能需要管理员权限修改服务设置
-  - 某些安全策略可能阻止启用此服务
-  - 如果无法启用服务，应用将使用降级模式（功能受限）
+  - 不需要启用任何 Windows 服务
+  - 不需要管理员权限（安装 .NET Framework 时除外）
+  - Windows 10/11 通常已经包含 .NET Framework 4.x
+
+  📝 降级模式：
+
+  如果无法安装 .NET Framework，应用将使用窗口标题采集（仅获取页面标题）
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `.trim();
