@@ -190,4 +190,25 @@ export class PlatformAdapterBridge extends PlatformAdapterBase implements Common
       return null;
     }
   }
+
+  // 获取浏览器活动URL（转发到底层适配器）
+  async getActiveURL(browserName: string): Promise<string | null> {
+    logger.info(`[PLATFORM_BRIDGE] 获取浏览器URL请求: ${browserName}`);
+    try {
+      // 检查底层平台适配器是否支持getActiveURL
+      if ((this.platformAdapter as any).getActiveURL) {
+        const url = await (this.platformAdapter as any).getActiveURL(browserName);
+        logger.info(`[PLATFORM_BRIDGE] ✅ 成功获取URL: ${url || 'null'}`);
+        return url;
+      } else {
+        logger.warn('[PLATFORM_BRIDGE] ⚠️ 底层平台适配器不支持getActiveURL');
+        logger.debug('[PLATFORM_BRIDGE] platformAdapter类型:', this.platformAdapter?.constructor.name);
+        logger.debug('[PLATFORM_BRIDGE] VERSION:', (this.platformAdapter as any).VERSION);
+        return null;
+      }
+    } catch (error) {
+      logger.error('[PLATFORM_BRIDGE] ❌ 获取浏览器URL失败:', error);
+      return null;
+    }
+  }
 }
