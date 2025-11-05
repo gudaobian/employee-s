@@ -359,20 +359,31 @@ public class WindowHelper {
   }
 
   /**
-   * 规范化 URL（添加缺失的协议）
+   * 规范化 URL（添加缺失的协议，并只保留域名）
+   * 例如：https://www.baidu.com/s?wd=test → https://www.baidu.com/
    */
   private normalizeURL(url: string): string {
     if (!url) {
       return url;
     }
 
-    // 如果已经有协议，直接返回
-    if (/^(https?|chrome|edge|about|file):\/?\/?/i.test(url)) {
-      return url;
+    let fullUrl = url;
+
+    // 如果没有协议，添加 https://
+    if (!/^(https?|chrome|edge|about|file):\/?\/?/i.test(url)) {
+      fullUrl = `https://${url}`;
     }
 
-    // 没有协议，添加 https://（现代浏览器默认）
-    return `https://${url}`;
+    // 解析 URL，只保留协议和域名
+    try {
+      const urlObj = new URL(fullUrl);
+      // 返回协议 + 域名，例如 https://www.baidu.com/
+      return `${urlObj.protocol}//${urlObj.hostname}/`;
+    } catch (error) {
+      // 如果解析失败，返回原始 URL（可能是特殊协议如 chrome://）
+      logger.warn(`[WindowsURLCollector] Failed to parse URL: ${fullUrl}`);
+      return fullUrl;
+    }
   }
 }
 
