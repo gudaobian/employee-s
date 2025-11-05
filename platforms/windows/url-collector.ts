@@ -161,6 +161,10 @@ export class WindowsURLCollector {
     const namesArray = addressBarNames.map(name => `"${name.replace(/"/g, '""')}"`).join(',');
 
     return `
+# 设置输出编码为 UTF-8（解决中文乱码）
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
@@ -234,18 +238,30 @@ try {
    * 执行 PowerShell 脚本
    */
   private async executePowerShell(script: string, timeout: number): Promise<{ stdout: string; stderr: string }> {
-    // 将脚本编码为 Base64（避免引号转义问题）
-    const scriptBase64 = Buffer.from(script, 'utf16le').toString('base64');
+    // 在脚本前添加进度抑制设置
+    const fullScript = `
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+${script}
+`;
 
-    // 使用 -EncodedCommand 参数执行
-    const command = `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${scriptBase64}`;
+    // 将脚本编码为 Base64（避免引号转义问题）
+    const scriptBase64 = Buffer.from(fullScript, 'utf16le').toString('base64');
+
+    // 使用 -EncodedCommand 参数执行，添加 OutputFormat Text 避免 CLIXML
+    // 使用 chcp 65001 设置代码页为 UTF-8
+    const command = `chcp 65001 >nul && powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand ${scriptBase64}`;
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error('PowerShell execution timeout'));
       }, timeout);
 
-      exec(command, { encoding: 'utf8', maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      exec(command, {
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        windowsHide: true  // 隐藏命令窗口
+      }, (error, stdout, stderr) => {
         clearTimeout(timer);
 
         if (error) {
@@ -265,6 +281,10 @@ try {
     try {
       // 使用 PowerShell 获取活动窗口标题
       const script = `
+# 设置输出编码为 UTF-8（解决中文乱码）
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
