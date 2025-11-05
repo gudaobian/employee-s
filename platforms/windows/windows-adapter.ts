@@ -25,9 +25,21 @@ import { WindowsPermissionChecker } from './permission-checker';
 
 const execAsync = promisify(exec);
 
+// 动态读取 package.json 版本号
+const getPackageVersion = (): string => {
+  try {
+    const packageJsonPath = path.join(__dirname, '../../..', 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+    return `${packageJson.version}-windows-adapter`;
+  } catch (error) {
+    logger.warn('[WindowsAdapter] Failed to read package version, using fallback');
+    return 'unknown-version';
+  }
+};
+
 export class WindowsAdapter extends PlatformAdapterBase {
-  // 版本标识 - 用于验证是否加载了最新代码
-  public readonly VERSION = '1.0.87-url-collection-cache-fix';
+  // 版本标识 - 自动从 package.json 读取
+  public readonly VERSION = getPackageVersion();
 
   private activityMonitorTimer?: NodeJS.Timeout;
   private lastActivityData: ActivityData | null = null;
