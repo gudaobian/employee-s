@@ -12,6 +12,7 @@ const execAsync = promisify(exec);
 export interface WindowsURLInfo {
   url: string;
   browserName: string;
+  timestamp: number;
   collectionMethod: 'ui_automation' | 'window_title' | 'fallback';
   quality: 'full_url' | 'domain_only' | 'title_only';
 }
@@ -90,6 +91,7 @@ export class WindowsURLCollector {
         return {
           url: urlFromAutomation,
           browserName,
+          timestamp: Date.now(),
           collectionMethod: 'ui_automation',
           quality: 'full_url'
         };
@@ -102,6 +104,7 @@ export class WindowsURLCollector {
         return {
           url: urlFromTitle,
           browserName,
+          timestamp: Date.now(),
           collectionMethod: 'window_title',
           quality: 'title_only'
         };

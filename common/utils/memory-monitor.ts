@@ -1,165 +1,105 @@
 /**
- * Memory Monitor Utility
- * Provides utilities for monitoring and managing memory usage
+ * Memory Monitor
+ * Monitors and manages application memory usage
  */
 
-export interface MemoryUsage {
-  heapUsedMB: number;
-  heapTotalMB: number;
-  rssMB: number;
-  externalMB: number;
-}
-
-export type MemoryStatus = 'normal' | 'warning' | 'critical';
-
-/**
- * Memory thresholds in MB
- */
-const MEMORY_THRESHOLDS = {
-  WARNING: 200,   // Warning threshold
-  CRITICAL: 300   // Critical threshold
-};
-
-/**
- * ANSI color codes for console output
- */
-const COLORS = {
-  RESET: '\x1b[0m',
-  GREEN: '\x1b[32m',
-  YELLOW: '\x1b[33m',
-  RED: '\x1b[31m',
-  CYAN: '\x1b[36m'
-};
+import { logger } from './logger';
 
 export class MemoryMonitor {
-  /**
-   * Get current memory usage in MB
-   */
-  static getMemoryUsage(): MemoryUsage {
-    const memUsage = process.memoryUsage();
+  private static instance?: MemoryMonitor;
+  private monitorInterval?: NodeJS.Timeout;
+  private readonly MEMORY_THRESHOLD_MB = 300;
+  private readonly CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-    return {
-      heapUsedMB: Math.round(memUsage.heapUsed / 1024 / 1024),
-      heapTotalMB: Math.round(memUsage.heapTotal / 1024 / 1024),
-      rssMB: Math.round(memUsage.rss / 1024 / 1024),
-      externalMB: Math.round(memUsage.external / 1024 / 1024)
-    };
+  private constructor() {}
+
+  static getInstance(): MemoryMonitor {
+    if (!MemoryMonitor.instance) {
+      MemoryMonitor.instance = new MemoryMonitor();
+    }
+    return MemoryMonitor.instance;
   }
 
-  /**
-   * Check memory threshold status
-   * Returns 'normal', 'warning', or 'critical' based on heap usage
-   */
-  static checkMemoryThreshold(): MemoryStatus {
-    const { heapUsedMB } = this.getMemoryUsage();
-
-    if (heapUsedMB >= MEMORY_THRESHOLDS.CRITICAL) {
-      return 'critical';
-    } else if (heapUsedMB >= MEMORY_THRESHOLDS.WARNING) {
-      return 'warning';
+  start(): void {
+    if (this.monitorInterval) {
+      logger.warn('[MemoryMonitor] Already started');
+      return;
     }
 
+    this.monitorInterval = setInterval(() => {
+      this.checkMemory();
+    }, this.CHECK_INTERVAL_MS);
+
+    logger.info('[MemoryMonitor] Started monitoring');
+  }
+
+  stop(): void {
+    if (this.monitorInterval) {
+      clearInterval(this.monitorInterval);
+      this.monitorInterval = undefined;
+      logger.info('[MemoryMonitor] Stopped monitoring');
+    }
+  }
+
+  private checkMemory(): void {
+    const used = process.memoryUsage();
+    const heapUsedMB = Math.round(used.heapUsed / 1024 / 1024);
+    const heapTotalMB = Math.round(used.heapTotal / 1024 / 1024);
+    const rssMB = Math.round(used.rss / 1024 / 1024);
+
+    logger.debug(`[Memory] Heap: ${heapUsedMB}/${heapTotalMB}MB, RSS: ${rssMB}MB`);
+
+    if (heapUsedMB > this.MEMORY_THRESHOLD_MB) {
+      logger.warn(`[Memory] High heap usage: ${heapUsedMB}MB (threshold: ${this.MEMORY_THRESHOLD_MB}MB)`);
+
+      // Trigger GC if available
+      if (global.gc) {
+        logger.info('[Memory] Triggering manual GC...');
+        global.gc();
+
+        // Log memory after GC
+        const afterGC = process.memoryUsage();
+        const heapAfterMB = Math.round(afterGC.heapUsed / 1024 / 1024);
+        logger.info(`[Memory] After GC: ${heapAfterMB}MB (freed ${heapUsedMB - heapAfterMB}MB)`);
+      }
+    }
+  }
+
+  forceGC(): void {
+    if (global.gc) {
+      const before = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+      global.gc();
+      const after = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+      logger.info(`[Memory] Manual GC: ${before}MB → ${after}MB (freed ${before - after}MB)`);
+    } else {
+      logger.warn('[Memory] GC not available (run with --expose-gc)');
+    }
+  }
+
+  // Static methods for backward compatibility
+  static logMemoryUsage(label: string): void {
+    const used = process.memoryUsage();
+    const heapUsedMB = Math.round(used.heapUsed / 1024 / 1024);
+    const heapTotalMB = Math.round(used.heapTotal / 1024 / 1024);
+    const rssMB = Math.round(used.rss / 1024 / 1024);
+    logger.debug(`[Memory] ${label}: Heap ${heapUsedMB}/${heapTotalMB}MB, RSS ${rssMB}MB`);
+  }
+
+  static checkMemoryThreshold(): 'normal' | 'warning' | 'critical' {
+    const heapUsedMB = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+    if (heapUsedMB > 400) return 'critical';
+    if (heapUsedMB > 300) return 'warning';
     return 'normal';
   }
 
-  /**
-   * Manually trigger garbage collection if available
-   * Returns true if GC was triggered, false if not available
-   */
-  static triggerGC(): boolean {
+  static triggerGC(): void {
     if (global.gc) {
-      const beforeGC = this.getMemoryUsage();
+      const before = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
       global.gc();
-      const afterGC = this.getMemoryUsage();
-
-      console.log(`[MEMORY] GC triggered: ${beforeGC.heapUsedMB}MB → ${afterGC.heapUsedMB}MB (freed ${beforeGC.heapUsedMB - afterGC.heapUsedMB}MB)`);
-
-      return true;
+      const after = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+      logger.info(`[Memory] GC triggered: ${before}MB → ${after}MB`);
     }
-
-    console.warn('[MEMORY] ⚠️ GC not available. Start with --expose-gc flag');
-    return false;
-  }
-
-  /**
-   * Log memory usage with color indicators
-   * @param context Context string to identify where the log is from
-   */
-  static logMemoryUsage(context: string = 'MEMORY'): void {
-    const memUsage = this.getMemoryUsage();
-    const status = this.checkMemoryThreshold();
-
-    // Select color based on status
-    let statusColor = COLORS.GREEN;
-    let statusEmoji = '✅';
-
-    if (status === 'warning') {
-      statusColor = COLORS.YELLOW;
-      statusEmoji = '⚠️';
-    } else if (status === 'critical') {
-      statusColor = COLORS.RED;
-      statusEmoji = '🚨';
-    }
-
-    const statusText = status.toUpperCase();
-
-    console.log(
-      `${COLORS.CYAN}[${context}]${COLORS.RESET} ${statusEmoji} Memory: ` +
-      `Heap=${statusColor}${memUsage.heapUsedMB}MB${COLORS.RESET}/${memUsage.heapTotalMB}MB | ` +
-      `RSS=${memUsage.rssMB}MB | ` +
-      `External=${memUsage.externalMB}MB | ` +
-      `Status=${statusColor}${statusText}${COLORS.RESET}`
-    );
-  }
-
-  /**
-   * Get memory thresholds configuration
-   */
-  static getThresholds(): typeof MEMORY_THRESHOLDS {
-    return { ...MEMORY_THRESHOLDS };
-  }
-
-  /**
-   * Check if memory usage is below safe threshold for operations
-   * Returns true if safe to proceed with memory-intensive operations
-   */
-  static isSafeForOperations(): boolean {
-    return this.checkMemoryThreshold() !== 'critical';
-  }
-
-  /**
-   * Force memory cleanup by clearing large data structures
-   * This is a placeholder for application-specific cleanup logic
-   */
-  static forceCleanup(): void {
-    // Clear any cached data if available
-    if (global.gc) {
-      this.triggerGC();
-    }
-
-    // Additional cleanup can be implemented here
-    console.log('[MEMORY] Cleanup completed');
-  }
-
-  /**
-   * Get detailed memory report
-   */
-  static getDetailedReport(): string {
-    const memUsage = this.getMemoryUsage();
-    const status = this.checkMemoryThreshold();
-    const thresholds = this.getThresholds();
-
-    return `
-=== Memory Report ===
-Status: ${status.toUpperCase()}
-Heap Used: ${memUsage.heapUsedMB}MB / ${memUsage.heapTotalMB}MB
-RSS (Resident Set Size): ${memUsage.rssMB}MB
-External Memory: ${memUsage.externalMB}MB
-Thresholds:
-  - Warning: ${thresholds.WARNING}MB
-  - Critical: ${thresholds.CRITICAL}MB
-GC Available: ${global.gc ? 'Yes' : 'No'}
-===================
-    `.trim();
   }
 }
+
+export const memoryMonitor = MemoryMonitor.getInstance();

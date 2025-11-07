@@ -843,6 +843,11 @@
         let isRunning = false;
         let autoStartEnabled = false;
         let configExpanded = false;
+
+        // 自启动操作锁定机制
+        let isTogglingAutoStart = false;
+        let lastUserActionTime = 0;
+        const USER_ACTION_PROTECTION_MS = 1000;  // 用户操作后1秒内保护状态
         
 
         // 初始化
@@ -950,9 +955,28 @@
                 // 监听自启动状态变化事件
                 window.electronAPI.on('autostart-status-changed', (event, data) => {
                     console.log('[AUTO_START_UI] 收到自启动状态变化事件:', data);
-                    autoStartEnabled = data.enabled;
-                    updateAutoStartToggle(autoStartEnabled);
-                    addLog(`🔄 自启动状态已更新: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
+
+                    // 保护机制：用户刚操作过，忽略可能过期的推送
+                    const timeSinceUserAction = Date.now() - lastUserActionTime;
+                    if (timeSinceUserAction < USER_ACTION_PROTECTION_MS) {
+                        console.log('[保护期] 忽略状态推送，用户刚操作过 (距离:', timeSinceUserAction, 'ms)');
+                        return;
+                    }
+
+                    // 根据来源决定是否应用状态
+                    if (data.source === 'user-action') {
+                        // 用户操作触发的推送，立即应用
+                        console.log('[用户操作] 应用状态推送');
+                        autoStartEnabled = data.enabled;
+                        updateAutoStartToggle(autoStartEnabled);
+                        addLog(`🔄 自启动状态已更新: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
+                    } else if (data.source === 'initial-sync' || !data.source) {
+                        // 初始同步推送或未标记来源，谨慎应用
+                        console.log('[初始同步] 应用状态推送');
+                        autoStartEnabled = data.enabled;
+                        updateAutoStartToggle(autoStartEnabled);
+                        addLog(`🔄 自启动状态已同步: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
+                    }
                 });
             }
 
@@ -1169,7 +1193,21 @@
 
         // 开启自启动
         async function toggleAutoStart() {
+            // 防抖：如果正在操作中，忽略重复点击
+            if (isTogglingAutoStart) {
+                console.log('[防抖] 自启动操作进行中，忽略重复点击');
+                return;
+            }
+
             try {
+                isTogglingAutoStart = true;
+                lastUserActionTime = Date.now();  // 标记用户操作时间
+
+                // UI锁定：视觉反馈
+                const toggle = document.getElementById('autoStartToggle');
+                toggle.style.opacity = '0.6';
+                toggle.style.pointerEvents = 'none';
+
                 if (window.electronAPI && window.electronAPI.autostart) {
                     if (autoStartEnabled) {
                         // 当前是开启状态，需要关闭
@@ -1177,13 +1215,12 @@
                         const result = await window.electronAPI.autostart.disable();
                         if (result && result.success) {
                             addLog('✅ 自启动已关闭', 'warning');
-
-                            // 延迟500ms后重新验证实际状态
-                            setTimeout(async () => {
-                                await verifyAutoStartStatus();
-                            }, 500);
+                            // 移除延迟验证逻辑，信任主进程推送
                         } else {
                             addLog('❌ 关闭自启动失败: ' + (result.error || '未知错误'), 'error');
+                            // 失败时恢复UI状态
+                            autoStartEnabled = true;
+                            updateAutoStartToggle(autoStartEnabled);
                         }
                     } else {
                         // 当前是关闭状态，需要开启
@@ -1191,13 +1228,12 @@
                         const result = await window.electronAPI.autostart.enable();
                         if (result && result.success) {
                             addLog('✅ 自启动已开启', 'success');
-
-                            // 延迟500ms后重新验证实际状态
-                            setTimeout(async () => {
-                                await verifyAutoStartStatus();
-                            }, 500);
+                            // 移除延迟验证逻辑，信任主进程推送
                         } else {
                             addLog('❌ 开启自启动失败: ' + (result.error || '未知错误'), 'error');
+                            // 失败时恢复UI状态
+                            autoStartEnabled = false;
+                            updateAutoStartToggle(autoStartEnabled);
                         }
                     }
                 } else {
@@ -1208,25 +1244,43 @@
                 }
             } catch (error) {
                 addLog('❌ 自启动切换错误: ' + error.message, 'error');
+            } finally {
+                // 解锁UI（延迟1秒确保操作完成）
+                setTimeout(() => {
+                    isTogglingAutoStart = false;
+                    const toggle = document.getElementById('autoStartToggle');
+                    toggle.style.opacity = '1';
+                    toggle.style.pointerEvents = 'auto';
+                }, 1000);
             }
         }
 
-        // 验证自启动实际状态
+        // 验证自启动实际状态（已移除延迟验证逻辑，改为信任主进程推送）
+        // 保留此函数仅用于手动调试或特殊情况下的状态检查
         async function verifyAutoStartStatus() {
             try {
-                console.log('[AUTO_START_UI] 验证自启动实际状态...');
+                console.log('[AUTO_START_UI] 手动验证自启动状态...');
                 const result = await window.electronAPI.autostart.getStatus();
                 if (result && result.success) {
                     const actualStatus = result.enabled || false;
-                    console.log('[AUTO_START_UI] 实际状态:', actualStatus, '当前UI状态:', autoStartEnabled);
+                    const expectedStatus = autoStartEnabled;
+                    console.log('[AUTO_START_UI] 实际状态:', actualStatus, '当前UI状态:', expectedStatus);
 
-                    if (actualStatus !== autoStartEnabled) {
-                        console.log('[AUTO_START_UI] 状态不一致，更新UI');
+                    // 只在确认系统状态与预期不符时才更新，并给出警告
+                    if (actualStatus !== expectedStatus) {
+                        console.warn('[状态不一致] 预期:', expectedStatus, '实际:', actualStatus);
+
+                        // 给用户警告提示，而非静默覆盖
+                        if (actualStatus === false && expectedStatus === true) {
+                            addLog('⚠️ 系统自启动设置未生效，可能需要手动检查系统偏好设置', 'warning');
+                        } else if (actualStatus === true && expectedStatus === false) {
+                            addLog('⚠️ 检测到系统自启动已开启，但UI显示关闭', 'warning');
+                        }
+
                         autoStartEnabled = actualStatus;
                         updateAutoStartToggle(autoStartEnabled);
-                        addLog(`🔄 自启动状态已同步: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
                     } else {
-                        console.log('[AUTO_START_UI] 状态一致');
+                        console.log('[AUTO_START_UI] 状态一致，无需更新');
                     }
                 } else {
                     console.warn('[AUTO_START_UI] 无法验证状态:', result?.error);

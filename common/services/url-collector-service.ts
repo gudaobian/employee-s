@@ -96,7 +96,9 @@ export class URLCollectorService extends EventEmitter {
         return null;
       }
 
-      const rawUrl = await this.platformAdapter.getActiveURL(browserName);
+      // CRITICAL: Pass window title to platform adapter for accurate window/tab matching
+      // Chrome may have multiple windows; title helps match the correct one
+      const rawUrl = await this.platformAdapter.getActiveURL(browserName, activeWindow.title);
       if (!rawUrl) {
         logger.info(`[URLCollector] ❌ Failed to get URL for ${browserName}`);
         logURLCollectFailed(browserName, 'Failed to get URL from platform adapter');

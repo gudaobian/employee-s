@@ -469,7 +469,12 @@ export class ActivityCollectorService extends BaseService {
       activeTime: 0,
       idleTime: 0,
       intervalDuration: this.config.activityInterval,
-      timestamp: new Date()
+      timestamp: new Date(),
+      // 显式初始化所有可选字段，确保重置时清除旧值
+      windowTitle: undefined,
+      processName: undefined,
+      activeUrl: undefined,
+      sessionId: undefined
     };
   }
 
@@ -479,7 +484,18 @@ export class ActivityCollectorService extends BaseService {
     this.lastActivityTime = this.collectionStartTime;
     this.isCurrentlyIdle = false;
 
-    logger.info('[ACTIVITY_COLLECTOR] Accumulated data reset');
+    // 验证重置是否成功 - 所有可选字段应该为 undefined
+    if (this.accumulatedData.activeUrl !== undefined) {
+      logger.error('[ACTIVITY_COLLECTOR] ❌ activeUrl not reset! Value:', this.accumulatedData.activeUrl);
+    }
+    if (this.accumulatedData.windowTitle !== undefined) {
+      logger.error('[ACTIVITY_COLLECTOR] ❌ windowTitle not reset! Value:', this.accumulatedData.windowTitle);
+    }
+    if (this.accumulatedData.processName !== undefined) {
+      logger.error('[ACTIVITY_COLLECTOR] ❌ processName not reset! Value:', this.accumulatedData.processName);
+    }
+
+    logger.info('[ACTIVITY_COLLECTOR] Accumulated data reset and verified');
   }
 
   private hasAccumulatedData(): boolean {
@@ -498,8 +514,9 @@ export class ActivityCollectorService extends BaseService {
       this.accumulatedData.timestamp = new Date();
 
       // 获取当前窗口信息
+      let windowInfo: any; // 定义在外层作用域，便于后续日志使用
       try {
-        const windowInfo = await this.platformAdapter.getActiveWindow();
+        windowInfo = await this.platformAdapter.getActiveWindow();
         this.accumulatedData.windowTitle = windowInfo?.title;
         // 修复: 使用 application 字段（统一接口定义），兼容旧的 processName
         this.accumulatedData.processName = windowInfo?.application || (windowInfo as any)?.processName;
@@ -559,7 +576,12 @@ export class ActivityCollectorService extends BaseService {
         activityInterval: inputActivityData.activityInterval,
         configInterval: this.config.activityInterval,
         match: inputActivityData.activityInterval === this.config.activityInterval,
-        expectedInterval: 600000
+        expectedInterval: 600000,
+        // 新增：URL 相关信息，便于问题诊断
+        activeUrl: inputActivityData.url,
+        urlLastUpdated: this.accumulatedData.timestamp.toISOString(),
+        currentWindow: windowInfo?.application,
+        isBrowser: windowInfo?.application ? this.isBrowserApplication(windowInfo.application) : false
       });
 
       // 验证：activityInterval应该等于配置值

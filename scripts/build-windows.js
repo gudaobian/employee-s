@@ -24,6 +24,67 @@ const BUILD_STEPS = [
     required: true
   },
   {
+    name: '清理electron-builder缓存',
+    custom: async () => {
+      console.log('\n🧹 清理electron-builder缓存...');
+      const cacheLocations = [];
+
+      if (IS_WINDOWS) {
+        const localAppData = process.env.LOCALAPPDATA;
+        if (localAppData) {
+          cacheLocations.push(
+            path.join(localAppData, 'electron-builder'),
+            path.join(localAppData, 'electron'),
+            path.join(localAppData, 'electron-builder', 'Cache', 'nsis')
+          );
+        }
+        const temp = process.env.TEMP;
+        if (temp) {
+          // 清理临时目录中的electron-builder缓存
+          const tempFiles = fs.readdirSync(temp).filter(f => f.startsWith('electron-builder-'));
+          tempFiles.forEach(f => {
+            cacheLocations.push(path.join(temp, f));
+          });
+        }
+      } else {
+        // macOS
+        const home = process.env.HOME;
+        if (home) {
+          cacheLocations.push(
+            path.join(home, 'Library', 'Caches', 'electron-builder'),
+            path.join(home, 'Library', 'Caches', 'electron')
+          );
+        }
+      }
+
+      // 清理 node_modules 缓存
+      const nodeModulesCache = path.join(ROOT_DIR, 'node_modules', '.cache', 'electron-builder');
+      if (fs.existsSync(nodeModulesCache)) {
+        cacheLocations.push(nodeModulesCache);
+      }
+
+      let cleaned = 0;
+      for (const loc of cacheLocations) {
+        if (fs.existsSync(loc)) {
+          try {
+            fs.rmSync(loc, { recursive: true, force: true });
+            console.log(`  ✅ 已清理: ${loc}`);
+            cleaned++;
+          } catch (error) {
+            console.log(`  ⚠️ 清理失败: ${loc} (${error.message})`);
+          }
+        }
+      }
+
+      if (cleaned === 0) {
+        console.log('  ℹ️ 未找到需要清理的缓存');
+      } else {
+        console.log(`  ✅ 共清理 ${cleaned} 个缓存位置`);
+      }
+    },
+    required: false
+  },
+  {
     name: '编译TypeScript',
     command: 'npm',
     args: ['run', 'compile'],
@@ -68,16 +129,34 @@ const BUILD_STEPS = [
 ];
 
 async function runCommand(step) {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     console.log(`\n📋 ${step.name}...`);
-    
+
     // 跳过条件检查
     if (step.skipOnWindows && IS_WINDOWS) {
       console.log('⏭️ 跳过 (Windows平台不适用)');
       resolve(true);
       return;
     }
-    
+
+    // 如果是自定义函数，直接执行
+    if (step.custom && typeof step.custom === 'function') {
+      try {
+        await step.custom();
+        console.log(`✅ ${step.name} 完成`);
+        resolve(true);
+      } catch (error) {
+        console.log(`❌ ${step.name} 出错:`, error.message);
+        if (step.required) {
+          reject(error);
+        } else {
+          console.log(`⚠️ 非关键步骤出错，继续构建...`);
+          resolve(false);
+        }
+      }
+      return;
+    }
+
     // 检查目录是否存在
     if (step.cwd && !fs.existsSync(step.cwd)) {
       if (step.required) {
@@ -90,13 +169,13 @@ async function runCommand(step) {
         return;
       }
     }
-    
+
     const process = spawn(step.command, step.args, {
       cwd: step.cwd || ROOT_DIR,
       stdio: 'inherit',
       shell: true
     });
-    
+
     process.on('close', (code) => {
       if (code === 0) {
         console.log(`✅ ${step.name} 完成`);
@@ -111,7 +190,7 @@ async function runCommand(step) {
         }
       }
     });
-    
+
     process.on('error', (error) => {
       console.log(`❌ ${step.name} 出错:`, error.message);
       if (step.required) {
@@ -158,15 +237,15 @@ async function checkPrerequisites() {
 
 async function verifyBuildOutput() {
   console.log('\n🔍 验证构建输出...');
-  
+
   const checkPaths = [
     { path: 'dist', name: 'TypeScript编译输出', required: true },
     { path: 'native-event-monitor-win/build', name: 'Windows原生模块', required: true },
     { path: 'native-event-monitor/build', name: 'macOS原生模块', required: false }
   ];
-  
+
   let allRequired = true;
-  
+
   for (const check of checkPaths) {
     const fullPath = path.join(ROOT_DIR, check.path);
     if (fs.existsSync(fullPath)) {
@@ -178,7 +257,34 @@ async function verifyBuildOutput() {
       }
     }
   }
-  
+
+  // 验证编译后的代码内容（关键！）
+  console.log('\n🔍 验证编译后的代码内容...');
+  const adapterPath = path.join(ROOT_DIR, 'dist/platforms/windows/windows-adapter.js');
+  if (fs.existsSync(adapterPath)) {
+    const content = fs.readFileSync(adapterPath, 'utf8');
+
+    // 检查关键方法
+    if (content.includes('getActiveURL')) {
+      console.log('✅ getActiveURL 方法存在');
+    } else {
+      console.log('❌ CRITICAL: getActiveURL 方法不存在！');
+      console.log('🚨 这意味着编译了旧代码，必须停止构建！');
+      allRequired = false;
+    }
+
+    // 检查版本标识
+    const versionMatch = content.match(/VERSION\s*=\s*['"]([^'"]+)['"]/);
+    if (versionMatch) {
+      console.log(`✅ WindowsAdapter VERSION: ${versionMatch[1]}`);
+    } else {
+      console.log('⚠️ 无法找到 VERSION 标识');
+    }
+  } else {
+    console.log(`❌ WindowsAdapter 不存在: ${adapterPath}`);
+    allRequired = false;
+  }
+
   return allRequired;
 }
 

@@ -6,12 +6,14 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 const { WindowsNativeInstaller } = require('./windows-native-installer');
 const UnifiedLogManager = require('./unified-log-manager');
+const { initializeAutoUpdate, setupUpdateIPCHandlers } = require('./auto-update-integration');
 
 // Enable manual garbage collection
 app.commandLine.appendSwitch('--expose-gc');
-app.commandLine.appendSwitch('--max-old-space-size=512');
+app.commandLine.appendSwitch('--max-old-space-size=2048'); // Increase from 512MB to 2048MB
 
 // 全局变量
 let mainWindow = null;
@@ -26,6 +28,13 @@ let windowsNativeInstaller = null;
 let logManager = null; // 日志管理器
 let memoryMonitorInterval = null;
 
+// 用户交互状态跟踪（自启动功能）
+let userInteractionState = {
+    hasInteracted: false,
+    lastActionTime: 0,
+    lastActionType: null  // 'enable' | 'disable'
+};
+
 // 检查启动参数
 const isStartMinimized = process.argv.includes('--start-minimized');
 console.log(`[STARTUP] Start minimized: ${isStartMinimized}`);
@@ -38,6 +47,48 @@ const APP_CONFIG = {
     height: 750, // Windows标题栏需要更高，确保自启动按钮不被遮挡
     resizable: false
 };
+
+// Direct log file writing function for Electron main process
+// CRITICAL: Robust logging with directory creation to ensure logs always work
+function writeToLogFile(message) {
+    try {
+        const logDir = path.join(os.homedir(), 'Library', 'Logs', 'employee-monitor', 'logs');
+        const logFile = path.join(logDir, 'app.log');
+
+        // Ensure log directory exists before writing
+        if (!fs.existsSync(logDir)) {
+            fs.mkdirSync(logDir, { recursive: true });
+        }
+
+        const timestamp = new Date().toISOString();
+        const logLine = `${timestamp} INFO ${message}\n`;
+        fs.appendFileSync(logFile, logLine, { encoding: 'utf-8', flag: 'a' });
+    } catch (error) {
+        console.error('[LOG] Failed to write to log file:', error);
+        // Try to write error to console at least
+        console.error('[LOG] Message was:', message);
+    }
+}
+
+// Memory monitoring function (extracted for reusability)
+function logMemoryUsage(label = '') {
+    try {
+        const memUsage = process.memoryUsage();
+        const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+        const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+        const rssMB = Math.round(memUsage.rss / 1024 / 1024);
+
+        const memMsg = `[MEMORY]${label ? ' ' + label + ':' : ''} Heap: ${heapUsedMB}/${heapTotalMB}MB, RSS: ${rssMB}MB`;
+        console.log(memMsg);
+        writeToLogFile(memMsg);
+
+        return { heapUsedMB, heapTotalMB, rssMB };
+    } catch (error) {
+        console.error('[MEMORY] Failed to log memory usage:', error);
+        writeToLogFile(`[MEMORY] Error logging memory: ${error.message}`);
+        return null;
+    }
+}
 
 // 防止多实例运行
 const gotTheLock = app.requestSingleInstanceLock();
@@ -60,11 +111,19 @@ if (process.platform === 'darwin') {
     console.log('macOS detected - keeping Dock icon visible for better UX');
 }
 
+// CRITICAL: Log memory BEFORE app initialization to catch early crashes
+writeToLogFile('[STARTUP] Electron app initializing...');
+logMemoryUsage('STARTUP');
+
 // 应用就绪
 app.whenReady().then(() => {
     console.log('企业安全 (精简版) 启动中...');
     console.log('[MAIN] Environment check - isPackaged:', app.isPackaged, 'appPath:', app.getAppPath());
     console.log('[MAIN] __dirname:', __dirname, 'process.cwd():', process.cwd());
+
+    // CRITICAL: Log memory immediately after ready
+    writeToLogFile('[STARTUP] App ready event fired');
+    logMemoryUsage('READY');
     
     // 隐藏默认菜单栏（Windows/Linux）
     if (process.platform !== 'darwin') {
@@ -86,7 +145,22 @@ app.whenReady().then(() => {
     createMainWindow();
     createTray();
     setupIPCHandlers();
-    
+
+    // Initialize auto-update system
+    setupUpdateIPCHandlers();
+    setTimeout(async () => {
+        try {
+            const updateInitialized = await initializeAutoUpdate();
+            if (updateInitialized) {
+                console.log('[STARTUP] Auto-update system initialized successfully');
+            } else {
+                console.log('[STARTUP] Auto-update system disabled or unavailable');
+            }
+        } catch (error) {
+            console.error('[STARTUP] Failed to initialize auto-update:', error.message);
+        }
+    }, 5000); // Wait 5 seconds for app to fully initialize
+
     // 初始化托盘菜单状态和验证托盘
     setTimeout(() => {
         if (tray && !tray.isDestroyed()) {
@@ -121,24 +195,57 @@ app.whenReady().then(() => {
         }, 3000); // 等待3秒确保所有组件初始化完成
     }
 
-    // Memory monitoring (every 5 minutes)
+    // CRITICAL: Memory monitoring with ultra-aggressive GC and early logging
     memoryMonitorInterval = setInterval(() => {
-        const memUsage = process.memoryUsage();
-        const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-        const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+        try {
+            const mem = logMemoryUsage();
+            if (!mem) return;
 
-        console.log(`[MEMORY] Heap: ${heapUsedMB}MB / ${heapTotalMB}MB`);
+            const { heapUsedMB, heapTotalMB, rssMB } = mem;
 
-        // Trigger GC if heap usage exceeds 300MB
-        if (heapUsedMB > 300 && global.gc) {
-            console.log('[MEMORY] Triggering GC (heap > 300MB)');
-            global.gc();
+            // Ultra-aggressive GC: trigger if heap exceeds 100MB (lowered from 200MB)
+            if (heapUsedMB > 100 && global.gc) {
+                const gcMsg = `[MEMORY] ⚡ Triggering GC (heap > 100MB: ${heapUsedMB}MB)`;
+                console.log(gcMsg);
+                writeToLogFile(gcMsg);
 
-            const afterGC = process.memoryUsage();
-            const afterGCMB = Math.round(afterGC.heapUsed / 1024 / 1024);
-            console.log(`[MEMORY] After GC: ${afterGCMB}MB`);
+                const beforeGC = heapUsedMB;
+                global.gc();
+
+                const afterMem = logMemoryUsage('After GC');
+                const freedMB = beforeGC - (afterMem ? afterMem.heapUsedMB : heapUsedMB);
+
+                if (freedMB > 0) {
+                    writeToLogFile(`[MEMORY] ✅ GC freed ${freedMB}MB`);
+                }
+            }
+
+            // Critical warning if approaching limit
+            if (heapUsedMB > 300) {
+                const warnMsg = `[MEMORY] 🔴 CRITICAL: High memory usage: ${heapUsedMB}MB / 2048MB`;
+                console.warn(warnMsg);
+                writeToLogFile(warnMsg);
+
+                // Force GC immediately
+                if (global.gc) {
+                    global.gc();
+                    logMemoryUsage('Emergency GC');
+                }
+            }
+        } catch (error) {
+            console.error('[MEMORY] Monitor error:', error);
+            writeToLogFile(`[MEMORY] Monitor error: ${error.message}`);
         }
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 30 * 1000); // 30 seconds (ultra-aggressive)
+
+    // CRITICAL: Execute immediate memory check AND log startup message
+    const startMsg = '[MEMORY] 内存监控已启动，每30秒检查一次';
+    sendLogToRenderer(startMsg);
+    writeToLogFile(startMsg);
+    console.log('[MEMORY] Memory monitoring started, checking every 30 seconds');
+
+    // CRITICAL: First memory check immediately (don't wait 30 seconds)
+    logMemoryUsage('Initial check');
 
     // 尝试导入主应用
     try {
@@ -418,6 +525,12 @@ function createMainWindow() {
             // 使用多次重试确保状态能够正确推送
             const pushAutoStartStatus = async (retryCount = 0, maxRetries = 10) => {
                 try {
+                    // 检查用户是否已手动操作过滑块
+                    if (userInteractionState.hasInteracted) {
+                        console.log('[AUTO_START_INIT] 跳过初始推送，用户已手动操作过自启动设置');
+                        return;  // 用户已操作，跳过初始推送
+                    }
+
                     console.log(`[AUTO_START_INIT] 正在获取自启动状态... (尝试 ${retryCount + 1}/${maxRetries})`);
                     const platformAdapter = app_instance?.getPlatformAdapter();
                     if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
@@ -427,7 +540,10 @@ function createMainWindow() {
                         // 推送初始状态到渲染进程
                         if (mainWindow && !mainWindow.isDestroyed()) {
                             console.log('[AUTO_START_INIT] 📤 推送初始状态到UI: enabled =', enabled);
-                            mainWindow.webContents.send('autostart-status-changed', { enabled });
+                            mainWindow.webContents.send('autostart-status-changed', {
+                                enabled,
+                                source: 'initial-sync'  // 标记为初始同步
+                            });
                             sendLogToRenderer(`[状态同步] 自启动状态: ${enabled ? '已开启' : '已关闭'}`);
                         }
                     } else {
@@ -1186,15 +1302,36 @@ function setupIPCHandlers() {
 
                 if (platformAdapter && typeof platformAdapter.enableAutoStart === 'function') {
                     console.log('[AUTO_START] enableAutoStart method available, calling...');
+
+                    // 标记用户已操作
+                    userInteractionState.hasInteracted = true;
+                    userInteractionState.lastActionTime = Date.now();
+                    userInteractionState.lastActionType = 'enable';
+
                     const result = await platformAdapter.enableAutoStart();
                     if (result) {
                         sendLogToRenderer('自启动已开启', 'success');
 
-                        // 推送状态变化到渲染进程
-                        if (mainWindow && !mainWindow.isDestroyed()) {
-                            console.log('[AUTO_START] Sending autostart-status-changed event to renderer (enabled: true)');
-                            mainWindow.webContents.send('autostart-status-changed', { enabled: true });
-                        }
+                        // 延迟推送状态，确保系统配置完全写入
+                        setTimeout(() => {
+                            // 验证设置是否真正生效
+                            if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
+                                platformAdapter.isAutoStartEnabled().then(enabled => {
+                                    if (enabled && mainWindow && !mainWindow.isDestroyed()) {
+                                        console.log('[延迟确认] Sending autostart-status-changed (enabled: true)');
+                                        mainWindow.webContents.send('autostart-status-changed', {
+                                            enabled: true,
+                                            source: 'user-action'  // 标记为用户操作触发
+                                        });
+                                    } else if (!enabled) {
+                                        console.warn('[延迟确认] 自启动设置未生效，系统验证失败');
+                                        sendLogToRenderer('⚠️ 自启动设置可能未生效，请手动检查系统设置', 'warning');
+                                    }
+                                }).catch(err => {
+                                    console.error('[延迟确认] 验证自启动状态失败:', err);
+                                });
+                            }
+                        }, 500);  // 延迟500ms推送状态
 
                         return { success: true, message: '自启动开启成功' };
                     } else {
@@ -1239,15 +1376,35 @@ function setupIPCHandlers() {
                 console.log('[AUTO_START] Platform adapter:', platformAdapter ? 'available' : 'not available');
                 
                 if (platformAdapter && typeof platformAdapter.disableAutoStart === 'function') {
+                    // 标记用户已操作
+                    userInteractionState.hasInteracted = true;
+                    userInteractionState.lastActionTime = Date.now();
+                    userInteractionState.lastActionType = 'disable';
+
                     const result = await platformAdapter.disableAutoStart();
                     if (result) {
                         sendLogToRenderer('自启动已关闭', 'warning');
 
-                        // 推送状态变化到渲染进程
-                        if (mainWindow && !mainWindow.isDestroyed()) {
-                            console.log('[AUTO_START] Sending autostart-status-changed event to renderer (enabled: false)');
-                            mainWindow.webContents.send('autostart-status-changed', { enabled: false });
-                        }
+                        // 延迟推送状态，确保系统配置完全写入
+                        setTimeout(() => {
+                            // 验证设置是否真正生效
+                            if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
+                                platformAdapter.isAutoStartEnabled().then(enabled => {
+                                    if (!enabled && mainWindow && !mainWindow.isDestroyed()) {
+                                        console.log('[延迟确认] Sending autostart-status-changed (enabled: false)');
+                                        mainWindow.webContents.send('autostart-status-changed', {
+                                            enabled: false,
+                                            source: 'user-action'  // 标记为用户操作触发
+                                        });
+                                    } else if (enabled) {
+                                        console.warn('[延迟确认] 自启动关闭未生效，系统验证失败');
+                                        sendLogToRenderer('⚠️ 自启动关闭可能未生效，请手动检查系统设置', 'warning');
+                                    }
+                                }).catch(err => {
+                                    console.error('[延迟确认] 验证自启动状态失败:', err);
+                                });
+                            }
+                        }, 500);  // 延迟500ms推送状态
 
                         return { success: true, message: '自启动关闭成功' };
                     } else {

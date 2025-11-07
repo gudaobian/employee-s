@@ -212,7 +212,7 @@ export class FSMServiceManager extends EventEmitter {
           currentState: metrics.currentState,
           stateDuration: metrics.stateDuration,
           lastTransitionTime: transitionHistory.length > 0 ? transitionHistory[0].timestamp : undefined,
-          handlerCount: this.handlerFactory.createAllHandlers().size
+          handlerCount: this.handlerFactory.getHandlerCount()
         }
       };
 
@@ -246,7 +246,7 @@ export class FSMServiceManager extends EventEmitter {
         },
         handlers: {
           validation: validation,
-          count: this.handlerFactory.createAllHandlers().size
+          count: this.handlerFactory.getHandlerCount()
         },
         configuration: {
           // 可以添加配置信息

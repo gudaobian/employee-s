@@ -157,8 +157,8 @@ describe('Browser URL Collection - Comprehensive Integration Tests', () => {
         // Check permission first
         const permissionChecker = createPermissionChecker();
         if (permissionChecker && testCase.permission === 'granted') {
-          const hasPermission = await permissionChecker.checkPermission();
-          if (!hasPermission) {
+          const result = await permissionChecker.checkAccessibilityPermission();
+          if (!result.granted) {
             console.warn(`⚠️  Skipping: ${testCase.browser} - Permission not granted`);
             return;
           }
@@ -271,12 +271,12 @@ describe('Browser URL Collection - Comprehensive Integration Tests', () => {
         return;
       }
 
-      const hasPermission = await permissionChecker.checkPermission();
+      const result = await permissionChecker.checkAccessibilityPermission();
       const permissionType = isMacOS ? 'Accessibility' : 'UI Automation';
 
-      console.log(`   ${permissionType} Permission: ${hasPermission ? '✅ Granted' : '❌ Denied'}`);
+      console.log(`   ${permissionType} Permission: ${result.granted ? '✅ Granted' : '❌ Denied'}`);
 
-      expect(typeof hasPermission).toBe('boolean');
+      expect(typeof result.granted).toBe('boolean');
     });
 
     it('should provide permission guidance when denied', async () => {
@@ -285,10 +285,10 @@ describe('Browser URL Collection - Comprehensive Integration Tests', () => {
         return;
       }
 
-      const hasPermission = await permissionChecker.checkPermission();
+      const result = await permissionChecker.checkAccessibilityPermission();
 
-      if (!hasPermission) {
-        const guidance = permissionChecker.getPermissionGuidance();
+      if (!result.granted) {
+        const guidance = result.message;
 
         expect(guidance).toBeTruthy();
         expect(guidance.length).toBeGreaterThan(0);
@@ -304,9 +304,9 @@ describe('Browser URL Collection - Comprehensive Integration Tests', () => {
         return;
       }
 
-      const hasPermission = await permissionChecker.checkPermission();
+      const permResult = await permissionChecker.checkAccessibilityPermission();
 
-      if (!hasPermission) {
+      if (!permResult.granted) {
         // Should not throw, should return null or graceful error
         const result = await collector.getActiveURL('Chrome');
 

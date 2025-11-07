@@ -22,7 +22,7 @@ export interface IPlatformAdapter {
   
   // 活动监控
   getActiveWindow(): Promise<WindowInfo>;
-  getActiveURL?(browserName: string): Promise<string | null>; // 获取浏览器URL（可选）
+  getActiveURL?(browserName: string, windowTitle?: string): Promise<string | null>; // 获取浏览器URL（可选，windowTitle用于匹配正确的浏览器窗口）
   startWindowMonitoring(callback: (window: WindowInfo) => void): void;
   stopWindowMonitoring(): void;
   createEventListener?(options: any): Promise<any>;

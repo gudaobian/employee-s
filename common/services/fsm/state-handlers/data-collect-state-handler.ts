@@ -55,6 +55,11 @@ export class DataCollectStateHandler extends BaseStateHandler {
   private lastNetworkCheck = 0;
   private offlineStartTime = 0;
 
+  // CRITICAL: Store bound function references to prevent memory leaks
+  // Without storing references, .bind(this) creates new functions each time
+  // and listeners cannot be removed, causing memory leaks
+  private boundHandleConfigUpdate: (config: any) => Promise<void>;
+
   constructor(
     configService: IConfigService,
     platformAdapter: IPlatformAdapter,
@@ -79,13 +84,19 @@ export class DataCollectStateHandler extends BaseStateHandler {
     // 设置网络监控事件监听
     this.setupNetworkEventListeners();
 
-    // 监听配置更新事件
-    this.configService.on?.('config-updated', this.handleConfigUpdate.bind(this));
+    // CRITICAL: Bind handler functions once and store references
+    // This allows proper cleanup to prevent memory leaks
+    this.boundHandleConfigUpdate = this.handleConfigUpdate.bind(this);
 
-    // 如果应用实例存在，同时监听WebSocket配置更新事件
+    // 监听配置更新事件 - using stored bound reference
+    this.configService.on?.('config-updated', this.boundHandleConfigUpdate);
+
+    // 如果应用实例存在，同时监听WebSocket配置更新事件 - using stored bound reference
     if (this.appInstance) {
-      this.appInstance.on('config-update', this.handleConfigUpdate.bind(this));
+      this.appInstance.on('config-update', this.boundHandleConfigUpdate);
     }
+
+    logger.info('[DATA_COLLECT] Event listeners registered with stored bound references');
   }
 
   protected async execute(context: FSMContext): Promise<StateHandlerResult> {
@@ -520,10 +531,10 @@ export class DataCollectStateHandler extends BaseStateHandler {
       logger.info('[DATA_COLLECT] Attempting screenshot directly (permissions verified by startup check)...');
 
       const screenshotResult = await this.platformAdapter.takeScreenshot({
-        quality: screenshotConfig.quality || 20,
+        quality: screenshotConfig.quality || 10,  // Reduced from 20 to prevent OOM
         format: screenshotConfig.format || 'jpg',
-        maxWidth: screenshotConfig.maxWidth || 1920,
-        maxHeight: screenshotConfig.maxHeight || 1080
+        maxWidth: screenshotConfig.maxWidth || 1280,  // Reduced from 1920 to prevent OOM
+        maxHeight: screenshotConfig.maxHeight || 720   // Reduced from 1080 to prevent OOM
       });
 
       if (screenshotResult.success && screenshotResult.data) {
@@ -1329,13 +1340,22 @@ export class DataCollectStateHandler extends BaseStateHandler {
         return;
       }
 
+      // CRITICAL: Force GC before screenshot to free memory and prevent OOM crash
+      // Screenshot at 5 minutes was causing OOM due to large Base64 string allocation
+      if (global.gc) {
+        logger.info('[DATA_COLLECT] 🧹 Forcing GC before screenshot to prevent OOM...');
+        global.gc();
+        logger.info('[DATA_COLLECT] ✅ GC completed');
+      }
+
       // 执行截图采集 - 使用原有的截图逻辑
+      // CRITICAL: Reduced dimensions and quality to prevent OOM crashes at 5-minute mark
       const screenshotConfig = config.monitoring?.screenshotInterval ? {
         enabled: true,
-        quality: 20,        // 降低质量以减小文件大小
+        quality: 10,        // Reduced from 20 to 10 to minimize memory usage
         format: 'jpg',
-        maxWidth: 1920,     // 最大宽度限制
-        maxHeight: 1080     // 最大高度限制
+        maxWidth: 1280,     // Reduced from 1920 to 1280 (saves ~44% memory)
+        maxHeight: 720      // Reduced from 1080 to 720 (saves ~44% memory)
       } : undefined;
       const screenshotResult = await this.collectScreenshotData(screenshotConfig);
       if (screenshotResult && screenshotResult.data) {
@@ -1351,11 +1371,13 @@ export class DataCollectStateHandler extends BaseStateHandler {
 
             // 🔧 关键修复: 将 Buffer 转换为 Base64 字符串
             // Socket.IO 不能直接传输 Buffer，需要转换为字符串
-            const bufferBase64 = screenshotResult.data instanceof Buffer
-              ? screenshotResult.data.toString('base64')
-              : screenshotResult.data;
+            // CRITICAL: This creates a large string in memory, potential OOM risk
+            const originalBuffer = screenshotResult.data; // Save reference
+            const bufferBase64 = originalBuffer instanceof Buffer
+              ? originalBuffer.toString('base64')
+              : originalBuffer;
 
-            const dataSize = screenshotResult.data.length;
+            const dataSize = originalBuffer.length;
             const base64Size = bufferBase64.length;
 
             // 验证 Base64 格式
@@ -1367,7 +1389,7 @@ export class DataCollectStateHandler extends BaseStateHandler {
             logger.info(`[DATA_COLLECT] Base64预览: ${base64Preview}`);
 
             // 检查原始图片格式 (magic bytes)
-            const magicBytes = screenshotResult.data.slice(0, 4);
+            const magicBytes = originalBuffer.slice(0, 4);
             const isPNG = magicBytes[0] === 0x89 && magicBytes[1] === 0x50;
             const isJPEG = magicBytes[0] === 0xFF && magicBytes[1] === 0xD8;
             const isWebP = magicBytes.toString('ascii', 0, 4) === 'RIFF';
@@ -1379,7 +1401,19 @@ export class DataCollectStateHandler extends BaseStateHandler {
               fileSize: dataSize  // 原始 Buffer 字节大小（不是 Base64 长度）
             });
             logger.info('[DATA_COLLECT] ✅ 截图数据已通过WebSocket服务上传');
-            this.emitEvent('screenshot-uploaded', screenshotResult);
+
+            // CRITICAL: Immediately free screenshot memory after upload
+            screenshotResult.data = null;
+            (screenshotResult as any).buffer = null;
+
+            // Force GC after screenshot upload to reclaim memory
+            if (global.gc) {
+              logger.info('[DATA_COLLECT] 🧹 Forcing GC after screenshot upload...');
+              global.gc();
+              logger.info('[DATA_COLLECT] ✅ Post-screenshot GC completed');
+            }
+
+            this.emitEvent('screenshot-uploaded', { timestamp: screenshotResult.timestamp });
           } catch (error: any) {
             logger.warn('[DATA_COLLECT] ⚠️ 截图数据上传失败: ' + error.message);
             this.emitEvent('screenshot-upload-failed', { error: error.message });
@@ -2236,6 +2270,58 @@ export class DataCollectStateHandler extends BaseStateHandler {
       
     } catch (error) {
       logger.warn('[DATA_COLLECT] 内存清理失败:', error);
+    }
+  }
+
+  /**
+   * CRITICAL: Cleanup method to remove event listeners and prevent memory leaks
+   * MUST be called when this handler is destroyed or replaced
+   */
+  public cleanup(): void {
+    try {
+      logger.info('[DATA_COLLECT] Cleaning up event listeners and timers...');
+
+      // Remove config update listeners using stored bound references
+      if (this.boundHandleConfigUpdate) {
+        // Use removeListener if available (EventEmitter standard method)
+        if (typeof (this.configService as any).removeListener === 'function') {
+          (this.configService as any).removeListener('config-updated', this.boundHandleConfigUpdate);
+        }
+
+        if (this.appInstance) {
+          this.appInstance.removeListener('config-update', this.boundHandleConfigUpdate);
+        }
+
+        logger.info('[DATA_COLLECT] ✅ Config update listeners removed');
+      }
+
+      // Clear all timers
+      if (this.screenshotInterval) {
+        clearInterval(this.screenshotInterval);
+        this.screenshotInterval = undefined;
+      }
+      if (this.activityInterval) {
+        clearInterval(this.activityInterval);
+        this.activityInterval = undefined;
+      }
+      if (this.processInterval) {
+        clearInterval(this.processInterval);
+        this.processInterval = undefined;
+      }
+      if (this.collectionInterval) {
+        clearInterval(this.collectionInterval);
+        this.collectionInterval = undefined;
+      }
+      if (this.networkCheckInterval) {
+        clearInterval(this.networkCheckInterval);
+        this.networkCheckInterval = undefined;
+      }
+
+      logger.info('[DATA_COLLECT] ✅ All timers cleared');
+      logger.info('[DATA_COLLECT] ✅ Cleanup completed successfully');
+
+    } catch (error) {
+      logger.error('[DATA_COLLECT] Error during cleanup:', error);
     }
   }
 }

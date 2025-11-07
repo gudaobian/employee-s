@@ -192,12 +192,12 @@ export class PlatformAdapterBridge extends PlatformAdapterBase implements Common
   }
 
   // 获取浏览器活动URL（转发到底层适配器）
-  async getActiveURL(browserName: string): Promise<string | null> {
-    logger.info(`[PLATFORM_BRIDGE] 获取浏览器URL请求: ${browserName}`);
+  async getActiveURL(browserName: string, windowTitle?: string): Promise<string | null> {
+    logger.info(`[PLATFORM_BRIDGE] 获取浏览器URL请求: ${browserName}, windowTitle: "${windowTitle || ''}"`);
     try {
       // 检查底层平台适配器是否支持getActiveURL
       if ((this.platformAdapter as any).getActiveURL) {
-        const url = await (this.platformAdapter as any).getActiveURL(browserName);
+        const url = await (this.platformAdapter as any).getActiveURL(browserName, windowTitle);
         logger.info(`[PLATFORM_BRIDGE] ✅ 成功获取URL: ${url || 'null'}`);
         return url;
       } else {

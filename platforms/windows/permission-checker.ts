@@ -10,7 +10,8 @@ import { logger } from '../../common/utils';
 const execAsync = promisify(exec);
 
 export interface PermissionCheckResult {
-  available: boolean;
+  available?: boolean;
+  granted?: boolean;
   message: string;
 }
 
@@ -158,6 +159,18 @@ export class WindowsPermissionChecker {
       logger.error('[Windows Permission] ❌ 无法打开服务管理器:', error.message);
       return false;
     }
+  }
+
+  /**
+   * Common interface method for cross-platform compatibility
+   * Wraps checkUIAutomationAvailability for unified testing interface
+   */
+  async checkAccessibilityPermission(): Promise<PermissionCheckResult> {
+    const result = await this.checkUIAutomationAvailability();
+    return {
+      granted: result.available,
+      message: result.message
+    };
   }
 
   /**

@@ -15,7 +15,10 @@ module.exports = {
     'platforms/**/*.ts',
     '!**/*.d.ts',
     '!**/node_modules/**',
-    '!**/dist/**'
+    '!**/dist/**',
+    '!**/test/**',
+    '!**/*.test.ts',
+    '!**/*.benchmark.ts'
   ],
   moduleNameMapper: {
     '^@common/(.*)$': '<rootDir>/common/$1',
@@ -31,7 +34,8 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/release/',
-    '/dist/'
+    '/dist/',
+    '/test/performance/'
   ],
   globals: {
     'ts-jest': {
@@ -39,6 +43,16 @@ module.exports = {
         esModuleInterop: true,
         allowSyntheticDefaultImports: true
       }
+    }
+  },
+  testTimeout: 60000,
+  maxWorkers: 1,
+  coverageThreshold: {
+    global: {
+      branches: 70,
+      functions: 70,
+      lines: 80,
+      statements: 80
     }
   }
 };

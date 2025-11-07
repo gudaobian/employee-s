@@ -1082,11 +1082,21 @@ export class DarwinAdapter extends PlatformAdapterBase {
     try {
       // 使用 Electron 的原生 API 检查自启动状态
       const { app } = require('electron');
-      
+
       if (app) {
-        const loginItemSettings = app.getLoginItemSettings();
-        logger.debug('Current login item settings:', loginItemSettings);
-        return loginItemSettings.openAtLogin;
+        // 多次读取确认状态稳定（避免读取到缓存值）
+        const settings1 = app.getLoginItemSettings();
+        await new Promise(resolve => setTimeout(resolve, 50));  // 短延迟50ms
+        const settings2 = app.getLoginItemSettings();
+
+        // 如果两次读取结果一致，认为状态稳定
+        const isEnabled = settings1.openAtLogin && settings2.openAtLogin;
+        logger.debug('Auto-start status (verified):', {
+          first: settings1.openAtLogin,
+          second: settings2.openAtLogin,
+          result: isEnabled
+        });
+        return isEnabled;
       } else {
         // 如果没有 Electron app 实例，回退到手动检查
         logger.warn('No Electron app instance available, checking manual plist file');
@@ -1103,7 +1113,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
     try {
       // 使用 Electron 的原生 API 而不是手动创建 plist 文件
       const { app } = require('electron');
-      
+
       if (app) {
         // 设置登录项，隐藏启动
         app.setLoginItemSettings({
@@ -1112,9 +1122,20 @@ export class DarwinAdapter extends PlatformAdapterBase {
           name: '企业安全',
           path: process.execPath
         });
-        
-        logger.info('Auto start enabled successfully using Electron API');
-        return true;
+
+        // 多次验证设置是否成功（最多重试3次）
+        for (let i = 0; i < 3; i++) {
+          await new Promise(resolve => setTimeout(resolve, 100));  // 延迟100ms
+          const settings = app.getLoginItemSettings();
+          if (settings.openAtLogin) {
+            logger.info(`Auto-start enabled and verified after ${(i + 1) * 100}ms`);
+            return true;
+          }
+        }
+
+        // 如果3次验证都失败，使用手动方法
+        logger.warn('Auto-start setting not verified after 300ms, falling back to manual method');
+        return await this.enableAutoStartManual();
       } else {
         // 如果没有 Electron app 实例，回退到手动方法
         logger.warn('No Electron app instance available, using manual plist method');
@@ -1175,7 +1196,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
     try {
       // 使用 Electron 的原生 API 禁用自启动
       const { app } = require('electron');
-      
+
       if (app) {
         // 禁用登录项
         app.setLoginItemSettings({
@@ -1184,10 +1205,18 @@ export class DarwinAdapter extends PlatformAdapterBase {
           name: '企业安全',
           path: process.execPath
         });
-        
-        logger.info('Auto start disabled successfully using Electron API');
+
+        // 多次验证设置是否成功（最多重试3次）
+        for (let i = 0; i < 3; i++) {
+          await new Promise(resolve => setTimeout(resolve, 100));  // 延迟100ms
+          const settings = app.getLoginItemSettings();
+          if (!settings.openAtLogin) {
+            logger.info(`Auto-start disabled and verified after ${(i + 1) * 100}ms`);
+            break;
+          }
+        }
       }
-      
+
       // 同时清理可能存在的手动创建的 plist 文件
       await this.disableAutoStartManual();
       
@@ -1288,7 +1317,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
    * @param browserName 浏览器名称 (Safari, Chrome, Firefox, Edge, Brave等)
    * @returns URL字符串，失败返回null
    */
-  async getActiveURL(browserName: string): Promise<string | null> {
+  async getActiveURL(browserName: string, windowTitle?: string): Promise<string | null> {
     try {
       // 确保有辅助功能权限
       await this.ensureAccessibilityPermission();
@@ -1297,17 +1326,20 @@ export class DarwinAdapter extends PlatformAdapterBase {
       const { DarwinURLCollector } = await import('./url-collector');
       const collector = new DarwinURLCollector();
 
-      // 采集URL
-      const urlInfo = await collector.getActiveURL(browserName);
+      // 采集URL (传递windowTitle用于精确匹配)
+      const urlInfo = await collector.getActiveURL(browserName, windowTitle);
 
       if (urlInfo) {
+        // 处理URL: 只保留协议+域名/IP+端口
+        const cleanedUrl = this.extractBaseUrl(urlInfo.url);
+
         // 记录成功的URL采集
-        logURLCollected(browserName, urlInfo.url, {
+        logURLCollected(browserName, cleanedUrl, {
           collectionMethod: urlInfo.collectionMethod,
           quality: urlInfo.quality,
-          privacyLevel: 'full' // darwin-adapter层面认为是完整URL
+          privacyLevel: 'domain_only' // 只保留域名+端口
         });
-        return urlInfo.url;
+        return cleanedUrl;
       } else {
         // 记录采集失败
         logURLCollectFailed(browserName, 'URL collector returned null');
@@ -1329,6 +1361,23 @@ export class DarwinAdapter extends PlatformAdapterBase {
         logURLCollectFailed(browserName, errorMsg);
       }
       return null;
+    }
+  }
+
+  /**
+   * 提取URL的基础部分(协议+域名/IP+端口)
+   * 例如: https://www.baidu.com/s?ie=utf-8 -> https://www.baidu.com
+   *      http://23.95.193.155:3001/path -> http://23.95.193.155:3001
+   */
+  private extractBaseUrl(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      // 只保留协议+域名+端口
+      return `${urlObj.protocol}//${urlObj.host}`;
+    } catch (error) {
+      // 如果URL解析失败,返回原URL
+      logger.warn('[URL Processing] Failed to parse URL, returning original:', url);
+      return url;
     }
   }
 

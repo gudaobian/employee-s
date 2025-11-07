@@ -8,6 +8,32 @@ import { logger, Logger } from '../common/utils';
 import { getPlatformInfo } from '../platforms';
 
 /**
+ * 检查macOS权限（仅在macOS平台上运行）
+ */
+async function checkMacOSPermissions(): Promise<void> {
+  if (process.platform !== 'darwin') {
+    return; // Only for macOS
+  }
+
+  try {
+    const { MacOSPermissionChecker } = await import('../platforms/macos/permission-checker');
+    const checker = new MacOSPermissionChecker();
+    const result = await checker.checkAccessibilityPermission();
+
+    if (!result.granted) {
+      logger.warn('⚠️ macOS辅助功能权限未授予');
+      logger.info('浏览器URL采集功能将无法正常工作');
+      logger.info('运行以下命令查看授权指南: npm run check-permissions');
+      logger.info('或运行以下命令自动打开系统设置: npm run open-accessibility-settings');
+    } else {
+      logger.info('✅ macOS辅助功能权限已授予');
+    }
+  } catch (error) {
+    logger.error('[Startup] Permission check failed:', error);
+  }
+}
+
+/**
  * 应用程序主入口
  */
 async function main(): Promise<void> {
@@ -26,29 +52,32 @@ async function main(): Promise<void> {
       processId: process.pid,
       nodeVersion: process.version
     });
-    
+
     // 检查平台支持
     if (!platformInfo.isSupported) {
       throw new Error(`Unsupported platform: ${platformInfo.name}`);
     }
-    
+
+    // 检查macOS权限（仅限macOS）
+    await checkMacOSPermissions();
+
     // 创建应用程序实例
     app = new EmployeeMonitorApp();
-    
+
     // 启动应用程序
     await app.start();
-    
+
     logger.info('Employee Monitor started successfully');
-    
+
     // 设置信号处理
     setupSignalHandlers(app);
-    
+
     // 保持进程运行
     process.stdin.resume();
-    
+
   } catch (error) {
     logger.error('Failed to start Employee Monitor', error);
-    
+
     if (app) {
       try {
         await app.stop();
@@ -56,7 +85,7 @@ async function main(): Promise<void> {
         logger.error('Error during shutdown', shutdownError);
       }
     }
-    
+
     process.exit(1);
   }
 }

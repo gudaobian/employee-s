@@ -9,7 +9,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { EmployeeMonitorApp, AppConfig, AppState } from './app';
 import { createPlatformAdapter, getPlatformInfo } from '../platforms';
-import { logger } from '../common/utils';
+import { logger, urlCollectStats } from '../common/utils';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -320,6 +320,102 @@ program
     } catch (error: any) {
       console.error(chalk.red('❌ Screenshot failed:'), error.message);
       logger.error('CLI screenshot command failed', error);
+      process.exit(1);
+    }
+  });
+
+// Check Permissions 命令
+program
+  .command('check-permissions')
+  .description('检查macOS辅助功能权限状态')
+  .action(async () => {
+    try {
+      if (process.platform !== 'darwin') {
+        console.log(chalk.yellow('⚠️  This command is only available on macOS'));
+        return;
+      }
+
+      const { MacOSPermissionChecker } = await import('../platforms/macos/permission-checker');
+      const checker = new MacOSPermissionChecker();
+      const result = await checker.checkAccessibilityPermission();
+
+      if (result.granted) {
+        console.log(chalk.green('✅ 辅助功能权限已授予'));
+        console.log('浏览器URL采集功能可正常使用');
+      } else {
+        console.log(chalk.red('❌ 辅助功能权限未授予'));
+        console.log('\n' + result.message);
+        console.log(chalk.yellow('\n如需自动打开系统设置，请运行:'));
+        console.log(chalk.cyan('  npm run open-accessibility-settings'));
+      }
+    } catch (error: any) {
+      console.error(chalk.red('❌ 权限检查失败:'), error.message);
+      logger.error('CLI check-permissions command failed', error);
+      process.exit(1);
+    }
+  });
+
+// Stats 命令
+program
+  .command('stats')
+  .description('显示URL采集统计信息')
+  .option('--reset', '重置统计数据')
+  .option('--json', '以JSON格式输出')
+  .action((options) => {
+    try {
+      if (options.reset) {
+        urlCollectStats.reset();
+        console.log(chalk.green('✅ 统计数据已重置'));
+        return;
+      }
+
+      if (options.json) {
+        const metricsData = urlCollectStats.exportJSON();
+        console.log(JSON.stringify(metricsData, null, 2));
+      } else {
+        // Display formatted report
+        console.log(urlCollectStats.getReport());
+
+        // Additional health summary
+        const metrics = urlCollectStats.getMetrics();
+        if (metrics.byBrowser.size > 0) {
+          console.log(chalk.blue('Browser Health Status:'));
+          console.log('─'.repeat(50));
+
+          for (const [browser, _] of metrics.byBrowser.entries()) {
+            const health = urlCollectStats.getBrowserHealth(browser);
+            const successRate = urlCollectStats.getBrowserSuccessRate(browser);
+
+            let healthIcon = '';
+            let healthColor: any = chalk.white;
+
+            switch (health) {
+              case 'healthy':
+                healthIcon = '✅';
+                healthColor = chalk.green;
+                break;
+              case 'degraded':
+                healthIcon = '⚠️';
+                healthColor = chalk.yellow;
+                break;
+              case 'failing':
+                healthIcon = '❌';
+                healthColor = chalk.red;
+                break;
+              case 'unknown':
+                healthIcon = '❓';
+                healthColor = chalk.gray;
+                break;
+            }
+
+            console.log(`  ${healthIcon} ${healthColor(browser)}: ${health} (${successRate.toFixed(1)}% success rate)`);
+          }
+          console.log('');
+        }
+      }
+    } catch (error: any) {
+      console.error(chalk.red('❌ 统计命令失败:'), error.message);
+      logger.error('CLI stats command failed', error);
       process.exit(1);
     }
   });

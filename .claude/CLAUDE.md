@@ -6,6 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 Employee Monitoring System **Employee Client** - A cross-platform desktop application (Windows/macOS) built with Electron that monitors employee activities, captures screenshots, and communicates with the API server in real-time.
 
+## User Environment & Workflow
+
+**IMPORTANT**: The user ALWAYS downloads and installs the latest version immediately after each build completes.
+
+- **Version Management**: Do NOT repeatedly suggest checking version or updating the application
+- **Build Pipeline**: User uses `/build-windows` command (GitHub Actions) for production builds
+- **Installation Practice**: User downloads the latest installer from GitHub releases as soon as it's available
+- **Assumption**: When troubleshooting, assume the user is running the most recent released version unless explicitly stated otherwise
+
+This workflow means version-related suggestions should focus on:
+1. Whether a NEW build is needed (e.g., due to code changes)
+2. Whether the current build pipeline is working correctly
+3. NOT on whether the user should update their installed version
+
 ## Development Commands
 
 ```bash

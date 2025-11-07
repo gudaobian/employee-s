@@ -4,26 +4,42 @@
  */
 
 import { BasePlatformAdapter } from '../common/base-platform-adapter';
-import { 
-  ScreenshotOptions, 
-  ScreenshotResult, 
-  PermissionStatus, 
-  SystemInfo, 
-  ProcessInfo, 
-  WindowInfo, 
-  PlatformCapabilities 
+import {
+  ScreenshotOptions,
+  ScreenshotResult,
+  PermissionStatus,
+  SystemInfo,
+  ProcessInfo,
+  WindowInfo,
+  PlatformCapabilities
 } from '../../common/interfaces/platform-interface';
+import { DarwinURLCollector, URLInfo } from '../darwin/url-collector';
+import { MacOSPermissionChecker } from './permission-checker';
+import { logger, urlCollectStats } from '../../common/utils';
+import * as activeWinCompat from './active-win-compat';
 
 export class MacOSAdapter extends BasePlatformAdapter {
+  static readonly VERSION = '1.1.0';
+
   private windowMonitoringInterval?: NodeJS.Timeout;
   private windowMonitoringCallback?: (window: WindowInfo) => void;
+  private urlCollector?: DarwinURLCollector;
+  private permissionChecker?: MacOSPermissionChecker;
+  private permissionGranted: boolean = false;
+  private permissionCheckTime: number = 0;
+  private readonly PERMISSION_CHECK_INTERVAL = 60000; // 60 seconds cache
 
   constructor() {
     super();
   }
 
   protected async doInitialize(): Promise<void> {
-    // macOS特定的初始化逻辑
+    logger.info(`[MacOSAdapter] Initializing version ${MacOSAdapter.VERSION}`);
+
+    // Check active-win-compat module availability
+    const isModuleAvailable = await activeWinCompat.isAvailable();
+    logger.info('[MacOSAdapter] active-win-compat available:', isModuleAvailable);
+
     this.logOperation('macos-adapter-initialize');
   }
 
@@ -31,6 +47,154 @@ export class MacOSAdapter extends BasePlatformAdapter {
     // 清理监控
     this.stopWindowMonitoring();
     this.logOperation('macos-adapter-cleanup');
+  }
+
+  /**
+   * Ensure URL collector is initialized and permissions are granted
+   * Uses 60-second caching to avoid repeated permission checks
+   */
+  private async ensureURLCollectorInitialized(): Promise<boolean> {
+    // Cache check - avoid repeated permission checks
+    if (this.urlCollector && this.permissionGranted &&
+        Date.now() - this.permissionCheckTime < this.PERMISSION_CHECK_INTERVAL) {
+      logger.debug('[MacOSAdapter] Using cached permission status (granted)');
+      return true;
+    }
+
+    // Initialize collector and permission checker
+    if (!this.urlCollector) {
+      this.urlCollector = new DarwinURLCollector();
+    }
+    if (!this.permissionChecker) {
+      this.permissionChecker = new MacOSPermissionChecker();
+    }
+
+    logger.debug('[MacOSAdapter] Checking permissions (cache expired or first check)');
+
+    // Check permissions
+    const permissionResult = await this.permissionChecker.checkAccessibilityPermission();
+    this.permissionGranted = permissionResult.granted;
+    this.permissionCheckTime = Date.now();
+
+    logger.debug(`[MacOSAdapter] Permission check result: ${permissionResult.granted ? 'granted' : 'not granted'}`);
+
+    return this.permissionGranted;
+  }
+
+  /**
+   * Get active URL from browser with retry mechanism
+   * Retries up to MAX_RETRIES times with exponential backoff
+   * CRITICAL: Accepts windowTitle to match correct browser window/tab
+   *
+   * @param browserName - Browser name (Safari, Chrome, Firefox, etc.)
+   * @param windowTitle - Window title for matching correct tab (optional but recommended)
+   * @returns URL string if successful, null if failed
+   */
+  async getActiveURL(browserName: string, windowTitle?: string): Promise<string | null> {
+    return this.getActiveURLWithRetry(browserName, windowTitle, 0);
+  }
+
+  /**
+   * Internal retry logic for getActiveURL
+   *
+   * @param browserName - Browser name
+   * @param windowTitle - Window title for tab matching
+   * @param retryCount - Current retry attempt
+   * @returns URL string if successful, null if failed
+   */
+  private async getActiveURLWithRetry(
+    browserName: string,
+    windowTitle: string | undefined,
+    retryCount: number
+  ): Promise<string | null> {
+    const MAX_RETRIES = 2;
+    const RETRY_DELAY_MS = 500; // Base delay: 500ms
+
+    try {
+      return await this.doGetActiveURL(browserName, windowTitle);
+    } catch (error) {
+      if (retryCount < MAX_RETRIES) {
+        const delay = RETRY_DELAY_MS * Math.pow(2, retryCount); // Exponential backoff
+        logger.warn(`[MacOSAdapter] Retry ${retryCount + 1}/${MAX_RETRIES} after ${delay}ms for ${browserName}`);
+
+        await this.sleep(delay);
+        return await this.getActiveURLWithRetry(browserName, windowTitle, retryCount + 1);
+      }
+
+      // Max retries exceeded
+      logger.error(`[MacOSAdapter] Failed after ${MAX_RETRIES} retries: ${browserName}`, error);
+      urlCollectStats.recordFailure(browserName, `Max retries exceeded: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Core URL collection logic (extracted for retry)
+   * CRITICAL: Passes windowTitle to URL collector for accurate tab matching
+   *
+   * @param browserName - Browser name
+   * @param windowTitle - Window title for tab matching
+   * @returns URL string if successful
+   * @throws Error if collection fails
+   */
+  private async doGetActiveURL(browserName: string, windowTitle?: string): Promise<string | null> {
+    return this.executeWithErrorHandling(
+      async () => {
+        const hasPermission = await this.ensureURLCollectorInitialized();
+        if (!hasPermission) {
+          urlCollectStats.recordFailure(browserName, 'Permission not granted');
+          throw new Error('Accessibility permission not granted');
+        }
+
+        const startTime = Date.now();
+        // CRITICAL: Pass windowTitle to URL collector
+        logger.info(`[MacOSAdapter] Calling urlCollector.getActiveURL with windowTitle: "${windowTitle}"`);
+        const urlInfo = await this.urlCollector!.getActiveURL(browserName, windowTitle);
+        const latency = Date.now() - startTime;
+
+        if (urlInfo) {
+          logger.info(`✅ URL collected in ${latency}ms: ${browserName} - ${urlInfo.url}${windowTitle ? ' (title-matched)' : ''}`);
+
+          // Record success with method and latency
+          const method = urlInfo.collectionMethod || 'applescript';
+          urlCollectStats.recordSuccess(browserName, method, latency);
+
+          return urlInfo.url;
+        }
+
+        // No URL returned - this is a failure
+        urlCollectStats.recordFailure(browserName, 'No URL returned from collector');
+        throw new Error('No URL returned from collector');
+      },
+      'get-active-url'
+    );
+  }
+
+  /**
+   * Sleep utility for retry delays
+   *
+   * @param ms - Milliseconds to sleep
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Force refresh permission status (bypass cache)
+   */
+  async refreshPermissionStatus(): Promise<boolean> {
+    this.permissionCheckTime = 0; // Force permission recheck
+    return await this.ensureURLCollectorInitialized();
+  }
+
+  /**
+   * Open Accessibility Settings for user to grant permission
+   */
+  async openAccessibilitySettings(): Promise<boolean> {
+    if (!this.permissionChecker) {
+      this.permissionChecker = new MacOSPermissionChecker();
+    }
+    return await this.permissionChecker.openAccessibilitySettings();
   }
 
   async takeScreenshot(options: ScreenshotOptions = {}): Promise<ScreenshotResult> {
@@ -230,35 +394,75 @@ export class MacOSAdapter extends BasePlatformAdapter {
   async getActiveWindow(): Promise<WindowInfo> {
     return this.executeWithErrorHandling(
       async () => {
+        logger.debug('[MacOSAdapter] Window monitoring method:', {
+          primary: 'active-win-compat (NSWorkspace)',
+          fallback: 'AppleScript (System Events)'
+        });
+
+        // Try active-win-compat (NSWorkspace API) first
         try {
-          // 使用兼容层
-          const { activeWindow } = require('../../active-win-compat');
-          const window = await activeWindow();
-          
+          const startTime = Date.now();
+          logger.debug('[MacOSAdapter] Trying active-win-compat (NSWorkspace API)...');
+
+          const window = await activeWinCompat.activeWindow();
+          const elapsed = Date.now() - startTime;
+
           if (window) {
-            return {
-              id: window.id.toString(),
-              title: window.title,
-              application: window.owner.name,
-              processId: window.owner.processId,
-              bounds: {
-                x: window.bounds.x,
-                y: window.bounds.y,
-                width: window.bounds.width,
-                height: window.bounds.height
-              },
-              isVisible: true
-            };
+            logger.info('[MacOSAdapter] ✅ Got window:', {
+              app: window.owner.name,
+              pid: window.owner.processId,
+              title: window.title ? `"${window.title}"` : '(no title)',
+              method: 'nsworkspace',
+              latency_ms: elapsed
+            });
+
+            return this.convertToWindowInfo(window);
           }
-        } catch (error) {
-          // 降级到AppleScript
-          return await this.getActiveWindowWithAppleScript();
+
+          logger.debug(`[MacOSAdapter] active-win-compat returned null (${elapsed}ms)`);
+        } catch (error: any) {
+          logger.warn('[MacOSAdapter] active-win-compat failed:', {
+            error: error.message,
+            code: error.code
+          });
         }
 
-        throw new Error('Unable to get active window');
+        // Fallback to AppleScript
+        logger.debug('[MacOSAdapter] Falling back to AppleScript (System Events)...');
+        const startTime = Date.now();
+        const result = await this.getActiveWindowWithAppleScript();
+        const elapsed = Date.now() - startTime;
+
+        logger.info('[MacOSAdapter] ✅ Got window (fallback):', {
+          app: result.application,
+          title: result.title,
+          method: 'applescript',
+          latency_ms: elapsed
+        });
+
+        return result;
       },
       'get-active-window'
     );
+  }
+
+  /**
+   * Convert active-win-compat result to WindowInfo interface
+   */
+  private convertToWindowInfo(window: activeWinCompat.ActiveWindowResult): WindowInfo {
+    return {
+      id: window.id.toString(),
+      title: window.title,
+      application: window.owner.name,
+      processId: window.owner.processId,
+      bounds: {
+        x: window.bounds.x,
+        y: window.bounds.y,
+        width: window.bounds.width,
+        height: window.bounds.height
+      },
+      isVisible: true
+    };
   }
 
   startWindowMonitoring(callback: (window: WindowInfo) => void): void {

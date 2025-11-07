@@ -36,6 +36,9 @@ export * from './path-helper';
 // 内存监控器
 export * from './memory-monitor';
 
+// URL采集统计
+export * from './url-collect-stats';
+
 // 便捷导出 - 常用工具的实例
 export { logger } from './logger';
 export { timerManager, managedSetTimeout, managedSetInterval, managedClear, delay } from './timer-manager';
@@ -45,3 +48,4 @@ export { environmentDetector, getEnvironmentInfo, getRuntimeCapabilities, hasCap
 export { errorHandler, handleError, createError, ErrorType, ErrorSeverity } from './error-handler';
 export { httpClient } from './http-client';
 export { resourceManager } from './resource-manager';
+export { urlCollectStats } from './url-collect-stats';export { memoryMonitor, MemoryMonitor } from './memory-monitor';

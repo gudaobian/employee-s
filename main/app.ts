@@ -8,6 +8,7 @@ import { DeviceState, DeviceFSMService } from '../common/services/fsm/device-fsm
 import { ServiceManager } from '../common/services';
 import { TamperDetectionService, TamperEvent } from '../common/services/tamper-detection-service';
 import { PowerEventService } from '../common/services/power-event-service';
+import { PermissionMonitorService } from '../common/services/permission-monitor-service';
 import { createPlatformAdapter, platformFactory } from '../platforms';
 import { IPlatformAdapter as PlatformIPlatformAdapter } from '../platforms/interfaces/platform-interface';
 import { IPlatformAdapter } from '../common/interfaces/platform-interface';
@@ -40,6 +41,7 @@ export class EmployeeMonitorApp extends EventEmitter {
   private stateMachine?: DeviceFSMService;
   private tamperDetectionService?: TamperDetectionService;
   private powerEventService?: PowerEventService;
+  private permissionMonitorService?: PermissionMonitorService;
   private healthCheckTimer?: string;
 
   constructor(config: Partial<AppConfig> = {}) {
@@ -128,8 +130,12 @@ export class EmployeeMonitorApp extends EventEmitter {
       this.initializeTamperDetection();
 
       // 6. 初始化电源事件服务
-      this.emitProgress('正在启动电源事件监控...', 97);
+      this.emitProgress('正在启动电源事件监控...', 96);
       this.initializePowerEventService();
+
+      // 7. 初始化权限监控服务（仅macOS）
+      this.emitProgress('正在启动权限监控...', 98);
+      this.initializePermissionMonitoring();
 
       this.setState(AppState.RUNNING);
       logger.info('Employee Monitor App started successfully');
@@ -176,6 +182,12 @@ export class EmployeeMonitorApp extends EventEmitter {
       if (this.powerEventService) {
         this.powerEventService.removeAllListeners();
         this.powerEventService = undefined;
+      }
+
+      // 停止权限监控服务
+      if (this.permissionMonitorService) {
+        this.permissionMonitorService.stop();
+        this.permissionMonitorService = undefined;
       }
 
       // 停止状态机
@@ -560,6 +572,64 @@ export class EmployeeMonitorApp extends EventEmitter {
       logger.info('[POWER_EVENT] Service started successfully');
     } catch (error) {
       logger.error('[POWER_EVENT] Failed to initialize service:', error);
+      // 不抛出异常，允许应用继续运行
+    }
+  }
+
+  /**
+   * 初始化权限监控服务（仅macOS）
+   */
+  private async initializePermissionMonitoring(): Promise<void> {
+    if (process.platform !== 'darwin') {
+      logger.debug('[PermissionMonitor] Skipping - not macOS');
+      return;
+    }
+
+    try {
+      logger.info('[PermissionMonitor] Initializing service...');
+
+      // 创建权限监控服务实例
+      this.permissionMonitorService = new PermissionMonitorService();
+
+      // 监听权限撤销事件
+      this.permissionMonitorService.on('permission-revoked', (result) => {
+        logger.warn('[App] ⚠️ Accessibility permission was revoked!');
+        logger.warn('[App] 浏览器URL采集功能已停止工作');
+        logger.info('[App] 请重新授予权限: npm run open-accessibility-settings');
+
+        // 刷新平台适配器的权限状态（如果支持）
+        if (this.platformAdapter && (this.platformAdapter as any).refreshPermissionStatus) {
+          (this.platformAdapter as any).refreshPermissionStatus().catch((error: Error) => {
+            logger.error('[App] Failed to refresh permission status:', error);
+          });
+        }
+
+        // 发出应用事件
+        this.emit('permission-revoked', result);
+      });
+
+      // 监听权限授予事件
+      this.permissionMonitorService.on('permission-granted', (result) => {
+        logger.info('[App] ✅ Accessibility permission was granted!');
+        logger.info('[App] 浏览器URL采集功能已恢复');
+
+        // 刷新平台适配器的权限状态（如果支持）
+        if (this.platformAdapter && (this.platformAdapter as any).refreshPermissionStatus) {
+          (this.platformAdapter as any).refreshPermissionStatus().catch((error: Error) => {
+            logger.error('[App] Failed to refresh permission status:', error);
+          });
+        }
+
+        // 发出应用事件
+        this.emit('permission-granted', result);
+      });
+
+      // 启动权限监控（每60秒检查一次）
+      await this.permissionMonitorService.start(60000);
+
+      logger.info('[PermissionMonitor] Service started successfully');
+    } catch (error) {
+      logger.error('[PermissionMonitor] Failed to initialize service:', error);
       // 不抛出异常，允许应用继续运行
     }
   }

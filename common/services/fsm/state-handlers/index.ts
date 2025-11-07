@@ -44,6 +44,11 @@ export class StateHandlerFactory {
   private websocketService?: IWebSocketService;
   private dataSyncService?: any;
 
+  // CRITICAL: Cache handlers to prevent memory leaks from duplicate instances
+  // Each handler instance registers event listeners, so creating duplicates
+  // causes listener accumulation and memory explosion
+  private handlerCache: Map<DeviceState, any> = new Map();
+
   constructor(
     configService: IConfigService,
     platformAdapter: IPlatformAdapter,
@@ -61,27 +66,44 @@ export class StateHandlerFactory {
   }
 
   createHandler(state: DeviceState) {
+    // CRITICAL: Check cache first to prevent duplicate handler instances
+    // Duplicate handlers cause event listener memory leaks
+    if (this.handlerCache.has(state)) {
+      console.log(`[StateHandlerFactory] ✅ Returning cached handler for state: ${state}`);
+      return this.handlerCache.get(state);
+    }
+
+    console.log(`[StateHandlerFactory] 🆕 Creating new handler for state: ${state}`);
+
+    let handler: any;
+
     switch (state) {
       case DeviceState.INIT:
-        return new InitStateHandler(this.configService);
-        
+        handler = new InitStateHandler(this.configService);
+        break;
+
       case DeviceState.HEARTBEAT:
-        return new HeartbeatStateHandler(this.configService);
-        
+        handler = new HeartbeatStateHandler(this.configService);
+        break;
+
       case DeviceState.REGISTER:
-        return new RegisterStateHandler(this.configService, this.platformAdapter);
-        
+        handler = new RegisterStateHandler(this.configService, this.platformAdapter);
+        break;
+
       case DeviceState.BIND_CHECK:
-        return new BindCheckStateHandler(this.configService);
-        
+        handler = new BindCheckStateHandler(this.configService);
+        break;
+
       case DeviceState.WS_CHECK:
-        return new WSCheckStateHandler(this.configService);
-        
+        handler = new WSCheckStateHandler(this.configService);
+        break;
+
       case DeviceState.CONFIG_FETCH:
-        return new ConfigFetchStateHandler(this.configService);
+        handler = new ConfigFetchStateHandler(this.configService);
+        break;
 
       case DeviceState.DATA_COLLECT:
-        return new DataCollectStateHandler(
+        handler = new DataCollectStateHandler(
           this.configService,
           this.platformAdapter,
           this.appInstance,
@@ -89,24 +111,34 @@ export class StateHandlerFactory {
           this.websocketService,
           this.dataSyncService
         );
-        
+        break;
+
       case DeviceState.UNBOUND:
-        return new UnboundStateHandler(this.configService);
-        
+        handler = new UnboundStateHandler(this.configService);
+        break;
+
       case DeviceState.DISCONNECT:
-        return new DisconnectStateHandler(this.configService);
-        
+        handler = new DisconnectStateHandler(this.configService);
+        break;
+
       case DeviceState.ERROR:
-        return new ErrorStateHandler(this.configService);
-        
+        handler = new ErrorStateHandler(this.configService);
+        break;
+
       default:
         throw new Error(`No handler available for state: ${state}`);
     }
+
+    // Store in cache before returning
+    this.handlerCache.set(state, handler);
+    return handler;
   }
 
   createAllHandlers(): Map<DeviceState, any> {
-    const handlers = new Map();
-    
+    // CRITICAL: Use createHandler() which now implements caching
+    // This prevents duplicate handler instances and event listener leaks
+    console.log('[StateHandlerFactory] Creating all handlers (with caching)...');
+
     const states = [
       DeviceState.INIT,
       DeviceState.HEARTBEAT,
@@ -120,18 +152,28 @@ export class StateHandlerFactory {
       DeviceState.ERROR
     ];
 
+    const handlers = new Map();
+
     for (const state of states) {
       try {
+        // Use createHandler which implements caching
         const handler = this.createHandler(state);
         handlers.set(state, handler);
-        console.log(`[StateHandlerFactory] Created handler for state: ${state}`);
       } catch (error: any) {
         console.error(`[StateHandlerFactory] Failed to create handler for state ${state}:`, error);
       }
     }
 
-    console.log(`[StateHandlerFactory] Created ${handlers.size} state handlers`);
+    console.log(`[StateHandlerFactory] ✅ Handlers ready: ${handlers.size} total, ${this.handlerCache.size} in cache`);
     return handlers;
+  }
+
+  /**
+   * Get the count of cached handlers without creating new instances
+   * CRITICAL: Use this for diagnostics instead of createAllHandlers()
+   */
+  getHandlerCount(): number {
+    return this.handlerCache.size;
   }
 
   // 验证所有处理器是否正确创建
