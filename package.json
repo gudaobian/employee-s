@@ -1,6 +1,6 @@
 {
   "name": "employee-safety-client",
-  "version": "2.0.0",
+  "version": "2.0.2",
   "description": "Employee Safety Client - Comprehensive Employee Security Solution",
   "main": "electron/main-minimal.js",
   "bin": {
@@ -19,6 +19,8 @@
     "pack:mac:universal": "node scripts/pack-mac-universal.js",
     "pack:mac:dmg": "bash scripts/create-dmg.sh",
     "pack:mac:pkg": "bash scripts/create-pkg.sh",
+    "pack:mac:zip": "npm run build:mac && npx electron-builder --mac zip --config electron-builder.yml",
+    "pack:mac:all": "npm run build:mac && npx electron-builder --mac --config electron-builder.yml",
     "pack:mac:builder": "npm run build:mac && npx electron-builder --mac --config electron-builder.yml",
     "pack:win": "node scripts/build-windows.js",
     "test": "jest",
@@ -70,6 +72,7 @@
   "devDependencies": {
     "@electron/packager": "^18.4.4",
     "@electron/windows-sign": "^1.1.2",
+    "@types/electron": "^1.4.38",
     "@types/jest": "^29.0.0",
     "@types/node": "^18.0.0",
     "@types/uuid": "^9.0.0",
@@ -120,7 +123,8 @@
       "identity": "Developer ID Application",
       "target": [
         "dmg",
-        "pkg"
+        "pkg",
+        "zip"
       ]
     },
     "win": {
