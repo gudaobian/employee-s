@@ -336,8 +336,12 @@
         }
 
         .btn-permission {
-            background: linear-gradient(135deg, #ff9500 0%, #ff8c00 100%);
+            background: linear-gradient(135deg, #8e8e93 0%, #6d6d70 100%);
             color: white;
+        }
+
+        .btn-permission:hover {
+            background: linear-gradient(135deg, #6d6d70 0%, #48484a 100%);
         }
 
         .btn-background {
@@ -927,6 +931,57 @@
                         }, 3000);
                     }
                 });
+
+                // 监听更新下载进度事件
+                window.electronAPI.on('update-download-progress', (progress) => {
+                    console.log('下载进度:', progress);
+
+                    const progressElement = document.getElementById('initProgress');
+                    const messageElement = document.getElementById('progressMessage');
+                    const fillElement = document.getElementById('progressBarFill');
+                    const percentageElement = document.getElementById('progressPercentage');
+
+                    if (progressElement) {
+                        progressElement.classList.add('show');
+                    }
+
+                    if (messageElement) {
+                        // 显示下载速度和进度
+                        const transferred = formatBytes(progress.transferred);
+                        const total = formatBytes(progress.total);
+                        const speed = formatBytes(progress.bytesPerSecond);
+                        messageElement.textContent = `正在下载更新: ${transferred}/${total} (${speed}/s)`;
+                    }
+
+                    if (fillElement) {
+                        fillElement.style.width = Math.round(progress.percent) + '%';
+                    }
+
+                    if (percentageElement) {
+                        percentageElement.textContent = Math.round(progress.percent) + '%';
+                    }
+
+                    // 如果下载完成，3秒后隐藏进度条
+                    if (progress.percent >= 100) {
+                        if (messageElement) {
+                            messageElement.textContent = '更新下载完成！';
+                        }
+                        setTimeout(() => {
+                            if (progressElement) {
+                                progressElement.classList.remove('show');
+                            }
+                        }, 3000);
+                    }
+                });
+            }
+
+            // 格式化字节大小的辅助函数
+            function formatBytes(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
             }
 
             // 监听应用状态变化事件

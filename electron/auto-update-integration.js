@@ -8,8 +8,34 @@
  * - Update notification system
  */
 
-const { app, dialog, ipcMain } = require('electron');
+const { app, dialog, ipcMain, BrowserWindow, Notification } = require('electron');
 const path = require('path');
+const log = require('electron-log');
+
+// Configure electron-log for auto-update
+log.transports.file.resolvePathFn = () => path.join(app.getPath('logs'), 'auto-update.log');
+log.transports.file.level = 'info';
+log.transports.console.level = 'debug';
+
+// Global error handlers to prevent crashes from update errors
+process.on('uncaughtException', (error) => {
+  if (error.message && error.message.includes('download')) {
+    log.error('[AUTO_UPDATE] Uncaught download error (prevented crash):', error);
+    // Don't crash the app for download errors
+    return;
+  }
+  // Re-throw other errors
+  log.error('[FATAL] Uncaught exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  if (reason && reason.toString().includes('download')) {
+    log.error('[AUTO_UPDATE] Unhandled download rejection (prevented crash):', reason);
+    // Don't crash the app for download errors
+    return;
+  }
+  log.error('[FATAL] Unhandled rejection:', reason);
+});
 
 // Will be dynamically loaded after TypeScript compilation
 let AutoUpdateService;
@@ -22,14 +48,19 @@ let autoUpdateService = null;
  */
 async function initializeAutoUpdate() {
   try {
-    console.log('[AUTO_UPDATE] Initializing auto-update system...');
+    log.info('[AUTO_UPDATE] Initializing auto-update system...');
+    log.info('[AUTO_UPDATE] App version:', app.getVersion());
+    log.info('[AUTO_UPDATE] App path:', app.getAppPath());
+    log.info('[AUTO_UPDATE] Is packaged:', app.isPackaged);
 
     // Dynamically load compiled TypeScript modules
     try {
       const appPath = app.getAppPath();
-      const distPath = app.isPackaged
-        ? path.join(path.dirname(appPath), 'dist')
-        : path.join(appPath, 'dist');
+      // In packaged app, dist is inside app directory
+      const distPath = path.join(appPath, 'dist');
+
+      log.info('[AUTO_UPDATE] Dist path:', distPath);
+      log.info('[AUTO_UPDATE] Loading modules...');
 
       const { AutoUpdateService: AUS } = require(
         path.join(distPath, 'common', 'services', 'auto-update-service')
@@ -44,9 +75,11 @@ async function initializeAutoUpdate() {
       AutoUpdateService = AUS;
       UpdateConfigService = UCS;
       updateLogger = UL;
+      log.info('[AUTO_UPDATE] Modules loaded successfully');
     } catch (loadError) {
-      console.error('[AUTO_UPDATE] Failed to load update modules:', loadError.message);
-      console.error('[AUTO_UPDATE] Auto-update will be disabled');
+      log.error('[AUTO_UPDATE] Failed to load update modules:', loadError.message);
+      log.error('[AUTO_UPDATE] Error stack:', loadError.stack);
+      log.error('[AUTO_UPDATE] Auto-update will be disabled');
       return false;
     }
 
@@ -55,11 +88,11 @@ async function initializeAutoUpdate() {
     const config = updateConfig.getConfig();
 
     if (!config.enabled) {
-      console.log('[AUTO_UPDATE] Auto-update is disabled in configuration');
+      log.info('[AUTO_UPDATE] Auto-update is disabled in configuration');
       return false;
     }
 
-    console.log('[AUTO_UPDATE] Configuration loaded:', {
+    log.info('[AUTO_UPDATE] Configuration loaded:', {
       channel: config.channel,
       updateServerUrl: config.updateServerUrl,
       autoDownload: config.autoDownload,
@@ -80,19 +113,27 @@ async function initializeAutoUpdate() {
     // Verify previous update success
     const wasUpdated = await autoUpdateService.verifyUpdateSuccess();
     if (wasUpdated) {
-      console.log('[AUTO_UPDATE] ✅ Previous update verified successfully');
+      log.info('[AUTO_UPDATE] ✅ Previous update verified successfully');
 
       // Show success notification
       showUpdateSuccessNotification();
     }
 
-    // Start periodic update checks
-    autoUpdateService.startPeriodicCheck(config.checkInterval);
+    // Wrap periodic check in try-catch to prevent crashes
+    try {
+      autoUpdateService.startPeriodicCheck(config.checkInterval);
+      log.info('[AUTO_UPDATE] Periodic checks started, interval:', config.checkInterval, 'ms');
+    } catch (checkError) {
+      log.error('[AUTO_UPDATE] Failed to start periodic checks:', checkError);
+      // Don't fail initialization even if periodic check fails
+    }
 
-    console.log('[AUTO_UPDATE] ✅ Auto-update system initialized successfully');
+    log.info('[AUTO_UPDATE] ✅ Auto-update system initialized successfully');
     return true;
   } catch (error) {
-    console.error('[AUTO_UPDATE] Initialization failed:', error);
+    log.error('[AUTO_UPDATE] Initialization failed:', error);
+    log.error('[AUTO_UPDATE] Error stack:', error.stack);
+    // Don't crash the app - just disable auto-update
     return false;
   }
 }
@@ -102,12 +143,12 @@ async function initializeAutoUpdate() {
  */
 function setupUpdateEventListeners(service) {
   service.on('update-available', (info) => {
-    console.log('[AUTO_UPDATE] New update available:', info.version);
+    log.info('[AUTO_UPDATE] New update available:', info.version);
     showUpdateAvailableNotification(info);
   });
 
   service.on('download-progress', (progress) => {
-    console.log(
+    log.info(
       `[AUTO_UPDATE] Download progress: ${Math.round(progress.percent)}%`
     );
     // Send progress to renderer if needed
@@ -115,21 +156,21 @@ function setupUpdateEventListeners(service) {
   });
 
   service.on('update-downloaded', (info) => {
-    console.log('[AUTO_UPDATE] Update downloaded:', info.version);
+    log.info('[AUTO_UPDATE] Update downloaded:', info.version);
     showUpdateReadyNotification(info);
   });
 
   service.on('error', (error) => {
-    console.error('[AUTO_UPDATE] Update error:', error.message);
+    log.error('[AUTO_UPDATE] Update error:', error.message);
     showUpdateErrorNotification(error);
   });
 
   service.on('checking-for-update', () => {
-    console.log('[AUTO_UPDATE] Checking for updates...');
+    log.info('[AUTO_UPDATE] Checking for updates...');
   });
 
   service.on('update-not-available', () => {
-    console.log('[AUTO_UPDATE] No update available');
+    log.info('[AUTO_UPDATE] No update available');
   });
 }
 
@@ -202,26 +243,31 @@ function setupUpdateIPCHandlers() {
     }
   });
 
-  console.log('[AUTO_UPDATE] IPC handlers registered');
+  log.info('[AUTO_UPDATE] IPC handlers registered');
 }
 
 /**
- * Show update available notification
+ * Show update available notification (macOS native notification)
  */
 function showUpdateAvailableNotification(info) {
-  dialog
-    .showMessageBox({
-      type: 'info',
+  try {
+    log.info('[AUTO_UPDATE] Showing update notification:', info.version);
+
+    // Use macOS native notification - won't interfere with main window
+    const notification = new Notification({
       title: 'Update Available',
-      message: `Version ${info.version} is now available`,
-      detail:
-        `Current version: ${app.getVersion()}\n` +
-        `New version: ${info.version}\n\n` +
-        `The update will download in the background and install automatically when you quit the application.`,
-      buttons: ['OK'],
-      defaultId: 0
-    })
-    .catch((err) => console.error('[AUTO_UPDATE] Failed to show notification:', err));
+      body: `Version ${info.version} is now available.\nDownloading in the background...`,
+      silent: false,
+      timeoutType: 'default'
+    });
+
+    notification.show();
+
+    log.info('[AUTO_UPDATE] Native notification shown');
+  } catch (error) {
+    log.error('[AUTO_UPDATE] Failed to show notification:', error);
+    // Don't crash the app - just log the error
+  }
 }
 
 /**
@@ -246,7 +292,7 @@ function showUpdateReadyNotification(info) {
         autoUpdateService.quitAndInstall();
       }
     })
-    .catch((err) => console.error('[AUTO_UPDATE] Failed to show notification:', err));
+    .catch((err) => log.error('[AUTO_UPDATE] Failed to show notification:', err));
 }
 
 /**
@@ -262,14 +308,14 @@ function showUpdateSuccessNotification() {
       buttons: ['OK'],
       defaultId: 0
     })
-    .catch((err) => console.error('[AUTO_UPDATE] Failed to show notification:', err));
+    .catch((err) => log.error('[AUTO_UPDATE] Failed to show notification:', err));
 }
 
 /**
  * Show update error notification
  */
 function showUpdateErrorNotification(error) {
-  console.error('[AUTO_UPDATE] Error:', error);
+  log.error('[AUTO_UPDATE] Error:', error);
   // Don't show error dialogs to users - just log them
   // Errors are expected in some cases (network issues, etc.)
 }
@@ -279,11 +325,41 @@ function showUpdateErrorNotification(error) {
  */
 function broadcastToAllWindows(channel, data) {
   const { BrowserWindow } = require('electron');
-  BrowserWindow.getAllWindows().forEach((window) => {
+  const windows = BrowserWindow.getAllWindows();
+
+  // 如果是下载进度事件，直接在main进程显示进度
+  if (channel === 'update-download-progress' && data && typeof data.percent === 'number') {
+    const percent = data.percent / 100; // 转换为0-1范围
+
+    windows.forEach((window) => {
+      if (!window.isDestroyed()) {
+        // 设置dock进度条（macOS）或任务栏进度（Windows）
+        window.setProgressBar(percent);
+
+        // 更新窗口标题显示进度
+        const originalTitle = '企业安全';
+        window.setTitle(`${originalTitle} - 下载更新 ${Math.round(data.percent)}%`);
+      }
+    });
+  }
+
+  // 发送事件给renderer
+  windows.forEach((window) => {
     if (!window.isDestroyed()) {
       window.webContents.send(channel, data);
     }
   });
+}
+
+/**
+ * Format bytes to human readable format
+ */
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
 /**
@@ -300,25 +376,43 @@ function setupUpdateEventHandlers() {
   if (!autoUpdateService) return;
 
   autoUpdateService.on('update-available', (info) => {
-    console.log('[AUTO_UPDATE] New update available:', info.version);
+    log.info('[AUTO_UPDATE] New update available:', info.version);
     showUpdateAvailableNotification(info);
   });
 
   autoUpdateService.on('download-progress', (progress) => {
-    console.log(
+    log.info(
       `[AUTO_UPDATE] Download progress: ${Math.round(progress.percent)}%`
     );
     broadcastToAllWindows('update-download-progress', progress);
   });
 
   autoUpdateService.on('update-downloaded', (info) => {
-    console.log('[AUTO_UPDATE] Update downloaded:', info.version);
+    log.info('[AUTO_UPDATE] Update downloaded:', info.version);
+
+    // 清除进度条和恢复标题
+    const { BrowserWindow } = require('electron');
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(window => {
+      if (!window.isDestroyed()) {
+        window.setProgressBar(-1); // -1 移除进度条
+        window.setTitle('企业安全');
+      }
+    });
+
     showUpdateReadyNotification(info);
   });
 
   autoUpdateService.on('error', (error) => {
-    console.error('[AUTO_UPDATE] Update error:', error.message);
-    showUpdateErrorNotification(error);
+    try {
+      log.error('[AUTO_UPDATE] Update error:', error.message);
+      log.error('[AUTO_UPDATE] Error details:', error);
+      // Don't show error notification - just log it
+      // showUpdateErrorNotification(error);
+    } catch (handlerError) {
+      log.error('[AUTO_UPDATE] Error handler failed:', handlerError);
+      // Swallow error to prevent crash
+    }
   });
 }
 
