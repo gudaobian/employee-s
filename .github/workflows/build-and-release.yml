@@ -543,6 +543,34 @@ jobs:
           ELECTRON_BUILDER_CACHE: "${{ runner.temp }}/eb-cache-disabled"
           USE_HARD_LINKS: "false"
 
+      - name: Debug release directory structure
+        run: |
+          Write-Host "========================================="
+          Write-Host "调试: 检查 release 目录结构"
+          Write-Host "========================================="
+
+          if (Test-Path "release/win-unpacked") {
+            Write-Host "📁 release/win-unpacked 存在"
+            Write-Host ""
+            Write-Host "📂 资源目录结构:"
+            Get-ChildItem "release/win-unpacked/resources" -Recurse | Select-Object -First 50 | Format-Table Name, FullName
+
+            Write-Host ""
+            Write-Host "📂 查找所有 .node 文件:"
+            Get-ChildItem "release/win-unpacked" -Recurse -Filter "*.node" | Format-Table Name, FullName, Length
+
+            Write-Host ""
+            Write-Host "📂 检查 app.asar.unpacked 内容:"
+            if (Test-Path "release/win-unpacked/resources/app.asar.unpacked") {
+              Get-ChildItem "release/win-unpacked/resources/app.asar.unpacked" -Recurse | Select-Object -First 100 | Format-Table Name, FullName
+            } else {
+              Write-Host "❌ app.asar.unpacked 不存在！"
+            }
+          } else {
+            Write-Host "❌ release/win-unpacked 不存在"
+          }
+          Write-Host "========================================="
+
       - name: Verify packaged native module (CRITICAL)
         run: |
           Write-Host "========================================="
