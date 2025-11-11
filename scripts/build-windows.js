@@ -290,9 +290,9 @@ async function verifyBuildOutput() {
 
 async function runElectronBuilder() {
   console.log('\n📦 运行Electron Builder...');
-  
+
   return new Promise((resolve, reject) => {
-    const builderProcess = spawn('npx', ['electron-builder', '--win'], {
+    const builderProcess = spawn('npx', ['electron-builder', '--win', '--publish', 'never'], {
       cwd: ROOT_DIR,
       stdio: 'inherit',
       shell: true
