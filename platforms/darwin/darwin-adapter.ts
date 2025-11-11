@@ -1100,7 +1100,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
       } else {
         // 如果没有 Electron app 实例，回退到手动检查
         logger.warn('No Electron app instance available, checking manual plist file');
-        const launchAgentPath = `${os.homedir()}/Library/LaunchAgents/com.company.employee-monitor.plist`;
+        const launchAgentPath = `${os.homedir()}/Library/LaunchAgents/com.company.employee-safety.plist`;
         return fs.existsSync(launchAgentPath);
       }
     } catch (error) {
@@ -1159,7 +1159,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.company.employee-monitor</string>
+    <string>com.company.employee-safety</string>
     <key>ProgramArguments</key>
     <array>
         <string>${executablePath}</string>
@@ -1231,7 +1231,7 @@ export class DarwinAdapter extends PlatformAdapterBase {
   // 手动清理 plist 文件的备用方法
   private async disableAutoStartManual(): Promise<boolean> {
     try {
-      const launchAgentPath = `${os.homedir()}/Library/LaunchAgents/com.company.employee-monitor.plist`;
+      const launchAgentPath = `${os.homedir()}/Library/LaunchAgents/com.company.employee-safety.plist`;
       
       if (fs.existsSync(launchAgentPath)) {
         // 卸载LaunchAgent

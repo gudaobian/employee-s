@@ -12,6 +12,14 @@ mac:
       arch:
         - x64
         - arm64
+    - target: pkg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
   icon: assets/icons/icon.icns
   entitlements: null
   entitlementsInherit: null
@@ -19,9 +27,13 @@ mac:
   gatekeeperAssess: false
   extraResources:
     - from: installer-scripts/cleanup-macos.sh
-      to: cleanup-macos.sh
+      to: installer-scripts/cleanup-macos.sh
     - from: installer-scripts/uninstall-macos.sh
-      to: uninstall-macos.sh
+      to: installer-scripts/uninstall-macos.sh
+    - from: installer-scripts/auto-install-update-macos.sh
+      to: installer-scripts/auto-install-update-macos.sh
+    - from: app-update.yml
+      to: app-update.yml
 
 dmg:
   title: "${productName} ${version}"
@@ -52,6 +64,7 @@ files:
   - electron/**/*
   - assets/**/*
   - package.json
+  - app-update.yml
   - node_modules/**/*
   - native-event-monitor/**/*
   - native-event-monitor-win/**/*
@@ -67,7 +80,9 @@ extraMetadata:
 
 npmRebuild: false
 nodeGypRebuild: false
-publish: null  # Disable auto-publish, use create-release job instead
+publish:
+  provider: generic
+  url: http://23.95.193.155:3000/api/updates
 
 win:
   target:

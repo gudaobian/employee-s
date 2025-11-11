@@ -17,7 +17,8 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { updateLogger } from '@common/utils/update-logger';
+import { machineIdSync } from 'node-machine-id';
+import { updateLogger } from '../utils/update-logger';
 import { UpdateApiClient } from './update-api-client';
 import {
   UpdateStatus,
@@ -25,7 +26,7 @@ import {
   UpdateMetadata,
   UpdateInfo,
   UpdateDownloadProgress
-} from '@common/interfaces/update-status-interface';
+} from '../interfaces/update-status-interface';
 
 export interface AutoUpdateServiceOptions {
   updateServerUrl: string;
@@ -42,9 +43,25 @@ export class AutoUpdateService extends EventEmitter {
   private updateStartTime?: number;
   private downloadStartTime?: number;
   private channel: string;
+  private lastNotifiedVersion?: string; // 记录上次通知的版本，避免重复通知
+  private deviceId: string; // Device ID for multi-region OSS support
 
   constructor(options: AutoUpdateServiceOptions) {
     super();
+
+    // Get device ID for multi-region OSS support
+    try {
+      this.deviceId = machineIdSync();
+      updateLogger.info('Device ID acquired', { deviceId: this.deviceId });
+    } catch (error: any) {
+      // Fallback to hash of userData path if machineIdSync fails
+      const fallbackId = crypto.createHash('md5').update(app.getPath('userData')).digest('hex');
+      this.deviceId = fallbackId;
+      updateLogger.warn('Failed to get machine ID, using fallback', {
+        error: error.message,
+        deviceId: this.deviceId
+      });
+    }
 
     this.channel = options.channel || 'stable';
     this.apiClient = new UpdateApiClient(
@@ -58,7 +75,8 @@ export class AutoUpdateService extends EventEmitter {
     updateLogger.info('AutoUpdateService initialized', {
       version: app.getVersion(),
       channel: this.channel,
-      updateServerUrl: options.updateServerUrl
+      updateServerUrl: options.updateServerUrl,
+      deviceId: this.deviceId
     });
   }
 
@@ -66,10 +84,13 @@ export class AutoUpdateService extends EventEmitter {
    * Configure electron-updater
    */
   private configureAutoUpdater(options: AutoUpdateServiceOptions): void {
+    // Build feed URL with deviceId query parameter for multi-region OSS support
+    const feedURL = `${options.updateServerUrl}?deviceId=${this.deviceId}`;
+
     // Set feed URL
     autoUpdater.setFeedURL({
       provider: 'generic',
-      url: options.updateServerUrl,
+      url: feedURL,
       channel: this.channel
     });
 
@@ -89,6 +110,9 @@ export class AutoUpdateService extends EventEmitter {
     autoUpdater.forceDevUpdateConfig = false;
 
     updateLogger.info('AutoUpdater configured', {
+      feedURL,
+      deviceId: this.deviceId,
+      channel: this.channel,
       autoDownload: autoUpdater.autoDownload,
       autoInstallOnQuit: autoUpdater.autoInstallOnAppQuit,
       allowDowngrade: autoUpdater.allowDowngrade
@@ -101,46 +125,78 @@ export class AutoUpdateService extends EventEmitter {
   private setupEventHandlers(): void {
     // Checking for update
     autoUpdater.on('checking-for-update', () => {
-      updateLogger.info('Checking for updates...');
+      const feedURL = `${this.apiClient.getBaseURL()}?deviceId=${this.deviceId}`;
+      updateLogger.info('[EVENT] Checking for updates...', {
+        feedURL,
+        currentVersion: app.getVersion(),
+        deviceId: this.deviceId,
+        channel: this.channel,
+        timestamp: new Date().toISOString()
+      });
       this.emit('checking-for-update');
       this.reportUpdateStatus(UpdateStatus.CHECKING);
     });
 
     // Update available
     autoUpdater.on('update-available', (info: ElectronUpdateInfo) => {
-      updateLogger.info('Update available', {
+      const downloadUrl = info.files?.[0]?.url || 'N/A';
+      updateLogger.info('[EVENT] Update available', {
         version: info.version,
         releaseDate: info.releaseDate,
-        size: info.files?.[0]?.size
+        size: info.files?.[0]?.size,
+        downloadUrl,
+        currentVersion: app.getVersion(),
+        deviceId: this.deviceId,
+        timestamp: new Date().toISOString()
       });
 
-      this.updateStartTime = Date.now();
-      this.emit('update-available', this.convertUpdateInfo(info));
+      // 检查是否是新版本（与上次通知的版本不同）
+      const isNewVersion = this.lastNotifiedVersion !== info.version;
 
-      this.reportUpdateStatus(UpdateStatus.UPDATE_FOUND, {
-        targetVersion: info.version,
-        metadata: {
-          releaseDate: info.releaseDate,
-          size: info.files?.[0]?.size,
-          releaseNotes: info.releaseNotes as string
-        }
-      });
+      if (isNewVersion) {
+        // 记录这次通知的版本
+        this.lastNotifiedVersion = info.version;
+        updateLogger.info('[EVENT] New version detected, will show notification', {
+          version: info.version,
+          downloadUrl
+        });
+
+        this.updateStartTime = Date.now();
+        this.emit('update-available', this.convertUpdateInfo(info));
+
+        this.reportUpdateStatus(UpdateStatus.UPDATE_FOUND, {
+          targetVersion: info.version,
+          metadata: {
+            releaseDate: info.releaseDate,
+            size: info.files?.[0]?.size,
+            releaseNotes: info.releaseNotes as string
+          }
+        });
+      } else {
+        updateLogger.debug('[EVENT] Same version as before, skipping notification', { version: info.version });
+      }
     });
 
     // No update available
     autoUpdater.on('update-not-available', (info: ElectronUpdateInfo) => {
-      updateLogger.info('No update available', { currentVersion: app.getVersion() });
+      updateLogger.info('[EVENT] No update available', {
+        currentVersion: app.getVersion(),
+        deviceId: this.deviceId,
+        timestamp: new Date().toISOString()
+      });
       this.emit('update-not-available', this.convertUpdateInfo(info));
       this.reportUpdateStatus(UpdateStatus.NO_UPDATE);
     });
 
     // Download progress
     autoUpdater.on('download-progress', (progress: ProgressInfo) => {
-      updateLogger.debug('Download progress', {
-        percent: Math.round(progress.percent),
+      const percentRounded = Math.round(progress.percent);
+      updateLogger.debug('[EVENT] Download progress', {
+        percent: percentRounded,
         transferred: this.formatBytes(progress.transferred),
         total: this.formatBytes(progress.total),
-        speed: this.formatBytes(progress.bytesPerSecond) + '/s'
+        speed: this.formatBytes(progress.bytesPerSecond) + '/s',
+        deviceId: this.deviceId
       });
 
       const downloadProgress: UpdateDownloadProgress = {
@@ -160,12 +216,17 @@ export class AutoUpdateService extends EventEmitter {
         ? Date.now() - this.downloadStartTime
         : undefined;
 
-      updateLogger.info('Update downloaded', {
+      updateLogger.info('[EVENT] Update downloaded', {
         version: info.version,
-        downloadDuration: downloadDuration ? `${downloadDuration}ms` : 'unknown'
+        downloadDuration: downloadDuration ? `${downloadDuration}ms` : 'unknown',
+        path: info.path,
+        deviceId: this.deviceId,
+        timestamp: new Date().toISOString()
       });
 
       this.downloadInProgress = false;
+      // 下载完成后清空已通知版本，允许下次检测到新版本时再次通知
+      this.lastNotifiedVersion = undefined;
       this.emit('update-downloaded', this.convertUpdateInfo(info));
 
       this.reportUpdateStatus(UpdateStatus.DOWNLOADED, {
@@ -179,7 +240,12 @@ export class AutoUpdateService extends EventEmitter {
 
     // Error
     autoUpdater.on('error', (error: Error) => {
-      updateLogger.error('Update error', error);
+      updateLogger.error('[EVENT] Update error', {
+        error: error.message,
+        stack: error.stack,
+        deviceId: this.deviceId,
+        timestamp: new Date().toISOString()
+      });
       this.downloadInProgress = false;
       this.isChecking = false;
       this.emit('error', error);
@@ -243,10 +309,29 @@ export class AutoUpdateService extends EventEmitter {
 
     try {
       this.isChecking = true;
-      updateLogger.info('Manual update check triggered');
-      await autoUpdater.checkForUpdates();
+      const feedURL = `${this.apiClient.getBaseURL()}?deviceId=${this.deviceId}`;
+      updateLogger.info('[CHECK] Manual update check triggered', {
+        currentVersion: app.getVersion(),
+        feedURL,
+        deviceId: this.deviceId,
+        channel: this.channel,
+        timestamp: new Date().toISOString()
+      });
+
+      const result = await autoUpdater.checkForUpdates();
+
+      if (result) {
+        updateLogger.info('[CHECK] Update check completed', {
+          updateInfo: result.updateInfo,
+          hasUpdate: result.updateInfo.version !== app.getVersion()
+        });
+      }
     } catch (error: any) {
-      updateLogger.error('Failed to check for updates', error);
+      updateLogger.error('[CHECK] Failed to check for updates', {
+        error: error.message,
+        stack: error.stack,
+        feedURL: `${this.apiClient.getBaseURL()}?deviceId=${this.deviceId}`
+      });
       throw error;
     } finally {
       this.isChecking = false;
@@ -406,8 +491,7 @@ export class AutoUpdateService extends EventEmitter {
    * Get device ID
    */
   private getDeviceId(): string {
-    const machineId = app.getPath('userData');
-    return crypto.createHash('md5').update(machineId).digest('hex');
+    return this.deviceId;
   }
 
   /**
@@ -464,11 +548,12 @@ export class AutoUpdateService extends EventEmitter {
    */
   setChannel(channel: 'stable' | 'beta' | 'dev'): void {
     this.channel = channel;
+    const feedURL = `${this.apiClient.getBaseURL()}?deviceId=${this.deviceId}`;
     autoUpdater.setFeedURL({
       provider: 'generic',
-      url: this.apiClient.getBaseURL(),
+      url: feedURL,
       channel
     });
-    updateLogger.info('Update channel changed', { channel });
+    updateLogger.info('Update channel changed', { channel, feedURL, deviceId: this.deviceId });
   }
 }

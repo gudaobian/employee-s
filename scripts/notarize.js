@@ -39,7 +39,7 @@ module.exports = async function notarizing(context) {
 
   try {
     await notarize({
-      appBundleId: 'com.company.employee-monitor',
+      appBundleId: 'com.company.employee-safety',
       appPath: appPath,
       appleId: appleId,
       appleIdPassword: appleIdPassword,

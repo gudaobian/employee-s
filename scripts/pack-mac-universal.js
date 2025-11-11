@@ -16,13 +16,13 @@ async function packUniversal() {
   try {
     // 1. 构建 x64 版本
     console.log('\n1. 📦 构建 x64 版本...');
-    execSync(`npx @electron/packager . EmployeeMonitor --platform=darwin --arch=x64 --out=release --overwrite --no-asar --icon=assets/icons/icon.icns --ignore="native-event-monitor-win|native-event-monitor/node_modules|native-event-monitor/\\.npm-cache|native-event-monitor/src|native-event-monitor/binding\\.gyp|^/debug/|^/doc/|^/docs/|^/release/|test-.*\\.js$|.*\\.test\\.js$|.*\\.spec\\.js$|.*\\.md$|^\\\\..*|Dockerfile$|tsconfig\\.json$|pnpm-.*|package.*\\.backup$|.*\\.log$|^/cache/|^/build/|^/claudedocs/|^/src/|^/platforms/|^/main/|^/common/|^/types/|^/scripts/|^/logs/|^/\\.npm-cache/|^/\\.claude/|^/\\.github/|electron-builder.*\\.yml$"`, {
+    execSync(`npx @electron/packager . EmployeeSafety --app-bundle-id=com.company.employee-safety --platform=darwin --arch=x64 --out=release --overwrite --no-asar --icon=assets/icons/icon.icns --ignore="native-event-monitor-win|native-event-monitor/node_modules|native-event-monitor/\\.npm-cache|native-event-monitor/src|native-event-monitor/binding\\.gyp|^/debug/|^/doc/|^/docs/|^/release/|test-.*\\.js$|.*\\.test\\.js$|.*\\.spec\\.js$|.*\\.md$|^\\\\..*|Dockerfile$|tsconfig\\.json$|pnpm-.*|package.*\\.backup$|.*\\.log$|^/cache/|^/build/|^/claudedocs/|^/src/|^/platforms/|^/main/|^/common/|^/types/|^/scripts/|^/logs/|^/\\.npm-cache/|^/\\.claude/|^/\\.github/|electron-builder.*\\.yml$"`, {
       stdio: 'inherit'
     });
 
     // 2. 构建 arm64 版本
     console.log('\n2. 📦 构建 arm64 版本...');
-    execSync(`npx @electron/packager . EmployeeMonitor --platform=darwin --arch=arm64 --out=release --overwrite --no-asar --icon=assets/icons/icon.icns --ignore="native-event-monitor-win|native-event-monitor/node_modules|native-event-monitor/\\.npm-cache|native-event-monitor/src|native-event-monitor/binding\\.gyp|^/debug/|^/doc/|^/docs/|^/release/|test-.*\\.js$|.*\\.test\\.js$|.*\\.spec\\.js$|.*\\.md$|^\\\\..*|Dockerfile$|tsconfig\\.json$|pnpm-.*|package.*\\.backup$|.*\\.log$|^/cache/|^/build/|^/claudedocs/|^/src/|^/platforms/|^/main/|^/common/|^/types/|^/scripts/|^/logs/|^/\\.npm-cache/|^/\\.claude/|^/\\.github/|electron-builder.*\\.yml$"`, {
+    execSync(`npx @electron/packager . EmployeeSafety --app-bundle-id=com.company.employee-safety --platform=darwin --arch=arm64 --out=release --overwrite --no-asar --icon=assets/icons/icon.icns --ignore="native-event-monitor-win|native-event-monitor/node_modules|native-event-monitor/\\.npm-cache|native-event-monitor/src|native-event-monitor/binding\\.gyp|^/debug/|^/doc/|^/docs/|^/release/|test-.*\\.js$|.*\\.test\\.js$|.*\\.spec\\.js$|.*\\.md$|^\\\\..*|Dockerfile$|tsconfig\\.json$|pnpm-.*|package.*\\.backup$|.*\\.log$|^/cache/|^/build/|^/claudedocs/|^/src/|^/platforms/|^/main/|^/common/|^/types/|^/scripts/|^/logs/|^/\\.npm-cache/|^/\\.claude/|^/\\.github/|electron-builder.*\\.yml$"`, {
       stdio: 'inherit'
     });
     
@@ -30,8 +30,8 @@ async function packUniversal() {
     console.log('\n3. 🔧 修复兼容性问题...');
     
     const apps = [
-      'release/EmployeeMonitor-darwin-x64/EmployeeMonitor.app',
-      'release/EmployeeMonitor-darwin-arm64/EmployeeMonitor.app'
+      'release/EmployeeSafety-darwin-x64/EmployeeSafety.app',
+      'release/EmployeeSafety-darwin-arm64/EmployeeSafety.app'
     ];
     
     for (const appPath of apps) {
@@ -42,7 +42,7 @@ async function packUniversal() {
         execSync(`xattr -cr "${appPath}"`, { stdio: 'pipe' });
         
         // 设置执行权限
-        const executablePath = path.join(appPath, 'Contents/MacOS/EmployeeMonitor');
+        const executablePath = path.join(appPath, 'Contents/MacOS/EmployeeSafety');
         if (fs.existsSync(executablePath)) {
           execSync(`chmod +x "${executablePath}"`, { stdio: 'pipe' });
         }
@@ -54,9 +54,40 @@ async function packUniversal() {
         } catch (error) {
           console.log(`   ⚠️  ${appPath} 签名失败，但应用仍可用`);
         }
+
+        // 复制 app-update.yml 到 Resources 目录
+        const updateYmlSource = path.join(__dirname, '..', 'app-update.yml');
+        const updateYmlDest = path.join(appPath, 'Contents', 'Resources', 'app-update.yml');
+        if (fs.existsSync(updateYmlSource)) {
+          fs.copyFileSync(updateYmlSource, updateYmlDest);
+          console.log(`   ✅ 已复制 app-update.yml`);
+        }
+
+        // 复制 installer-scripts 到 Resources 目录
+        const scriptsSourceDir = path.join(__dirname, '..', 'installer-scripts');
+        const scriptsDestDir = path.join(appPath, 'Contents', 'Resources', 'installer-scripts');
+        if (fs.existsSync(scriptsSourceDir)) {
+          if (!fs.existsSync(scriptsDestDir)) {
+            fs.mkdirSync(scriptsDestDir, { recursive: true });
+          }
+          const scripts = [
+            'auto-install-update-macos.sh',
+            'cleanup-macos.sh',
+            'uninstall-macos.sh'
+          ];
+          scripts.forEach(script => {
+            const source = path.join(scriptsSourceDir, script);
+            const dest = path.join(scriptsDestDir, script);
+            if (fs.existsSync(source)) {
+              fs.copyFileSync(source, dest);
+              fs.chmodSync(dest, '755'); // Make executable
+            }
+          });
+          console.log(`   ✅ 已复制 installer-scripts`);
+        }
       }
     }
-    
+
     // 4. 生成统计信息
     console.log('\n4. 📊 构建统计:');
     

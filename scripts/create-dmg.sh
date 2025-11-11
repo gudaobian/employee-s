@@ -13,12 +13,12 @@ echo "💿 创建 macOS DMG 安装镜像..."
 echo "=================================="
 
 # 确保应用已构建
-if [ ! -d "$RELEASE_DIR/EmployeeMonitor-darwin-arm64/EmployeeMonitor.app" ]; then
+if [ ! -d "$RELEASE_DIR/EmployeeSafety-darwin-arm64/EmployeeSafety.app" ]; then
     echo "❌ 错误: 找不到 arm64 版本，请先运行 npm run pack:mac"
     exit 1
 fi
 
-if [ ! -d "$RELEASE_DIR/EmployeeMonitor-darwin-x64/EmployeeMonitor.app" ]; then
+if [ ! -d "$RELEASE_DIR/EmployeeSafety-darwin-x64/EmployeeSafety.app" ]; then
     echo "❌ 错误: 找不到 x64 版本，请先运行 npm run pack:mac"
     exit 1
 fi
@@ -26,11 +26,11 @@ fi
 # 创建 DMG 的函数
 create_dmg() {
     local ARCH=$1
-    local APP_PATH="$RELEASE_DIR/EmployeeMonitor-darwin-$ARCH/EmployeeMonitor.app"
-    local DMG_NAME="EmployeeMonitor-darwin-$ARCH.dmg"
+    local APP_PATH="$RELEASE_DIR/EmployeeSafety-darwin-$ARCH/EmployeeSafety.app"
+    local DMG_NAME="EmployeeSafety-darwin-$ARCH.dmg"
     local DMG_PATH="$RELEASE_DIR/$DMG_NAME"
     local TEMP_DMG="$RELEASE_DIR/temp-$ARCH.dmg"
-    local VOLUME_NAME="EmployeeMonitor"
+    local VOLUME_NAME="EmployeeSafety"
 
     echo ""
     echo "📦 创建 $ARCH 版本 DMG..."
@@ -49,7 +49,7 @@ create_dmg() {
 
     # 创建安装说明文件
     cat > "$TEMP_DIR/安装说明.txt" << 'INSTALL_README'
-EmployeeMonitor 安装说明
+EmployeeSafety 安装说明
 ========================
 
 ⚠️  重要提示：
@@ -57,11 +57,11 @@ EmployeeMonitor 安装说明
 
 1. 卸载旧版本：
    - 打开 Finder，进入「应用程序」文件夹
-   - 找到 EmployeeMonitor.app
+   - 找到 EmployeeSafety.app
    - 拖到废纸篓并清空
 
 2. 安装新版本：
-   - 将本 DMG 中的 EmployeeMonitor.app 拖到「Applications」文件夹
+   - 将本 DMG 中的 EmployeeSafety.app 拖到「Applications」文件夹
    - 首次打开时右键选择「打开」
 
 💡 为什么需要先删除旧版本？
@@ -132,6 +132,6 @@ echo ""
 echo "💡 分发说明:"
 echo "   - 用户下载对应架构的 .dmg 文件"
 echo "   - 双击打开 DMG"
-echo "   - 拖拽 EmployeeMonitor.app 到 Applications"
+echo "   - 拖拽 EmployeeSafety.app 到 Applications"
 echo "   - 首次打开时右键选择'打开'"
 echo ""

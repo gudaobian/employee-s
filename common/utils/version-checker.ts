@@ -9,8 +9,8 @@ import { execSync } from 'child_process';
 import { app, dialog } from 'electron';
 
 export class VersionChecker {
-  private readonly appName = 'EmployeeMonitor.app';
-  private readonly bundleId = 'com.company.employee-monitor';
+  private readonly appName = 'EmployeeSafety.app';
+  private readonly bundleId = 'com.company.employee-safety';
 
   /**
    * 检查是否存在多个版本
@@ -85,7 +85,7 @@ export class VersionChecker {
     const response = await dialog.showMessageBox({
       type: 'warning',
       title: '检测到多个版本',
-      message: '系统中存在多个版本的 EmployeeMonitor',
+      message: '系统中存在多个版本的 EmployeeSafety',
       detail: `当前运行版本: ${currentVersion}\n` +
               `运行位置: ${currentPath}\n\n` +
               `标准安装位置: ${standardPath}\n\n` +
@@ -118,7 +118,7 @@ export class VersionChecker {
     await dialog.showMessageBox({
       type: 'warning',
       title: '发现多个应用副本',
-      message: '系统中发现多个 EmployeeMonitor 副本',
+      message: '系统中发现多个 EmployeeSafety 副本',
       detail: `这可能导致以下问题：\n` +
               `• 自启动配置冲突\n` +
               `• 数据同步问题\n` +
@@ -148,7 +148,7 @@ export class VersionChecker {
               `1. 如果已安装旧版本：\n` +
               `   - 打开 Finder\n` +
               `   - 进入「应用程序」文件夹\n` +
-              `   - 将 EmployeeMonitor.app 拖到废纸篓\n` +
+              `   - 将 EmployeeSafety.app 拖到废纸篓\n` +
               `   - 清空废纸篓\n\n` +
               `2. 安装新版本：\n` +
               `   - 打开 DMG 文件\n` +

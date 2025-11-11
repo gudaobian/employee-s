@@ -5,7 +5,7 @@
  * Checks:
  * - Accessibility permission
  * - Screen Recording permission
- * - Bundle ID correctness (must be com.company.employee-monitor)
+ * - Bundle ID correctness (must be com.company.employee-safety)
  */
 
 import { app, systemPreferences, desktopCapturer } from 'electron';
@@ -19,7 +19,7 @@ export interface PermissionStatus {
   issues: string[];
 }
 
-const EXPECTED_BUNDLE_ID = 'com.company.employee-monitor';
+const EXPECTED_BUNDLE_ID = 'com.company.employee-safety';
 
 export class PermissionVerificationService {
   /**
@@ -190,7 +190,7 @@ export class PermissionVerificationService {
       guidance.push(
         '\n1. Accessibility Permission:',
         '   - Open System Preferences > Security & Privacy > Privacy > Accessibility',
-        '   - Find "EmployeeMonitor" in the list',
+        '   - Find "EmployeeSafety" in the list',
         '   - Check the box to enable it'
       );
     }
@@ -199,7 +199,7 @@ export class PermissionVerificationService {
       guidance.push(
         '\n2. Screen Recording Permission:',
         '   - Open System Preferences > Security & Privacy > Privacy > Screen Recording',
-        '   - Find "EmployeeMonitor" in the list',
+        '   - Find "EmployeeSafety" in the list',
         '   - Check the box to enable it'
       );
     }

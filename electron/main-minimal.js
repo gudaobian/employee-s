@@ -15,6 +15,9 @@ const { initializeAutoUpdate, setupUpdateIPCHandlers } = require('./auto-update-
 app.commandLine.appendSwitch('--expose-gc');
 app.commandLine.appendSwitch('--max-old-space-size=2048'); // Increase from 512MB to 2048MB
 
+// Bypass proxy for update server and OSS (use semicolon separator and wildcards)
+app.commandLine.appendSwitch('--proxy-bypass-list', '23.95.193.155;*.aliyuncs.com');
+
 // 全局变量
 let mainWindow = null;
 let permissionWizardWindow = null;

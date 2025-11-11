@@ -1,7 +1,7 @@
 /**
  * Bundle ID Verification Script
  *
- * CRITICAL: Ensures Bundle ID remains "com.company.employee-monitor" across all configuration files
+ * CRITICAL: Ensures Bundle ID remains "com.company.employee-safety" across all configuration files
  * This is essential to preserve macOS permissions (Accessibility, Screen Recording) across updates
  *
  * Run this script before every build and in CI/CD pipeline
@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-const EXPECTED_BUNDLE_ID = 'com.company.employee-monitor';
+const EXPECTED_BUNDLE_ID = 'com.company.employee-safety';
 
 interface VerificationResult {
   file: string;

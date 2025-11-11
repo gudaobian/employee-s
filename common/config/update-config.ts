@@ -36,7 +36,7 @@ export class UpdateConfigService {
       ),
       updateServerUrl:
         process.env.UPDATE_SERVER_URL ||
-        'https://api.example.com/api/v1/updates',
+        'http://23.95.193.155:3000/api/updates',
       channel: this.parseChannel(process.env.UPDATE_CHANNEL, 'stable'),
       autoDownload: this.parseBoolean(process.env.UPDATE_AUTO_DOWNLOAD, true),
       autoInstallOnQuit: this.parseBoolean(
