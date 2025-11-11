@@ -1,6 +1,6 @@
 {
   "name": "employee-safety-client",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Employee Safety Client - Comprehensive Employee Security Solution",
   "main": "electron/main-minimal.js",
   "bin": {
@@ -113,39 +113,6 @@
   },
   "homepage": "https://github.com/zhangxiaoyu2000/employee-s#readme",
   "build": {
-    "appId": "com.company.employee-safety",
-    "productName": "EmployeeSafety",
-    "mac": {
-      "category": "public.app-category.business",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist",
-      "identity": "Developer ID Application",
-      "target": [
-        "dmg",
-        "pkg",
-        "zip"
-      ]
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "publisherName": "Employee Monitoring Inc"
-    },
-    "publish": {
-      "provider": "generic",
-      "url": "http://23.95.193.155:3000/api/updates"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "buildResources": "build",
-      "output": "release"
-    }
+    "extends": null
   }
 }
