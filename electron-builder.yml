@@ -80,9 +80,7 @@ extraMetadata:
 
 npmRebuild: false
 nodeGypRebuild: false
-publish:
-  provider: generic
-  url: http://23.95.193.155:3000/api/updates
+publish: null
 
 win:
   target:
