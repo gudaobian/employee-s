@@ -1,6 +1,6 @@
 {
   "name": "employee-safety-client",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "description": "Employee Safety Client - Comprehensive Employee Security Solution",
   "main": "electron/main-minimal.js",
   "bin": {
@@ -111,8 +111,5 @@
   "bugs": {
     "url": "https://github.com/zhangxiaoyu2000/employee-s/issues"
   },
-  "homepage": "https://github.com/zhangxiaoyu2000/employee-s#readme",
-  "build": {
-    "extends": null
-  }
+  "homepage": "https://github.com/zhangxiaoyu2000/employee-s#readme"
 }

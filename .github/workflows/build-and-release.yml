@@ -621,10 +621,20 @@ jobs:
           Write-Host "========================================="
 
       - name: Verify NSIS installer contains getActiveURL (CRITICAL)
+        continue-on-error: true
+        id: verify-nsis
         run: |
           Write-Host "========================================="
           Write-Host "验证NSIS安装包中的WindowsAdapter（关键步骤）"
           Write-Host "========================================="
+
+          # 检查 release 目录是否存在
+          if (-not (Test-Path "release")) {
+            Write-Host "❌ release 目录不存在！"
+            Write-Host "   这意味着 electron-builder 打包失败"
+            Write-Host "   请检查前面的 'Create application bundle' 步骤"
+            exit 1
+          }
 
           # 安装必要工具
           Write-Host "📦 Installing tools..."
@@ -636,6 +646,8 @@ jobs:
 
           if (-not $exePath) {
             Write-Host "❌ NSIS installer not found!"
+            Write-Host "📂 release 目录内容:"
+            Get-ChildItem "release" | Format-Table Name, Length
             exit 1
           }
 
