@@ -170,7 +170,8 @@ bool X11Backend::isRunning() const {
     return m_running.load();
 }
 
-void X11Backend::recordCallback(void* closure, XRecordInterceptData* data) {
+void X11Backend::recordCallback(void* closure, void* rawData) {
+    XRecordInterceptData* data = static_cast<XRecordInterceptData*>(rawData);
     if (!data) {
         return;
     }
