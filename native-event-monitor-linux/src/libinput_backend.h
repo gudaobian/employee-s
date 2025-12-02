@@ -54,6 +54,10 @@ public:
      */
     static bool isAvailable();
 
+    // libinput interface callbacks (must be public for struct initialization)
+    static int openRestricted(const char* path, int flags, void* userData);
+    static void closeRestricted(int fd, void* userData);
+
 private:
     // Event processing
     void monitorThread();
@@ -64,10 +68,6 @@ private:
     // libinput context management
     bool initializeLibinput();
     void cleanupLibinput();
-
-    // libinput interface callbacks
-    static int openRestricted(const char* path, int flags, void* userData);
-    static void closeRestricted(int fd, void* userData);
 
     // State
     std::atomic<bool> m_running{false};

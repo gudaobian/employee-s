@@ -178,7 +178,7 @@ bool LibinputBackend::stop() {
         // Create a pipe to signal thread exit
         int pipeFds[2];
         if (pipe(pipeFds) == 0) {
-            write(pipeFds[1], "x", 1);
+            (void)write(pipeFds[1], "x", 1);  // Ignore return value
             close(pipeFds[0]);
             close(pipeFds[1]);
         }
