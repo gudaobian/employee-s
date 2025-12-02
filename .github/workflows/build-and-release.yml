@@ -884,6 +884,11 @@ jobs:
           echo "========================================="
 
       - name: Install application dependencies
+        env:
+          ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/'
+          ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
+          npm_config_electron_mirror: 'https://npmmirror.com/mirrors/electron/'
+          npm_config_electron_builder_binaries_mirror: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
         run: |
           echo "🔄 Installing application dependencies..."
 
@@ -895,6 +900,10 @@ jobs:
           npm config set fund false
           npm config set audit false
           npm config set progress false
+
+          # 设置 Electron 镜像
+          npm config set electron_mirror "https://npmmirror.com/mirrors/electron/"
+          npm config set electron_builder_binaries_mirror "https://npmmirror.com/mirrors/electron-builder-binaries/"
 
           # 清理缓存
           npm cache clean --force
@@ -991,6 +1000,8 @@ jobs:
           echo "========================================="
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/'
+          ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
 
       - name: List build outputs
         run: |
