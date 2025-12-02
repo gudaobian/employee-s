@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
+import { EventEmitter } from 'events';
 import {
   PlatformAdapterBase,
   SystemInfo,
@@ -22,6 +23,42 @@ import { logger } from '../../common/utils';
 
 const execAsync = promisify(exec);
 
+/**
+ * Interface for native event counts from LinuxEventMonitor
+ */
+interface NativeEventCounts {
+  keyboard: number;
+  mouse: number;
+  scrolls: number;
+  isMonitoring: boolean;
+}
+
+/**
+ * Interface for native permission status
+ */
+interface NativePermissionStatus {
+  hasInputAccess: boolean;
+  hasX11Access: boolean;
+  currentBackend: 'libinput' | 'x11' | 'none';
+  missingPermissions: string[];
+}
+
+/**
+ * Interface for the native LinuxEventMonitor class
+ */
+interface LinuxEventMonitorInterface extends EventEmitter {
+  start(): boolean;
+  stop(): boolean;
+  getCounts(): NativeEventCounts;
+  resetCounts(): boolean;
+  isMonitoring(): boolean;
+  getBackendType(): string;
+  checkPermissions(): NativePermissionStatus;
+  isAvailable(): boolean;
+  startPolling(intervalMs?: number): void;
+  stopPolling(): void;
+}
+
 export class LinuxAdapter extends PlatformAdapterBase {
   private activityMonitorTimer?: NodeJS.Timeout;
   private lastActivityData: ActivityData | null = null;
@@ -29,19 +66,35 @@ export class LinuxAdapter extends PlatformAdapterBase {
   private hasX11 = false;
   private hasWayland = false;
 
+  // Native event monitor instance
+  private nativeEventMonitor: LinuxEventMonitorInterface | null = null;
+  private nativeModuleLoaded = false;
+  private nativeModuleLoadError: string | null = null;
+
+  // Activity counters for current period
+  private currentPeriodKeystrokes = 0;
+  private currentPeriodMouseClicks = 0;
+  private currentPeriodMouseScrolls = 0;
+  private lastNativeKeystrokes = 0;
+  private lastNativeMouseClicks = 0;
+  private lastNativeMouseScrolls = 0;
+
   protected async performInitialization(): Promise<void> {
     logger.info('Initializing Linux platform adapter');
-    
+
     try {
       // 检测桌面环境
       await this.detectDesktopEnvironment();
-      
+
       // 检查必需的系统工具
       await this.checkSystemTools();
-      
+
+      // 加载原生事件监控模块
+      await this.loadNativeEventMonitor();
+
       // 检查权限
       await this.checkInitialPermissions();
-      
+
       logger.info('Linux platform adapter initialized successfully');
     } catch (error) {
       logger.error('Failed to initialize Linux adapter', error);
@@ -49,15 +102,144 @@ export class LinuxAdapter extends PlatformAdapterBase {
     }
   }
 
+  /**
+   * Load the native Linux event monitor module
+   * Tries multiple strategies: development path, packaged path, fallback
+   */
+  private async loadNativeEventMonitor(): Promise<void> {
+    logger.info('[LINUX] Loading native event monitor module...');
+
+    const strategies = [
+      // Strategy 1: Development path (TypeScript compiled)
+      {
+        name: 'development',
+        path: path.join(__dirname, '../../native-event-monitor-linux/lib/index')
+      },
+      // Strategy 2: Development path (JavaScript entry)
+      {
+        name: 'development-js',
+        path: path.join(__dirname, '../../native-event-monitor-linux/index')
+      },
+      // Strategy 3: Packaged Electron app path
+      {
+        name: 'packaged',
+        path: path.join((process as any).resourcesPath || '', 'native-event-monitor-linux')
+      },
+      // Strategy 4: Relative to app path
+      {
+        name: 'app-relative',
+        path: path.join(process.cwd(), 'native-event-monitor-linux')
+      }
+    ];
+
+    for (const strategy of strategies) {
+      try {
+        logger.debug(`[LINUX] Trying native module strategy: ${strategy.name} at ${strategy.path}`);
+
+        // Check if module file exists
+        const modulePath = strategy.path;
+        let moduleExists = false;
+
+        try {
+          // Try to resolve the module path
+          require.resolve(modulePath);
+          moduleExists = true;
+        } catch {
+          // Module doesn't exist at this path
+          moduleExists = false;
+        }
+
+        if (!moduleExists) {
+          logger.debug(`[LINUX] Module not found at: ${strategy.path}`);
+          continue;
+        }
+
+        // Try to load the module
+        const NativeModule = require(modulePath);
+        const LinuxEventMonitor = NativeModule.LinuxEventMonitor || NativeModule.default || NativeModule;
+
+        if (typeof LinuxEventMonitor !== 'function') {
+          logger.warn(`[LINUX] Invalid module export at ${strategy.path}`);
+          continue;
+        }
+
+        // Create monitor instance
+        const monitor = new LinuxEventMonitor() as LinuxEventMonitorInterface;
+
+        // Verify the monitor has required methods
+        if (typeof monitor.start !== 'function' ||
+            typeof monitor.stop !== 'function' ||
+            typeof monitor.getCounts !== 'function') {
+          logger.warn(`[LINUX] Native module missing required methods`);
+          continue;
+        }
+
+        // Check if native module is available
+        if (monitor.isAvailable && !monitor.isAvailable()) {
+          logger.warn(`[LINUX] Native module loaded but not available (binary not found)`);
+          this.nativeModuleLoadError = 'Native binary not found. Run npm run build:native in native-event-monitor-linux';
+          continue;
+        }
+
+        this.nativeEventMonitor = monitor;
+        this.nativeModuleLoaded = true;
+        logger.info(`[LINUX] Native event monitor loaded successfully via ${strategy.name}`);
+
+        // Check permissions
+        const perms = monitor.checkPermissions();
+        logger.info(`[LINUX] Native module permissions:`, {
+          hasInputAccess: perms.hasInputAccess,
+          hasX11Access: perms.hasX11Access,
+          backend: perms.currentBackend
+        });
+
+        return;
+      } catch (error) {
+        logger.debug(`[LINUX] Failed to load native module via ${strategy.name}:`, error);
+      }
+    }
+
+    // No strategy succeeded
+    this.nativeModuleLoaded = false;
+    this.nativeModuleLoadError = 'Failed to load native event monitor from any location';
+    logger.warn('[LINUX] Native event monitor not available - activity monitoring will be limited');
+    logger.warn('[LINUX] To enable full activity monitoring:');
+    logger.warn('[LINUX]   1. Install dependencies: sudo apt install libinput-dev libudev-dev libx11-dev libxtst-dev');
+    logger.warn('[LINUX]   2. Build native module: cd native-event-monitor-linux && npm run build:native');
+    logger.warn('[LINUX]   3. Add user to input group: sudo usermod -aG input $USER');
+  }
+
   protected async performCleanup(): Promise<void> {
     logger.info('Cleaning up Linux platform adapter');
-    
+
+    // Stop activity monitor timer
     if (this.activityMonitorTimer) {
       clearInterval(this.activityMonitorTimer);
       this.activityMonitorTimer = undefined;
     }
-    
+
+    // Clean up native event monitor
+    if (this.nativeEventMonitor) {
+      try {
+        logger.info('[LINUX] Stopping native event monitor...');
+        this.nativeEventMonitor.stopPolling();
+        this.nativeEventMonitor.stop();
+        this.nativeEventMonitor = null;
+        logger.info('[LINUX] Native event monitor stopped');
+      } catch (error) {
+        logger.error('[LINUX] Error stopping native event monitor:', error);
+      }
+    }
+
+    // Reset counters
     this.lastActivityData = null;
+    this.currentPeriodKeystrokes = 0;
+    this.currentPeriodMouseClicks = 0;
+    this.currentPeriodMouseScrolls = 0;
+    this.lastNativeKeystrokes = 0;
+    this.lastNativeMouseClicks = 0;
+    this.lastNativeMouseScrolls = 0;
+    this.nativeModuleLoaded = false;
   }
 
   async getSystemInfo(): Promise<SystemInfo> {
@@ -743,14 +925,61 @@ X-GNOME-Autostart-enabled=true
   private async collectActivityData(): Promise<ActivityData> {
     const timestamp = new Date();
     const activeWindow = await this.getActiveWindow();
-    
-    // Linux 上的活动监控实现困难，需要依赖具体的桌面环境
+
+    let keystrokes = 0;
+    let mouseClicks = 0;
+    let mouseScrolls = 0;
+
+    // Get activity data from native event monitor if available
+    if (this.nativeEventMonitor && this.nativeEventMonitor.isMonitoring()) {
+      try {
+        const counts = this.nativeEventMonitor.getCounts();
+
+        // Calculate delta since last collection
+        const deltaKeystrokes = counts.keyboard - this.lastNativeKeystrokes;
+        const deltaMouseClicks = counts.mouse - this.lastNativeMouseClicks;
+        const deltaMouseScrolls = counts.scrolls - this.lastNativeMouseScrolls;
+
+        // Add delta to current period counters
+        if (deltaKeystrokes > 0) {
+          this.currentPeriodKeystrokes += deltaKeystrokes;
+        }
+        if (deltaMouseClicks > 0) {
+          this.currentPeriodMouseClicks += deltaMouseClicks;
+        }
+        if (deltaMouseScrolls > 0) {
+          this.currentPeriodMouseScrolls += deltaMouseScrolls;
+        }
+
+        // Update last known values
+        this.lastNativeKeystrokes = counts.keyboard;
+        this.lastNativeMouseClicks = counts.mouse;
+        this.lastNativeMouseScrolls = counts.scrolls;
+
+        // Use current period values
+        keystrokes = this.currentPeriodKeystrokes;
+        mouseClicks = this.currentPeriodMouseClicks;
+        mouseScrolls = this.currentPeriodMouseScrolls;
+
+        logger.debug(`[LINUX] Activity data: keyboard=${keystrokes}, mouse=${mouseClicks}, scrolls=${mouseScrolls}`);
+      } catch (error) {
+        logger.error('[LINUX] Error getting native event counts:', error);
+      }
+    } else if (this.nativeModuleLoaded && this.nativeEventMonitor) {
+      // Native module loaded but not monitoring - try to start
+      logger.debug('[LINUX] Native monitor not running, using cached values');
+      keystrokes = this.currentPeriodKeystrokes;
+      mouseClicks = this.currentPeriodMouseClicks;
+      mouseScrolls = this.currentPeriodMouseScrolls;
+    }
+
     return {
       timestamp,
       activeWindow: activeWindow || undefined,
-      keystrokes: 0, // 需要特殊工具或库
-      mouseClicks: 0, // 需要特殊工具或库
-      mouseMovements: 0, // 需要特殊工具或库
+      keystrokes,
+      mouseClicks,
+      mouseMovements: 0, // Not tracked by native module
+      mouseScrolls,
       idleTime: await this.getIdleTime()
     };
   }
@@ -812,6 +1041,268 @@ X-GNOME-Autostart-enabled=true
     } catch (error) {
       throw new Error(`D-Bus monitoring failed: ${error}`);
     }
+  }
+
+  // === Public Methods for ActivityCollectorService ===
+
+  /**
+   * Create an event listener for keyboard, mouse, and idle events
+   * Used by ActivityCollectorService for real-time event monitoring
+   */
+  async createEventListener(options: {
+    keyboard?: boolean;
+    mouse?: boolean;
+    idle?: boolean;
+  }): Promise<EventEmitter | null> {
+    logger.info('[LINUX] Creating event listener', options);
+
+    const eventEmitter = new EventEmitter();
+
+    // Check if native module is available
+    if (!this.nativeEventMonitor) {
+      logger.warn('[LINUX] Native event monitor not available for event listener');
+
+      // Return null to indicate no event monitoring available
+      // The caller should handle graceful degradation
+      if (this.nativeModuleLoadError) {
+        logger.warn(`[LINUX] Native module error: ${this.nativeModuleLoadError}`);
+      }
+
+      return null;
+    }
+
+    // Check permissions
+    const perms = this.nativeEventMonitor.checkPermissions();
+    if (!perms.hasInputAccess && !perms.hasX11Access) {
+      logger.warn('[LINUX] No event monitoring backend available');
+      logger.warn(`[LINUX] Missing permissions: ${perms.missingPermissions.join(', ')}`);
+
+      // Emit permission-required event for UI notification
+      eventEmitter.emit('permission-required', {
+        hasInputAccess: perms.hasInputAccess,
+        hasX11Access: perms.hasX11Access,
+        missingPermissions: perms.missingPermissions,
+        message: 'Add user to input group: sudo usermod -aG input $USER'
+      });
+
+      return null;
+    }
+
+    // Start native monitoring if not already running
+    if (!this.nativeEventMonitor.isMonitoring()) {
+      logger.info('[LINUX] Starting native event monitor...');
+      const started = this.nativeEventMonitor.start();
+      if (!started) {
+        logger.error('[LINUX] Failed to start native event monitor');
+        return null;
+      }
+      logger.info(`[LINUX] Native event monitor started using backend: ${this.nativeEventMonitor.getBackendType()}`);
+    }
+
+    // Start activity monitoring to collect data
+    if (!this.monitoringActive) {
+      await this.startActivityMonitoring();
+    }
+
+    // Set up polling interval to emit events
+    const pollingInterval = setInterval(async () => {
+      try {
+        const activityData = await this.getActivityData();
+
+        if (options.keyboard && activityData.keystrokes && activityData.keystrokes > 0) {
+          eventEmitter.emit('keyboard', { count: activityData.keystrokes });
+        }
+
+        if (options.mouse) {
+          if (activityData.mouseClicks && activityData.mouseClicks > 0) {
+            eventEmitter.emit('mouse', {
+              type: 'click',
+              count: activityData.mouseClicks
+            });
+          }
+
+          if (activityData.mouseScrolls && activityData.mouseScrolls > 0) {
+            eventEmitter.emit('mouse', {
+              type: 'scroll',
+              count: activityData.mouseScrolls
+            });
+          }
+        }
+
+        if (options.idle && activityData.idleTime !== undefined) {
+          eventEmitter.emit('idle', { time: activityData.idleTime });
+        }
+      } catch (error) {
+        logger.error('[LINUX] Error in event listener polling:', error);
+      }
+    }, 1000);
+
+    // Add stop method to the emitter for cleanup
+    (eventEmitter as any).stop = async () => {
+      logger.info('[LINUX] Stopping event listener');
+      clearInterval(pollingInterval);
+
+      // Don't stop native monitor here - it may be used by other consumers
+      // Native monitor cleanup is handled in performCleanup
+    };
+
+    // Store reference for cleanup
+    (eventEmitter as any).pollingInterval = pollingInterval;
+
+    logger.info('[LINUX] Event listener created successfully');
+    return eventEmitter;
+  }
+
+  /**
+   * Called when data is successfully uploaded to the server
+   * Resets activity counters for the next collection period
+   */
+  public onDataUploadSuccess(): void {
+    logger.info('[LINUX] Data upload successful, resetting activity counters');
+
+    try {
+      // Reset native event counters
+      if (this.nativeEventMonitor && this.nativeEventMonitor.isMonitoring()) {
+        const result = this.nativeEventMonitor.resetCounts();
+        if (result) {
+          logger.debug('[LINUX] Native event counters reset successfully');
+        } else {
+          logger.warn('[LINUX] Failed to reset native event counters');
+        }
+      }
+
+      // Reset local period counters
+      this.currentPeriodKeystrokes = 0;
+      this.currentPeriodMouseClicks = 0;
+      this.currentPeriodMouseScrolls = 0;
+      this.lastNativeKeystrokes = 0;
+      this.lastNativeMouseClicks = 0;
+      this.lastNativeMouseScrolls = 0;
+
+      // Reset last activity data
+      this.lastActivityData = null;
+
+      logger.info('[LINUX] Activity counters reset complete');
+    } catch (error) {
+      logger.error('[LINUX] Error resetting activity counters:', error);
+    }
+  }
+
+  /**
+   * Check all permissions including native module input monitoring
+   * Returns comprehensive permission status for all monitoring capabilities
+   */
+  async checkAllPermissions(): Promise<{
+    screenshot: PermissionResult;
+    accessibility: PermissionResult;
+    inputMonitoring: PermissionResult;
+  }> {
+    const screenshotPerm = await this.checkScreenshotPermission();
+    const accessibilityPerm = await this.checkAccessibilityPermission();
+
+    // Check input monitoring permission via native module
+    let inputPerm: PermissionResult = {
+      granted: false,
+      canRequest: false,
+      error: 'Native event monitor not loaded'
+    };
+
+    if (this.nativeEventMonitor) {
+      try {
+        const status = this.nativeEventMonitor.checkPermissions();
+        const hasAccess = status.hasInputAccess || status.hasX11Access;
+
+        inputPerm = {
+          granted: hasAccess,
+          canRequest: !hasAccess, // Can request if not granted
+          error: hasAccess
+            ? undefined
+            : `Missing permissions: ${status.missingPermissions.join(', ')}. ` +
+              'To fix: sudo usermod -aG input $USER && reboot'
+        };
+
+        logger.debug('[LINUX] Input monitoring permission check:', {
+          granted: inputPerm.granted,
+          backend: status.currentBackend,
+          hasInputAccess: status.hasInputAccess,
+          hasX11Access: status.hasX11Access
+        });
+      } catch (error) {
+        inputPerm = {
+          granted: false,
+          canRequest: false,
+          error: `Permission check failed: ${error instanceof Error ? error.message : String(error)}`
+        };
+      }
+    } else if (this.nativeModuleLoadError) {
+      inputPerm = {
+        granted: false,
+        canRequest: false,
+        error: this.nativeModuleLoadError
+      };
+    }
+
+    return {
+      screenshot: screenshotPerm,
+      accessibility: accessibilityPerm,
+      inputMonitoring: inputPerm
+    };
+  }
+
+  /**
+   * Get the current native event monitor status
+   * Useful for debugging and status reporting
+   */
+  getNativeMonitorStatus(): {
+    loaded: boolean;
+    available: boolean;
+    monitoring: boolean;
+    backend: string;
+    error: string | null;
+    counts: NativeEventCounts | null;
+  } {
+    if (!this.nativeEventMonitor) {
+      return {
+        loaded: this.nativeModuleLoaded,
+        available: false,
+        monitoring: false,
+        backend: 'none',
+        error: this.nativeModuleLoadError,
+        counts: null
+      };
+    }
+
+    try {
+      return {
+        loaded: true,
+        available: this.nativeEventMonitor.isAvailable ? this.nativeEventMonitor.isAvailable() : true,
+        monitoring: this.nativeEventMonitor.isMonitoring(),
+        backend: this.nativeEventMonitor.getBackendType(),
+        error: null,
+        counts: this.nativeEventMonitor.getCounts()
+      };
+    } catch (error) {
+      return {
+        loaded: true,
+        available: false,
+        monitoring: false,
+        backend: 'none',
+        error: error instanceof Error ? error.message : String(error),
+        counts: null
+      };
+    }
+  }
+
+  /**
+   * Reset activity counters (helper method)
+   */
+  private resetActivityCounters(): void {
+    this.currentPeriodKeystrokes = 0;
+    this.currentPeriodMouseClicks = 0;
+    this.currentPeriodMouseScrolls = 0;
+    this.lastNativeKeystrokes = 0;
+    this.lastNativeMouseClicks = 0;
+    this.lastNativeMouseScrolls = 0;
   }
 }
 

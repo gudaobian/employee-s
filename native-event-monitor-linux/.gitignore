@@ -1,0 +1,24 @@
+# Build outputs
+build/
+node_modules/
+lib/*.js
+lib/*.d.ts
+lib/*.js.map
+lib/*.d.ts.map
+
+# npm
+package-lock.json
+.npm-cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prebuilt binaries (track separately if needed)
+# bin/

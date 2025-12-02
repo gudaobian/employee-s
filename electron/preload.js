@@ -16,6 +16,17 @@ const electronAPI = {
     updateConfig: (config) => ipcRenderer.invoke('app:update-config', config)
   },
 
+  // Linux permission management API (only functional on Linux)
+  linuxPermissions: {
+    checkPermissions: () => ipcRenderer.invoke('linux:check-permissions'),
+    getSetupInstructions: (status) => ipcRenderer.invoke('linux:get-setup-instructions', status),
+    copyToClipboard: (text) => ipcRenderer.invoke('linux:copy-to-clipboard', text),
+    getUdevRules: () => ipcRenderer.invoke('linux:get-udev-rules'),
+    getPermissionSummary: () => ipcRenderer.invoke('linux:get-permission-summary'),
+    clearPermissionCache: () => ipcRenderer.invoke('linux:clear-permission-cache'),
+    isLinux: () => process.platform === 'linux'
+  },
+
   permission: {
     check: (permissions) => ipcRenderer.invoke('permission:check', permissions),
     request: (permissions) => ipcRenderer.invoke('permission:request', permissions),

@@ -25,6 +25,8 @@ declare module 'fs' {
     rename(oldPath: string, newPath: string): Promise<void>;
     rmdir(path: string, options?: any): Promise<void>;
     copyFile(src: string, dest: string): Promise<void>;
+    readdir(path: string, options?: any): Promise<string[]>;
+    open(path: string, flags?: string | number, mode?: any): Promise<{ close(): Promise<void>; read: any; write: any }>;
   };
 }
 

@@ -823,6 +823,194 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  # 构建Linux应用
+  build-linux:
+    name: Build Linux Application
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Linux build dependencies
+        run: |
+          echo "========================================="
+          echo "安装 Linux 构建依赖"
+          echo "========================================="
+          sudo apt-get update
+          sudo apt-get install -y \
+            libinput-dev \
+            libudev-dev \
+            libx11-dev \
+            libxtst-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            build-essential \
+            python3 \
+            pkg-config \
+            rpm \
+            fakeroot
+
+          echo "✅ Linux dependencies installed"
+
+      - name: Verify environment
+        run: |
+          echo "========================================="
+          echo "环境信息检查"
+          echo "========================================="
+          echo "Node.js 版本:"
+          node --version
+          echo ""
+          echo "npm 版本:"
+          npm --version
+          echo ""
+          echo "系统信息:"
+          uname -a
+          echo ""
+          echo "GCC 版本:"
+          gcc --version | head -1
+          echo ""
+          echo "Python 版本:"
+          python3 --version
+          echo "========================================="
+
+      - name: Install application dependencies
+        run: |
+          echo "🔄 Installing application dependencies..."
+
+          # 清理环境
+          rm -rf node_modules package-lock.json
+          rm -rf native-event-monitor-linux/node_modules
+
+          # npm 配置
+          npm config set fund false
+          npm config set audit false
+          npm config set progress false
+
+          # 清理缓存
+          npm cache clean --force
+
+          # 安装依赖
+          npm install --production=false --legacy-peer-deps
+
+          echo "✅ Dependencies installation completed"
+
+      - name: Build native Linux module
+        run: |
+          echo "========================================="
+          echo "构建 Linux 原生模块"
+          echo "========================================="
+
+          cd native-event-monitor-linux
+
+          # 安装原生模块依赖
+          echo "📦 Installing native module dependencies..."
+          npm install
+
+          # 构建原生模块
+          echo "🔨 Building native module..."
+          npm run build:native || npm run build || node-gyp rebuild
+
+          # 构建 TypeScript
+          echo "📝 Compiling TypeScript..."
+          npm run build:ts || npx tsc
+
+          # 验证构建结果
+          if [ -f "build/Release/linux_event_monitor.node" ]; then
+            echo "✅ 原生模块编译成功"
+            ls -la build/Release/linux_event_monitor.node
+          else
+            echo "❌ 原生模块编译失败"
+            exit 1
+          fi
+
+          cd ..
+          echo "========================================="
+
+      - name: Rebuild native module for Electron
+        run: |
+          echo "========================================="
+          echo "为 Electron 重新编译原生模块"
+          echo "========================================="
+
+          cd native-event-monitor-linux
+
+          # 使用 electron-rebuild 确保 ABI 兼容
+          npx electron-rebuild --version=28.2.10 --force || true
+
+          # 验证
+          if [ -f "build/Release/linux_event_monitor.node" ]; then
+            echo "✅ 原生模块 Electron 兼容编译成功"
+            ls -la build/Release/linux_event_monitor.node
+          fi
+
+          cd ..
+          echo "========================================="
+
+      - name: Update package version from git tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "📌 Extracted version from tag: $VERSION"
+
+            # 更新 package.json 版本号
+            npm version $VERSION --no-git-tag-version --allow-same-version
+
+            echo "✅ Updated package.json version to: $VERSION"
+          else
+            echo "⚠️ Not a tag push, using package.json version"
+          fi
+
+      - name: Build TypeScript
+        run: |
+          npm run compile
+
+      - name: Build Linux packages
+        run: |
+          echo "========================================="
+          echo "构建 Linux 安装包"
+          echo "========================================="
+
+          # 构建 AppImage (x64)
+          echo "📦 Building AppImage..."
+          npx electron-builder --linux AppImage --x64
+
+          # 构建 DEB 包
+          echo "📦 Building DEB package..."
+          npx electron-builder --linux deb --x64
+
+          echo "========================================="
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: List build outputs
+        run: |
+          echo "Build outputs:"
+          if [ -d "release" ]; then
+            find release -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) -exec ls -lh {} \;
+          else
+            echo "❌ Release directory not found"
+            ls -la
+          fi
+
+      - name: Upload Linux build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer
+          path: |
+            release/*.AppImage
+            release/*.deb
+            release/*.rpm
+          retention-days: 1
+          if-no-files-found: error
+
   # 第三阶段：构建macOS应用（可选）
   build-macos:
     name: Build macOS Application
@@ -930,8 +1118,8 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows]
-    if: always() && (needs.build-windows.result == 'success')
+    needs: [build-windows, build-linux]
+    if: always() && (needs.build-windows.result == 'success' || needs.build-linux.result == 'success')
     
     steps:
       - name: Checkout repository
@@ -958,6 +1146,13 @@ jobs:
           name: windows-installer
           path: release-artifacts/windows/
 
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: linux-installer
+          path: release-artifacts/linux/
+
       - name: Download macOS artifacts (if available)
         uses: actions/download-artifact@v4
         continue-on-error: true
@@ -970,21 +1165,25 @@ jobs:
         run: |
           cat > release-notes.md << 'EOF'
           # Employee Monitor ${{ steps.version.outputs.version }}
-          
+
           ## 🚀 新版本发布
-          
+
           ### 📦 安装包
-          
+
           **Windows 用户：**
-          - `Employee-Monitor-Setup-${{ steps.version.outputs.version }}.exe` - Windows 安装程序（推荐）
-          - `Employee-Monitor-${{ steps.version.outputs.version }}-win.zip` - Windows 便携版
-          
+          - `EmployeeSafety-Setup-${{ steps.version.outputs.version }}.exe` - Windows 安装程序（推荐）
+          - `EmployeeSafety-${{ steps.version.outputs.version }}-win.zip` - Windows 便携版
+
+          **Linux 用户：**
+          - `EmployeeSafety-${{ steps.version.outputs.version }}-x64.AppImage` - 通用 Linux 版本（推荐）
+          - `EmployeeSafety-${{ steps.version.outputs.version }}-amd64.deb` - Debian/Ubuntu 安装包
+
           **macOS 用户：**
-          - `Employee-Monitor-${{ steps.version.outputs.version }}.dmg` - macOS 安装包
+          - `EmployeeSafety-${{ steps.version.outputs.version }}.dmg` - macOS 安装包
           
           ### ✨ 主要特性
-          
-          - 🖥️ 跨平台支持（Windows、macOS）
+
+          - 🖥️ 跨平台支持（Windows、macOS、Linux）
           - 📊 实时活动监控
           - 📸 自动截屏功能
           - 🔒 本地数据安全存储
@@ -999,9 +1198,19 @@ jobs:
           - **原生模块**: ✅ 使用预编译模块（代码库）
           
           ### 📋 安装说明
-          
+
           1. **Windows**: 下载 `.exe` 安装程序，右键以管理员身份运行
-          2. **macOS**: 下载 `.dmg` 文件，拖拽到应用程序文件夹
+          2. **Linux (AppImage)**: 下载 `.AppImage`，添加执行权限后运行：`chmod +x *.AppImage && ./*.AppImage`
+          3. **Linux (DEB)**: 下载 `.deb`，使用 `sudo dpkg -i *.deb` 安装
+          4. **macOS**: 下载 `.dmg` 文件，拖拽到应用程序文件夹
+
+          ### 🐧 Linux 特别说明
+
+          为获得完整功能，请将用户添加到 `input` 组：
+          ```bash
+          sudo usermod -a -G input $USER
+          # 然后注销并重新登录
+          ```
           
           ### 🆘 技术支持
           
@@ -1023,6 +1232,9 @@ jobs:
             release-artifacts/windows/*.exe
             release-artifacts/windows/*.msi
             release-artifacts/windows/*.zip
+            release-artifacts/linux/*.AppImage
+            release-artifacts/linux/*.deb
+            release-artifacts/linux/*.rpm
             release-artifacts/macos/*.dmg
             release-artifacts/macos/*.zip
         env:
@@ -1044,7 +1256,7 @@ jobs:
   notify-completion:
     name: Notify Build Completion
     runs-on: ubuntu-latest
-    needs: [build-windows, create-release]
+    needs: [build-windows, build-linux, create-release]
     if: always()
     
     steps:
@@ -1053,6 +1265,7 @@ jobs:
         run: |
           echo "🎉 Employee Monitor 构建和发布成功完成！"
           echo "✅ Windows 应用构建完成"
+          echo "✅ Linux 应用构建完成"
           echo "📦 安装包已上传到 GitHub Releases"
           echo "🔗 立即下载: https://github.com/${{ github.repository }}/releases/latest"
           

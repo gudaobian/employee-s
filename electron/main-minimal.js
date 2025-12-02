@@ -3,20 +3,11 @@
  * 280x320px 小窗口，只包含7个核心功能
  */
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const os = require('os');
-const fs = require('fs');
 const { WindowsNativeInstaller } = require('./windows-native-installer');
 const UnifiedLogManager = require('./unified-log-manager');
-const { initializeAutoUpdate, setupUpdateIPCHandlers } = require('./auto-update-integration');
-
-// Enable manual garbage collection
-app.commandLine.appendSwitch('--expose-gc');
-app.commandLine.appendSwitch('--max-old-space-size=2048'); // Increase from 512MB to 2048MB
-
-// Bypass proxy for update server and OSS (use semicolon separator and wildcards)
-app.commandLine.appendSwitch('--proxy-bypass-list', '23.95.193.155;*.aliyuncs.com');
 
 // 全局变量
 let mainWindow = null;
@@ -29,14 +20,6 @@ let currentState = 'INIT';
 let manuallyPaused = false; // 添加手动暂停标志，初始为false允许启动
 let windowsNativeInstaller = null;
 let logManager = null; // 日志管理器
-let memoryMonitorInterval = null;
-
-// 用户交互状态跟踪（自启动功能）
-let userInteractionState = {
-    hasInteracted: false,
-    lastActionTime: 0,
-    lastActionType: null  // 'enable' | 'disable'
-};
 
 // 检查启动参数
 const isStartMinimized = process.argv.includes('--start-minimized');
@@ -51,46 +34,378 @@ const APP_CONFIG = {
     resizable: false
 };
 
-// Direct log file writing function for Electron main process
-// CRITICAL: Robust logging with directory creation to ensure logs always work
-function writeToLogFile(message) {
-    try {
-        const logDir = path.join(os.homedir(), 'Library', 'Logs', 'employee-monitor', 'logs');
-        const logFile = path.join(logDir, 'app.log');
+// ============================================================================
+// Linux 平台初始化 - 必须在 app.whenReady() 之前调用
+// ============================================================================
 
-        // Ensure log directory exists before writing
-        if (!fs.existsSync(logDir)) {
-            fs.mkdirSync(logDir, { recursive: true });
+/**
+ * 检测系统输入法
+ * @returns {string|null} 检测到的输入法模块名称
+ */
+function detectInputMethod() {
+    const { execSync } = require('child_process');
+
+    // 检测常见输入法
+    const imMethods = ['fcitx5', 'fcitx', 'ibus', 'scim'];
+
+    for (const im of imMethods) {
+        try {
+            execSync(`which ${im}`, { stdio: 'ignore' });
+            return im === 'fcitx5' ? 'fcitx' : im;
+        } catch {
+            // 继续检查下一个
         }
+    }
 
-        const timestamp = new Date().toISOString();
-        const logLine = `${timestamp} INFO ${message}\n`;
-        fs.appendFileSync(logFile, logLine, { encoding: 'utf-8', flag: 'a' });
+    return null;
+}
+
+/**
+ * Linux 平台初始化
+ * 配置 Wayland/X11 兼容性和输入法
+ */
+function initLinuxPlatform() {
+    if (process.platform !== 'linux') return;
+
+    console.log('[LINUX] Initializing Linux platform...');
+
+    // Wayland 支持 - 启用 Ozone 平台和窗口装饰
+    app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform,WaylandWindowDecorations');
+    app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+
+    // PipeWire 屏幕捕获支持 (Wayland 必需)
+    if (process.env.WAYLAND_DISPLAY) {
+        console.log('[LINUX] Wayland detected, enabling PipeWire capturer');
+        app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
+    }
+
+    // 输入法兼容性配置
+    if (!process.env.GTK_IM_MODULE) {
+        // 尝试检测已安装的输入法
+        const imModule = detectInputMethod();
+        if (imModule) {
+            console.log(`[LINUX] Setting input method to: ${imModule}`);
+            process.env.GTK_IM_MODULE = imModule;
+            process.env.QT_IM_MODULE = imModule;
+            process.env.XMODIFIERS = `@im=${imModule}`;
+        }
+    }
+
+    // GPU 相关设置
+    // 某些 Linux 发行版需要禁用 GPU 沙箱以避免崩溃
+    if (process.env.DISABLE_GPU_SANDBOX === '1') {
+        app.commandLine.appendSwitch('disable-gpu-sandbox');
+    }
+
+    console.log('[LINUX] Platform initialization complete');
+    console.log(`  - Session type: ${process.env.XDG_SESSION_TYPE || 'unknown'}`);
+    console.log(`  - Desktop: ${process.env.XDG_CURRENT_DESKTOP || 'unknown'}`);
+    console.log(`  - Wayland display: ${process.env.WAYLAND_DISPLAY || 'none'}`);
+    console.log(`  - X11 display: ${process.env.DISPLAY || 'none'}`);
+}
+
+// 在 app 事件处理之前调用 Linux 初始化
+initLinuxPlatform();
+
+// ============================================================================
+// Linux 托盘图标支持
+// ============================================================================
+
+/**
+ * 获取 Linux 托盘图标路径
+ * 根据主题深浅选择合适的图标
+ * @returns {string} 图标文件路径
+ */
+function getLinuxTrayIconPath() {
+    const { nativeTheme } = require('electron');
+    const fs = require('fs');
+    const darkMode = nativeTheme.shouldUseDarkColors;
+    const iconName = darkMode ? 'tray-icon-light.png' : 'tray-icon-dark.png';
+
+    let iconPath;
+    if (app.isPackaged) {
+        iconPath = path.join(process.resourcesPath, 'icons', iconName);
+    } else {
+        iconPath = path.join(__dirname, 'icons', iconName);
+    }
+
+    // 如果主题特定图标不存在，使用默认图标
+    if (!fs.existsSync(iconPath)) {
+        const defaultIcon = app.isPackaged
+            ? path.join(process.resourcesPath, 'icons', 'icon.png')
+            : path.join(__dirname, 'icons', 'icon.png');
+
+        if (fs.existsSync(defaultIcon)) {
+            return defaultIcon;
+        }
+        return null; // 图标文件不存在
+    }
+
+    return iconPath;
+}
+
+/**
+ * 获取 Linux 窗口图标
+ * 尝试加载多种尺寸的图标
+ * @returns {string|null} 图标文件路径
+ */
+function getLinuxWindowIcon() {
+    const fs = require('fs');
+    const iconSizes = ['256x256', '128x128', '64x64', '48x48', '32x32', '16x16'];
+
+    for (const size of iconSizes) {
+        const iconPath = app.isPackaged
+            ? path.join(process.resourcesPath, 'icons', `icon-${size}.png`)
+            : path.join(__dirname, 'icons', `icon-${size}.png`);
+
+        if (fs.existsSync(iconPath)) {
+            return iconPath;
+        }
+    }
+
+    // 回退到默认图标
+    const defaultIcon = app.isPackaged
+        ? path.join(process.resourcesPath, 'icons', 'icon.png')
+        : path.join(__dirname, 'icons', 'icon.png');
+
+    if (fs.existsSync(defaultIcon)) {
+        return defaultIcon;
+    }
+
+    return null;
+}
+
+/**
+ * 创建 Linux 托盘菜单
+ * @returns {Electron.Menu} 托盘上下文菜单
+ */
+function createLinuxTrayMenu() {
+    let statusText = '未知';
+    let isRunning = false;
+
+    // 获取当前状态
+    if (app_instance) {
+        try {
+            if (app_instance.getStateMachine && typeof app_instance.getStateMachine === 'function') {
+                const stateMachine = app_instance.getStateMachine();
+                if (stateMachine && typeof stateMachine.getCurrentState === 'function') {
+                    currentState = stateMachine.getCurrentState();
+                    if (typeof stateMachine.isServiceRunning === 'function') {
+                        isRunning = stateMachine.isServiceRunning();
+                    } else {
+                        const runningStates = ['DATA_COLLECT', 'CONFIG_FETCH', 'WS_CHECK', 'HEARTBEAT'];
+                        isRunning = runningStates.includes(currentState);
+                    }
+                }
+            }
+            statusText = isRunning ? '运行中' : '已停止';
+        } catch (error) {
+            statusText = '错误';
+        }
+    }
+
+    return Menu.buildFromTemplate([
+        { label: `状态: ${statusText}`, enabled: false, id: 'status' },
+        { type: 'separator' },
+        {
+            label: '显示窗口',
+            click: () => {
+                if (mainWindow) {
+                    mainWindow.show();
+                    mainWindow.focus();
+                }
+            }
+        },
+        { type: 'separator' },
+        {
+            label: '启动服务',
+            enabled: !isRunning,
+            click: async () => {
+                const result = await startAppService(true);
+                console.log('[LINUX_TRAY] Start service result:', result);
+                setTimeout(() => updateTrayMenu(), 1000);
+            }
+        },
+        {
+            label: '停止服务',
+            enabled: isRunning,
+            click: async () => {
+                const result = await stopAppService();
+                console.log('[LINUX_TRAY] Stop service result:', result);
+                setTimeout(() => updateTrayMenu(), 1000);
+            }
+        },
+        { type: 'separator' },
+        {
+            label: '检查权限',
+            click: () => showLinuxPermissionGuide()
+        }
+        // 注意: 不添加"退出应用"选项，这是监控程序
+    ]);
+}
+
+/**
+ * 显示 Linux 权限指引
+ */
+async function showLinuxPermissionGuide() {
+    try {
+        // 发送到渲染进程显示权限状态
+        if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+            // 触发权限检查
+            mainWindow.webContents.send('show-permission-guide', {
+                platform: 'linux',
+                message: '请检查 Linux 权限设置'
+            });
+        }
     } catch (error) {
-        console.error('[LOG] Failed to write to log file:', error);
-        // Try to write error to console at least
-        console.error('[LOG] Message was:', message);
+        console.error('[LINUX_TRAY] Failed to show permission guide:', error);
     }
 }
 
-// Memory monitoring function (extracted for reusability)
-function logMemoryUsage(label = '') {
-    try {
-        const memUsage = process.memoryUsage();
-        const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-        const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
-        const rssMB = Math.round(memUsage.rss / 1024 / 1024);
+/**
+ * 创建 Linux 托盘
+ * 检测桌面环境并适配
+ * @returns {Electron.Tray|null} 托盘实例
+ */
+function createTrayLinux() {
+    const desktop = process.env.XDG_CURRENT_DESKTOP?.toLowerCase() || '';
+    const sessionType = process.env.XDG_SESSION_TYPE || '';
 
-        const memMsg = `[MEMORY]${label ? ' ' + label + ':' : ''} Heap: ${heapUsedMB}/${heapTotalMB}MB, RSS: ${rssMB}MB`;
-        console.log(memMsg);
-        writeToLogFile(memMsg);
+    console.log(`[LINUX_TRAY] Creating Linux tray, desktop: ${desktop}, session: ${sessionType}`);
 
-        return { heapUsedMB, heapTotalMB, rssMB };
-    } catch (error) {
-        console.error('[MEMORY] Failed to log memory usage:', error);
-        writeToLogFile(`[MEMORY] Error logging memory: ${error.message}`);
+    // GNOME 桌面环境下的特殊处理
+    if (desktop.includes('gnome')) {
+        console.log('[LINUX_TRAY] GNOME detected, using AppIndicator compatible mode');
+        console.log('[LINUX_TRAY] Note: GNOME may require AppIndicator extension for tray support');
+    }
+
+    // 尝试获取图标路径
+    const iconPath = getLinuxTrayIconPath();
+    let trayIcon;
+
+    if (iconPath) {
+        console.log(`[LINUX_TRAY] Using icon from: ${iconPath}`);
+        trayIcon = nativeImage.createFromPath(iconPath);
+    } else {
+        // 回退到默认创建的图标
+        console.log('[LINUX_TRAY] No icon file found, using default icon');
+        trayIcon = createDefaultIcon();
+    }
+
+    if (!trayIcon || trayIcon.isEmpty()) {
+        console.error('[LINUX_TRAY] Failed to create tray icon!');
         return null;
     }
+
+    const trayInstance = new Tray(trayIcon);
+    trayInstance.setToolTip(APP_CONFIG.name);
+
+    // X11 支持右键菜单
+    if (sessionType === 'x11' || !process.env.WAYLAND_DISPLAY) {
+        console.log('[LINUX_TRAY] X11 session, enabling context menu');
+        trayInstance.setContextMenu(createLinuxTrayMenu());
+    } else {
+        console.log('[LINUX_TRAY] Wayland session, context menu may have limitations');
+        // Wayland 下也尝试设置菜单
+        trayInstance.setContextMenu(createLinuxTrayMenu());
+    }
+
+    // 点击显示窗口
+    trayInstance.on('click', () => {
+        if (mainWindow) {
+            if (mainWindow.isVisible()) {
+                mainWindow.hide();
+            } else {
+                mainWindow.show();
+                mainWindow.focus();
+            }
+        }
+    });
+
+    // 监听主题变化，更新图标
+    const { nativeTheme } = require('electron');
+    nativeTheme.on('updated', () => {
+        if (trayInstance && !trayInstance.isDestroyed()) {
+            const newIconPath = getLinuxTrayIconPath();
+            if (newIconPath) {
+                const newIcon = nativeImage.createFromPath(newIconPath);
+                if (!newIcon.isEmpty()) {
+                    trayInstance.setImage(newIcon);
+                    console.log('[LINUX_TRAY] Theme changed, updated tray icon');
+                }
+            }
+        }
+    });
+
+    console.log('[LINUX_TRAY] Tray created successfully');
+    return trayInstance;
+}
+
+// ============================================================================
+// Linux 窗口创建适配
+// ============================================================================
+
+/**
+ * 为 Linux 创建主窗口
+ * 处理 Wayland 特有的限制
+ * @returns {Electron.BrowserWindow} 主窗口实例
+ */
+function createMainWindowLinux() {
+    const fs = require('fs');
+    const isWayland = !!process.env.WAYLAND_DISPLAY;
+    const { screen } = require('electron');
+
+    const windowOptions = {
+        width: APP_CONFIG.width || 340,
+        height: APP_CONFIG.height || 750,
+        resizable: APP_CONFIG.resizable || false,
+        frame: true,  // Linux 需要窗口装饰
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload-js.js')
+        },
+        show: false,
+        title: APP_CONFIG.name,
+        minimizable: true,
+        maximizable: false,
+        closable: true,
+        autoHideMenuBar: true
+    };
+
+    // 设置窗口图标
+    const iconPath = getLinuxWindowIcon();
+    if (iconPath) {
+        windowOptions.icon = iconPath;
+    }
+
+    // Wayland 不支持窗口定位
+    if (isWayland) {
+        console.log('[LINUX] Wayland mode: window positioning disabled');
+        // 不设置 x, y 坐标，让窗口管理器决定位置
+    } else {
+        // X11 可以指定位置
+        try {
+            const primaryDisplay = screen.getPrimaryDisplay();
+            const { width, height } = primaryDisplay.workAreaSize;
+
+            windowOptions.x = Math.floor((width - windowOptions.width) / 2);
+            windowOptions.y = Math.floor((height - windowOptions.height) / 2);
+            console.log(`[LINUX] X11 mode: window positioned at (${windowOptions.x}, ${windowOptions.y})`);
+        } catch (error) {
+            console.log('[LINUX] Failed to get display info, using default position');
+        }
+    }
+
+    const win = new BrowserWindow(windowOptions);
+
+    // 隐藏菜单栏
+    win.setMenuBarVisibility(false);
+    win.setAutoHideMenuBar(true);
+
+    return win;
 }
 
 // 防止多实例运行
@@ -114,19 +429,11 @@ if (process.platform === 'darwin') {
     console.log('macOS detected - keeping Dock icon visible for better UX');
 }
 
-// CRITICAL: Log memory BEFORE app initialization to catch early crashes
-writeToLogFile('[STARTUP] Electron app initializing...');
-logMemoryUsage('STARTUP');
-
 // 应用就绪
 app.whenReady().then(() => {
     console.log('企业安全 (精简版) 启动中...');
     console.log('[MAIN] Environment check - isPackaged:', app.isPackaged, 'appPath:', app.getAppPath());
     console.log('[MAIN] __dirname:', __dirname, 'process.cwd():', process.cwd());
-
-    // CRITICAL: Log memory immediately after ready
-    writeToLogFile('[STARTUP] App ready event fired');
-    logMemoryUsage('READY');
     
     // 隐藏默认菜单栏（Windows/Linux）
     if (process.platform !== 'darwin') {
@@ -148,22 +455,7 @@ app.whenReady().then(() => {
     createMainWindow();
     createTray();
     setupIPCHandlers();
-
-    // Initialize auto-update system
-    setupUpdateIPCHandlers();
-    setTimeout(async () => {
-        try {
-            const updateInitialized = await initializeAutoUpdate();
-            if (updateInitialized) {
-                console.log('[STARTUP] Auto-update system initialized successfully');
-            } else {
-                console.log('[STARTUP] Auto-update system disabled or unavailable');
-            }
-        } catch (error) {
-            console.error('[STARTUP] Failed to initialize auto-update:', error.message);
-        }
-    }, 5000); // Wait 5 seconds for app to fully initialize
-
+    
     // 初始化托盘菜单状态和验证托盘
     setTimeout(() => {
         if (tray && !tray.isDestroyed()) {
@@ -197,59 +489,7 @@ app.whenReady().then(() => {
             }
         }, 3000); // 等待3秒确保所有组件初始化完成
     }
-
-    // CRITICAL: Memory monitoring with ultra-aggressive GC and early logging
-    memoryMonitorInterval = setInterval(() => {
-        try {
-            const mem = logMemoryUsage();
-            if (!mem) return;
-
-            const { heapUsedMB, heapTotalMB, rssMB } = mem;
-
-            // Ultra-aggressive GC: trigger if heap exceeds 100MB (lowered from 200MB)
-            if (heapUsedMB > 100 && global.gc) {
-                const gcMsg = `[MEMORY] ⚡ Triggering GC (heap > 100MB: ${heapUsedMB}MB)`;
-                console.log(gcMsg);
-                writeToLogFile(gcMsg);
-
-                const beforeGC = heapUsedMB;
-                global.gc();
-
-                const afterMem = logMemoryUsage('After GC');
-                const freedMB = beforeGC - (afterMem ? afterMem.heapUsedMB : heapUsedMB);
-
-                if (freedMB > 0) {
-                    writeToLogFile(`[MEMORY] ✅ GC freed ${freedMB}MB`);
-                }
-            }
-
-            // Critical warning if approaching limit
-            if (heapUsedMB > 300) {
-                const warnMsg = `[MEMORY] 🔴 CRITICAL: High memory usage: ${heapUsedMB}MB / 2048MB`;
-                console.warn(warnMsg);
-                writeToLogFile(warnMsg);
-
-                // Force GC immediately
-                if (global.gc) {
-                    global.gc();
-                    logMemoryUsage('Emergency GC');
-                }
-            }
-        } catch (error) {
-            console.error('[MEMORY] Monitor error:', error);
-            writeToLogFile(`[MEMORY] Monitor error: ${error.message}`);
-        }
-    }, 30 * 1000); // 30 seconds (ultra-aggressive)
-
-    // CRITICAL: Execute immediate memory check AND log startup message
-    const startMsg = '[MEMORY] 内存监控已启动，每30秒检查一次';
-    sendLogToRenderer(startMsg);
-    writeToLogFile(startMsg);
-    console.log('[MEMORY] Memory monitoring started, checking every 30 seconds');
-
-    // CRITICAL: First memory check immediately (don't wait 30 seconds)
-    logMemoryUsage('Initial check');
-
+    
     // 尝试导入主应用
     try {
         sendLogToRenderer('[INIT] 正在尝试加载主应用模块...');
@@ -481,31 +721,38 @@ app.whenReady().then(() => {
 });
 
 function createMainWindow() {
-    mainWindow = new BrowserWindow({
-        width: APP_CONFIG.width,
-        height: APP_CONFIG.height,
-        resizable: APP_CONFIG.resizable,
-        webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            preload: path.join(__dirname, 'preload-js.js')
-        },
-        show: false,
-        title: APP_CONFIG.name,
-        titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default', // 只在macOS使用特殊样式
-        vibrancy: process.platform === 'darwin' ? 'under-window' : undefined, // 只在macOS使用毛玻璃效果
-        icon: createDefaultIcon(),
-        minimizable: true,
-        maximizable: false,
-        closable: true,
-        // 隐藏菜单栏（所有平台）
-        autoHideMenuBar: true
-    });
+    // Linux 平台使用专门的窗口创建函数
+    if (process.platform === 'linux') {
+        console.log('[WINDOW] Using Linux-specific window creation');
+        mainWindow = createMainWindowLinux();
+    } else {
+        // macOS 和 Windows 使用原有逻辑
+        mainWindow = new BrowserWindow({
+            width: APP_CONFIG.width,
+            height: APP_CONFIG.height,
+            resizable: APP_CONFIG.resizable,
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                preload: path.join(__dirname, 'preload-js.js')
+            },
+            show: false,
+            title: APP_CONFIG.name,
+            titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default', // 只在macOS使用特殊样式
+            vibrancy: process.platform === 'darwin' ? 'under-window' : undefined, // 只在macOS使用毛玻璃效果
+            icon: createDefaultIcon(),
+            minimizable: true,
+            maximizable: false,
+            closable: true,
+            // 隐藏菜单栏（所有平台）
+            autoHideMenuBar: true
+        });
 
-    // 隐藏菜单栏（Windows/Linux）
-    if (process.platform !== 'darwin') {
-        mainWindow.setMenuBarVisibility(false);
-        mainWindow.setAutoHideMenuBar(true);
+        // 隐藏菜单栏（Windows）
+        if (process.platform === 'win32') {
+            mainWindow.setMenuBarVisibility(false);
+            mainWindow.setAutoHideMenuBar(true);
+        }
     }
 
     // 加载精简界面
@@ -528,12 +775,6 @@ function createMainWindow() {
             // 使用多次重试确保状态能够正确推送
             const pushAutoStartStatus = async (retryCount = 0, maxRetries = 10) => {
                 try {
-                    // 检查用户是否已手动操作过滑块
-                    if (userInteractionState.hasInteracted) {
-                        console.log('[AUTO_START_INIT] 跳过初始推送，用户已手动操作过自启动设置');
-                        return;  // 用户已操作，跳过初始推送
-                    }
-
                     console.log(`[AUTO_START_INIT] 正在获取自启动状态... (尝试 ${retryCount + 1}/${maxRetries})`);
                     const platformAdapter = app_instance?.getPlatformAdapter();
                     if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
@@ -543,10 +784,7 @@ function createMainWindow() {
                         // 推送初始状态到渲染进程
                         if (mainWindow && !mainWindow.isDestroyed()) {
                             console.log('[AUTO_START_INIT] 📤 推送初始状态到UI: enabled =', enabled);
-                            mainWindow.webContents.send('autostart-status-changed', {
-                                enabled,
-                                source: 'initial-sync'  // 标记为初始同步
-                            });
+                            mainWindow.webContents.send('autostart-status-changed', { enabled });
                             sendLogToRenderer(`[状态同步] 自启动状态: ${enabled ? '已开启' : '已关闭'}`);
                         }
                     } else {
@@ -688,33 +926,47 @@ function createMainWindow() {
 
 function createTray() {
     console.log('Creating system tray...');
+
+    // Linux 平台使用专门的托盘创建函数
+    if (process.platform === 'linux') {
+        console.log('[TRAY] Using Linux-specific tray creation');
+        tray = createTrayLinux();
+        if (tray) {
+            console.log('[TRAY] Linux tray created successfully');
+        } else {
+            console.error('[TRAY] Failed to create Linux tray');
+        }
+        return;
+    }
+
+    // macOS 和 Windows 使用原有逻辑
     const trayIcon = createDefaultIcon();
-    
+
     if (!trayIcon) {
         console.error('Failed to create tray icon!');
         return;
     }
-    
+
     console.log('Creating Tray with icon...');
     tray = new Tray(trayIcon);
-    
+
     if (tray) {
-        console.log('✅ Tray created successfully');
+        console.log('Tray created successfully');
         tray.setToolTip(APP_CONFIG.name);
         console.log(`Tray tooltip set to: ${APP_CONFIG.name}`);
-        
+
         // macOS: 保留Dock图标，提供更好的用户体验
         // 用户可以通过Dock和菜单栏两种方式访问应用
         if (process.platform === 'darwin') {
-            console.log('✅ macOS tray created - keeping Dock icon for better UX');
+            console.log('macOS tray created - keeping Dock icon for better UX');
             // 不隐藏Dock图标，让用户更容易找到应用
             // app.dock?.hide(); // 已禁用
         }
     } else {
-        console.error('❌ Failed to create tray');
+        console.error('Failed to create tray');
         return;
     }
-    
+
     // 创建托盘后立即设置正确的菜单状态和事件监听器
     updateTrayMenu();
 }
@@ -1305,36 +1557,15 @@ function setupIPCHandlers() {
 
                 if (platformAdapter && typeof platformAdapter.enableAutoStart === 'function') {
                     console.log('[AUTO_START] enableAutoStart method available, calling...');
-
-                    // 标记用户已操作
-                    userInteractionState.hasInteracted = true;
-                    userInteractionState.lastActionTime = Date.now();
-                    userInteractionState.lastActionType = 'enable';
-
                     const result = await platformAdapter.enableAutoStart();
                     if (result) {
                         sendLogToRenderer('自启动已开启', 'success');
 
-                        // 延迟推送状态，确保系统配置完全写入
-                        setTimeout(() => {
-                            // 验证设置是否真正生效
-                            if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
-                                platformAdapter.isAutoStartEnabled().then(enabled => {
-                                    if (enabled && mainWindow && !mainWindow.isDestroyed()) {
-                                        console.log('[延迟确认] Sending autostart-status-changed (enabled: true)');
-                                        mainWindow.webContents.send('autostart-status-changed', {
-                                            enabled: true,
-                                            source: 'user-action'  // 标记为用户操作触发
-                                        });
-                                    } else if (!enabled) {
-                                        console.warn('[延迟确认] 自启动设置未生效，系统验证失败');
-                                        sendLogToRenderer('⚠️ 自启动设置可能未生效，请手动检查系统设置', 'warning');
-                                    }
-                                }).catch(err => {
-                                    console.error('[延迟确认] 验证自启动状态失败:', err);
-                                });
-                            }
-                        }, 500);  // 延迟500ms推送状态
+                        // 推送状态变化到渲染进程
+                        if (mainWindow && !mainWindow.isDestroyed()) {
+                            console.log('[AUTO_START] Sending autostart-status-changed event to renderer (enabled: true)');
+                            mainWindow.webContents.send('autostart-status-changed', { enabled: true });
+                        }
 
                         return { success: true, message: '自启动开启成功' };
                     } else {
@@ -1379,35 +1610,15 @@ function setupIPCHandlers() {
                 console.log('[AUTO_START] Platform adapter:', platformAdapter ? 'available' : 'not available');
                 
                 if (platformAdapter && typeof platformAdapter.disableAutoStart === 'function') {
-                    // 标记用户已操作
-                    userInteractionState.hasInteracted = true;
-                    userInteractionState.lastActionTime = Date.now();
-                    userInteractionState.lastActionType = 'disable';
-
                     const result = await platformAdapter.disableAutoStart();
                     if (result) {
                         sendLogToRenderer('自启动已关闭', 'warning');
 
-                        // 延迟推送状态，确保系统配置完全写入
-                        setTimeout(() => {
-                            // 验证设置是否真正生效
-                            if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
-                                platformAdapter.isAutoStartEnabled().then(enabled => {
-                                    if (!enabled && mainWindow && !mainWindow.isDestroyed()) {
-                                        console.log('[延迟确认] Sending autostart-status-changed (enabled: false)');
-                                        mainWindow.webContents.send('autostart-status-changed', {
-                                            enabled: false,
-                                            source: 'user-action'  // 标记为用户操作触发
-                                        });
-                                    } else if (enabled) {
-                                        console.warn('[延迟确认] 自启动关闭未生效，系统验证失败');
-                                        sendLogToRenderer('⚠️ 自启动关闭可能未生效，请手动检查系统设置', 'warning');
-                                    }
-                                }).catch(err => {
-                                    console.error('[延迟确认] 验证自启动状态失败:', err);
-                                });
-                            }
-                        }, 500);  // 延迟500ms推送状态
+                        // 推送状态变化到渲染进程
+                        if (mainWindow && !mainWindow.isDestroyed()) {
+                            console.log('[AUTO_START] Sending autostart-status-changed event to renderer (enabled: false)');
+                            mainWindow.webContents.send('autostart-status-changed', { enabled: false });
+                        }
 
                         return { success: true, message: '自启动关闭成功' };
                     } else {
@@ -1543,6 +1754,136 @@ function setupIPCHandlers() {
             return { success: false, error: error.message };
         }
     });
+
+    // === Linux Permission Management ===
+    if (process.platform === 'linux') {
+        console.log('[LINUX] Initializing Linux permission handlers...');
+
+        // Dynamic import of LinuxPermissionManager
+        let LinuxPermissionManager = null;
+        let linuxPermManager = null;
+
+        try {
+            // Try multiple paths for loading the permission manager
+            const possiblePaths = [
+                // Development path (TypeScript compiled)
+                path.join(__dirname, '..', 'dist', 'platforms', 'linux', 'permission-manager'),
+                // Packaged app path
+                path.join(app.getAppPath(), 'dist', 'platforms', 'linux', 'permission-manager'),
+                // Alternative packaged path
+                path.join(process.resourcesPath || '', 'app', 'dist', 'platforms', 'linux', 'permission-manager')
+            ];
+
+            for (const modulePath of possiblePaths) {
+                try {
+                    const fs = require('fs');
+                    if (fs.existsSync(modulePath + '.js')) {
+                        console.log('[LINUX] Loading LinuxPermissionManager from:', modulePath);
+                        const permModule = require(modulePath);
+                        LinuxPermissionManager = permModule.LinuxPermissionManager || permModule.default;
+                        if (LinuxPermissionManager) {
+                            linuxPermManager = new LinuxPermissionManager();
+                            console.log('[LINUX] LinuxPermissionManager loaded successfully');
+                            break;
+                        }
+                    }
+                } catch (loadError) {
+                    console.warn('[LINUX] Failed to load from:', modulePath, '-', loadError.message);
+                }
+            }
+        } catch (e) {
+            console.warn('[LINUX] Failed to load LinuxPermissionManager:', e.message);
+        }
+
+        if (linuxPermManager) {
+            // Check all Linux permissions
+            ipcMain.handle('linux:check-permissions', async () => {
+                try {
+                    console.log('[LINUX] Checking permissions...');
+                    const status = await linuxPermManager.checkAllPermissions();
+                    console.log('[LINUX] Permission status:', status.overallStatus);
+                    return { success: true, data: status };
+                } catch (error) {
+                    console.error('[LINUX] Permission check failed:', error);
+                    return { success: false, error: error.message };
+                }
+            });
+
+            // Get setup instructions
+            ipcMain.handle('linux:get-setup-instructions', async (event, status) => {
+                try {
+                    // If no status provided, get current status first
+                    const permStatus = status || await linuxPermManager.checkAllPermissions();
+                    const instructions = linuxPermManager.generateSetupInstructions(permStatus);
+                    return { success: true, data: instructions };
+                } catch (error) {
+                    console.error('[LINUX] Failed to generate setup instructions:', error);
+                    return { success: false, error: error.message };
+                }
+            });
+
+            // Copy text to clipboard
+            ipcMain.handle('linux:copy-to-clipboard', async (event, text) => {
+                try {
+                    clipboard.writeText(text);
+                    return { success: true };
+                } catch (error) {
+                    console.error('[LINUX] Clipboard write failed:', error);
+                    return { success: false, error: error.message };
+                }
+            });
+
+            // Get udev rules
+            ipcMain.handle('linux:get-udev-rules', async () => {
+                try {
+                    const rules = linuxPermManager.generateUdevRules();
+                    return { success: true, data: rules };
+                } catch (error) {
+                    console.error('[LINUX] Failed to generate udev rules:', error);
+                    return { success: false, error: error.message };
+                }
+            });
+
+            // Get quick permission summary
+            ipcMain.handle('linux:get-permission-summary', async () => {
+                try {
+                    const summary = await linuxPermManager.getQuickSummary();
+                    return { success: true, data: summary };
+                } catch (error) {
+                    console.error('[LINUX] Failed to get permission summary:', error);
+                    return { success: false, error: error.message };
+                }
+            });
+
+            // Clear permission cache
+            ipcMain.handle('linux:clear-permission-cache', async () => {
+                try {
+                    linuxPermManager.clearCache();
+                    return { success: true };
+                } catch (error) {
+                    console.error('[LINUX] Failed to clear permission cache:', error);
+                    return { success: false, error: error.message };
+                }
+            });
+
+            console.log('[LINUX] All permission IPC handlers registered');
+        } else {
+            console.warn('[LINUX] LinuxPermissionManager not available, registering stub handlers');
+
+            // Register stub handlers that return appropriate error messages
+            const stubHandler = async () => ({
+                success: false,
+                error: 'LinuxPermissionManager not loaded. Build the application first: npm run build'
+            });
+
+            ipcMain.handle('linux:check-permissions', stubHandler);
+            ipcMain.handle('linux:get-setup-instructions', stubHandler);
+            ipcMain.handle('linux:copy-to-clipboard', stubHandler);
+            ipcMain.handle('linux:get-udev-rules', stubHandler);
+            ipcMain.handle('linux:get-permission-summary', stubHandler);
+            ipcMain.handle('linux:clear-permission-cache', stubHandler);
+        }
+    }
 }
 
 // 辅助函数
@@ -2587,17 +2928,10 @@ async function gracefulShutdown(signal, error) {
 async function cleanup() {
     console.log('Starting cleanup process...');
     sendLogToRenderer('开始清理资源...');
-
+    
     const cleanupTasks = [];
-
+    
     try {
-        // Clear memory monitor interval
-        if (memoryMonitorInterval) {
-            clearInterval(memoryMonitorInterval);
-            memoryMonitorInterval = null;
-            console.log('[MEMORY] Memory monitor cleared');
-        }
-
         // 恢复日志管理器的原始console方法
         if (logManager) {
             cleanupTasks.push(
