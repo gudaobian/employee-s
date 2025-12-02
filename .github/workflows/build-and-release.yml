@@ -884,11 +884,15 @@ jobs:
           echo "========================================="
 
       - name: Install application dependencies
-        env:
-          ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/'
-          ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
         run: |
           echo "🔄 Installing application dependencies..."
+
+          # 显式导出 Electron 镜像环境变量（确保子进程能读取）
+          export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
+          export ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
+          export npm_config_electron_mirror="https://npmmirror.com/mirrors/electron/"
+
+          echo "ELECTRON_MIRROR=$ELECTRON_MIRROR"
 
           # 清理环境
           rm -rf node_modules package-lock.json
@@ -898,11 +902,6 @@ jobs:
           npm config set fund false
           npm config set audit false
           npm config set progress false
-
-          # 创建 .npmrc 设置 Electron 镜像
-          echo "electron_mirror=https://npmmirror.com/mirrors/electron/" >> ~/.npmrc
-          echo "electron_builder_binaries_mirror=https://npmmirror.com/mirrors/electron-builder-binaries/" >> ~/.npmrc
-          cat ~/.npmrc
 
           # 清理缓存
           npm cache clean --force
