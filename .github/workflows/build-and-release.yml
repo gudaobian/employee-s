@@ -883,16 +883,45 @@ jobs:
           python3 --version
           echo "========================================="
 
+      - name: Pre-download Electron binary
+        run: |
+          echo "📥 Pre-downloading Electron binary from mirror..."
+
+          ELECTRON_VERSION="28.2.10"
+          ELECTRON_CACHE_DIR="$HOME/.cache/electron"
+          ELECTRON_ZIP="electron-v${ELECTRON_VERSION}-linux-x64.zip"
+          MIRROR_URL="https://npmmirror.com/mirrors/electron/v${ELECTRON_VERSION}/${ELECTRON_ZIP}"
+
+          # 创建缓存目录
+          mkdir -p "$ELECTRON_CACHE_DIR"
+
+          # 下载 Electron
+          echo "Downloading from: $MIRROR_URL"
+          curl -L -o "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" "$MIRROR_URL"
+
+          # 验证下载
+          if [ -f "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" ]; then
+            ls -lh "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP"
+            echo "✅ Electron binary downloaded successfully"
+          else
+            echo "❌ Failed to download Electron binary"
+            exit 1
+          fi
+
+          # 创建 SHASUMS256.txt（electron 安装脚本需要）
+          cd "$ELECTRON_CACHE_DIR"
+          sha256sum "$ELECTRON_ZIP" > "SHASUMS256.txt-${ELECTRON_VERSION}"
+          cat "SHASUMS256.txt-${ELECTRON_VERSION}"
+
       - name: Install application dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 0
         run: |
           echo "🔄 Installing application dependencies..."
 
-          # 显式导出 Electron 镜像环境变量（确保子进程能读取）
-          export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
-          export ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
-          export npm_config_electron_mirror="https://npmmirror.com/mirrors/electron/"
-
-          echo "ELECTRON_MIRROR=$ELECTRON_MIRROR"
+          # 设置 electron 缓存路径
+          export electron_config_cache="$HOME/.cache/electron"
+          export ELECTRON_CACHE="$HOME/.cache/electron"
 
           # 清理环境
           rm -rf node_modules package-lock.json
@@ -903,7 +932,7 @@ jobs:
           npm config set audit false
           npm config set progress false
 
-          # 清理缓存
+          # 清理 npm 缓存（但不清理 electron 缓存）
           npm cache clean --force
 
           # 安装依赖
