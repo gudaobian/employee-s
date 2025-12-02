@@ -1,6 +1,6 @@
 {
   "name": "employee-safety-client",
-  "version": "1.0.104",
+  "version": "1.0.105",
   "description": "Employee Safety Client - Comprehensive Employee Security Solution",
   "main": "electron/main-minimal.js",
   "bin": {
@@ -38,7 +38,10 @@
     "cross-platform",
     "fsm"
   ],
-  "author": "Employee Monitoring Team",
+  "author": {
+    "name": "Employee Monitoring Team",
+    "email": "support@employee-safety.com"
+  },
   "license": "MIT",
   "dependencies": {
     "axios": "^1.6.0",
