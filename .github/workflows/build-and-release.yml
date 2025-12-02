@@ -24,6 +24,8 @@ permissions:
 
 env:
   NODE_VERSION: '18'  # Must match Electron's internal Node.js version (Electron 28 uses Node 18.18.2)
+  ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/'
+  ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
 
 jobs:
   # 构建Windows应用（使用代码库中预编译的原生模块）
