@@ -1010,19 +1010,42 @@ jobs:
         run: |
           npm run compile
 
-      - name: Build Linux packages
+      - name: Build Linux packages (x64)
         run: |
           echo "========================================="
-          echo "构建 Linux 安装包"
+          echo "构建 Linux 安装包 (x64)"
           echo "========================================="
 
           # 构建 AppImage (x64)
-          echo "📦 Building AppImage..."
+          echo "📦 Building AppImage (x64)..."
           npx electron-builder --linux AppImage --x64
 
           # 构建 DEB 包
-          echo "📦 Building DEB package..."
+          echo "📦 Building DEB package (x64)..."
           npx electron-builder --linux deb --x64
+
+          echo "========================================="
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/'
+          ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
+
+      - name: Setup QEMU for ARM64 cross-compilation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Build Linux packages (ARM64)
+        run: |
+          echo "========================================="
+          echo "构建 Linux 安装包 (ARM64)"
+          echo "========================================="
+
+          # 构建 AppImage (arm64) - 使用 electron-builder 的交叉编译功能
+          echo "📦 Building AppImage (arm64)..."
+          npx electron-builder --linux AppImage --arm64 || {
+            echo "⚠️ ARM64 AppImage build failed, skipping..."
+          }
 
           echo "========================================="
         env:
