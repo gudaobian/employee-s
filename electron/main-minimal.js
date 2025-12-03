@@ -62,12 +62,20 @@ function detectInputMethod() {
 
 /**
  * Linux 平台初始化
- * 配置 Wayland/X11 兼容性和输入法
+ * 配置 Wayland/X11 兼容性、输入法和沙箱
  */
 function initLinuxPlatform() {
     if (process.platform !== 'linux') return;
 
     console.log('[LINUX] Initializing Linux platform...');
+
+    // 沙箱问题修复 - Linux AppImage 需要禁用 SUID 沙箱
+    // 检查是否以 root 运行，如果不是则禁用沙箱
+    if (process.getuid && process.getuid() !== 0) {
+        console.log('[LINUX] Running as non-root, disabling sandbox for AppImage compatibility');
+        app.commandLine.appendSwitch('no-sandbox');
+        app.commandLine.appendSwitch('disable-gpu-sandbox');
+    }
 
     // Wayland 支持 - 启用 Ozone 平台和窗口装饰
     app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform,WaylandWindowDecorations');
