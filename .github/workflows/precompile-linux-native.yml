@@ -293,7 +293,7 @@ jobs:
     name: Merge Precompiled Artifacts
     runs-on: ubuntu-latest
     needs: [precompile-linux-x64, precompile-linux-arm64]
-    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
 
     steps:
       - name: Checkout repository
