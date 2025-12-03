@@ -612,6 +612,20 @@ app.whenReady().then(() => {
 
         // === 建议1: 增强诊断信息收集 ===
         const fs = require('fs');
+        const basePath = app.isPackaged
+            ? path.dirname(app.getAppPath())
+            : __dirname;
+
+        // 重新定义 possiblePaths（在 catch 块中需要重新定义）
+        const diagnosticPaths = [
+            path.join(__dirname, '..', 'dist', 'main', 'app'),
+            path.join(basePath, 'dist', 'main', 'app'),
+            path.join(app.getAppPath(), 'dist', 'main', 'app'),
+            path.join(process.resourcesPath || '', 'app', 'dist', 'main', 'app'),
+            path.join(__dirname, 'dist', 'main', 'app'),
+            path.join(process.cwd(), 'dist', 'main', 'app'),
+        ];
+
         const diagnosticInfo = {
             timestamp: new Date().toISOString(),
             errorMessage: error.message,
@@ -631,7 +645,7 @@ app.whenReady().then(() => {
         };
 
         // 重新检查所有路径并记录详细信息
-        possiblePaths.forEach(modulePath => {
+        diagnosticPaths.forEach(modulePath => {
             const pathInfo = {
                 path: modulePath,
                 fullPath: modulePath + '.js',

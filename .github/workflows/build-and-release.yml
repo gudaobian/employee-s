@@ -1035,6 +1035,18 @@ jobs:
         with:
           platforms: arm64
 
+      - name: Install ARM64 native dependencies
+        run: |
+          echo "📦 Installing ARM64 native dependencies..."
+
+          # 安装 sharp ARM64 版本
+          npm install --cpu=arm64 --os=linux sharp || {
+            echo "⚠️ Failed to install ARM64 sharp, trying alternative..."
+            npm install @img/sharp-linux-arm64 || true
+          }
+
+          echo "✅ ARM64 dependencies installed"
+
       - name: Build Linux packages (ARM64)
         run: |
           echo "========================================="
@@ -1052,6 +1064,8 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/'
           ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
+          npm_config_arch: arm64
+          npm_config_platform: linux
 
       - name: List build outputs
         run: |
