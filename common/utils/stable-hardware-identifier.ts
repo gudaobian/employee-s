@@ -67,6 +67,79 @@ export class StableHardwareIdentifier {
   }
 
   /**
+   * 获取Linux硬件UUID
+   * 尝试多种方法获取唯一标识符：
+   * 1. /sys/class/dmi/id/product_uuid (需要root)
+   * 2. dmidecode命令 (需要root)
+   * 3. /etc/machine-id (始终可用，但重装系统会变化)
+   */
+  private getLinuxHardwareUUID(): string {
+    const fs = require('fs');
+
+    // 方法1: 尝试读取 /sys/class/dmi/id/product_uuid (需要root权限)
+    try {
+      const uuidPath = '/sys/class/dmi/id/product_uuid';
+      if (fs.existsSync(uuidPath)) {
+        const uuid = fs.readFileSync(uuidPath, 'utf-8').trim();
+        if (uuid && uuid !== '' && uuid.toLowerCase() !== 'none') {
+          console.log('[STABLE_HARDWARE] ✅ Linux Hardware UUID obtained from /sys/class/dmi/id/product_uuid');
+          return uuid;
+        }
+      }
+    } catch (error: any) {
+      console.log('[STABLE_HARDWARE] /sys/class/dmi/id/product_uuid not accessible (may need root):', error.message);
+    }
+
+    // 方法2: 尝试使用 dmidecode 命令 (需要root权限)
+    try {
+      const output = execSync('sudo dmidecode -s system-uuid 2>/dev/null || dmidecode -s system-uuid 2>/dev/null', {
+        encoding: 'utf-8',
+        timeout: 5000
+      });
+      const uuid = output.trim();
+      if (uuid && uuid !== '' && uuid.toLowerCase() !== 'not present' && uuid.toLowerCase() !== 'none') {
+        console.log('[STABLE_HARDWARE] ✅ Linux Hardware UUID obtained from dmidecode');
+        return uuid;
+      }
+    } catch (error: any) {
+      console.log('[STABLE_HARDWARE] dmidecode not available or failed:', error.message);
+    }
+
+    // 方法3: 使用 /etc/machine-id (始终可用，但重装系统会变化)
+    try {
+      const machineIdPath = '/etc/machine-id';
+      if (fs.existsSync(machineIdPath)) {
+        const machineId = fs.readFileSync(machineIdPath, 'utf-8').trim();
+        if (machineId && machineId.length >= 32) {
+          console.log('[STABLE_HARDWARE] ✅ Linux Machine ID obtained from /etc/machine-id (fallback)');
+          // 将 machine-id 格式化为 UUID 格式以保持一致性
+          const formattedUuid = `${machineId.slice(0, 8)}-${machineId.slice(8, 12)}-${machineId.slice(12, 16)}-${machineId.slice(16, 20)}-${machineId.slice(20, 32)}`.toUpperCase();
+          return formattedUuid;
+        }
+      }
+    } catch (error: any) {
+      console.error('[STABLE_HARDWARE] Failed to read /etc/machine-id:', error.message);
+    }
+
+    // 方法4: 尝试读取 /var/lib/dbus/machine-id
+    try {
+      const dbusIdPath = '/var/lib/dbus/machine-id';
+      if (fs.existsSync(dbusIdPath)) {
+        const machineId = fs.readFileSync(dbusIdPath, 'utf-8').trim();
+        if (machineId && machineId.length >= 32) {
+          console.log('[STABLE_HARDWARE] ✅ Linux Machine ID obtained from /var/lib/dbus/machine-id (fallback)');
+          const formattedUuid = `${machineId.slice(0, 8)}-${machineId.slice(8, 12)}-${machineId.slice(12, 16)}-${machineId.slice(16, 20)}-${machineId.slice(20, 32)}`.toUpperCase();
+          return formattedUuid;
+        }
+      }
+    } catch (error: any) {
+      console.error('[STABLE_HARDWARE] Failed to read /var/lib/dbus/machine-id:', error.message);
+    }
+
+    throw new Error('Failed to retrieve Linux Hardware UUID: No method succeeded');
+  }
+
+  /**
    * 加载Windows原生模块（延迟加载）
    */
   private loadNativeModule(): void {
@@ -83,8 +156,14 @@ export class StableHardwareIdentifier {
       return;
     }
 
+    // Linux平台不需要加载原生模块
+    if (platform === 'linux') {
+      console.log('[STABLE_HARDWARE] Linux platform detected, using system files instead of native module');
+      return;
+    }
+
     if (platform !== 'win32') {
-      throw new Error(`Hardware ID generation is only supported on Windows and macOS. Current platform: ${platform}`);
+      throw new Error(`Hardware ID generation is only supported on Windows, macOS, and Linux. Current platform: ${platform}`);
     }
 
     try {
@@ -146,7 +225,16 @@ export class StableHardwareIdentifier {
         console.error('[STABLE_HARDWARE] ❌ CRITICAL: Failed to generate device ID:', error);
         throw new Error(`Cannot generate stable device ID on macOS: ${error.message}`);
       }
-    } else {
+    } else if (platform === 'linux') {
+      // Linux平台：使用系统文件获取硬件UUID
+      console.log('[STABLE_HARDWARE] Using Linux system files for Hardware UUID');
+      try {
+        uuid = this.getLinuxHardwareUUID();
+      } catch (error: any) {
+        console.error('[STABLE_HARDWARE] ❌ CRITICAL: Failed to generate device ID:', error);
+        throw new Error(`Cannot generate stable device ID on Linux: ${error.message}`);
+      }
+    } else if (platform === 'win32') {
       // Windows平台：使用原生模块
       this.loadNativeModule();
 
@@ -167,6 +255,8 @@ export class StableHardwareIdentifier {
         console.error('[STABLE_HARDWARE] ❌ CRITICAL: Failed to generate device ID:', error);
         throw new Error(`Cannot generate stable device ID on Windows: ${error.message}`);
       }
+    } else {
+      throw new Error(`Unsupported platform: ${platform}`);
     }
 
     // 验证UUID完整性
@@ -292,6 +382,16 @@ export class StableHardwareIdentifier {
         };
       } catch (error) {
         console.error('[STABLE_HARDWARE] Failed to get macOS diagnostic info:', error);
+      }
+    } else if (platform === 'linux') {
+      // Linux平台：使用系统文件获取硬件UUID
+      try {
+        const uuid = this.getLinuxHardwareUUID();
+        info.hardwareInfo = {
+          uuid
+        };
+      } catch (error) {
+        console.error('[STABLE_HARDWARE] Failed to get Linux diagnostic info:', error);
       }
     } else if (platform === 'win32') {
       // Windows平台：使用原生模块
