@@ -809,10 +809,40 @@ function createMainWindow() {
 
             // 延迟推送自启动状态(等待渲染进程初始化完成)
             // 使用多次重试确保状态能够正确推送
-            const pushAutoStartStatus = async (retryCount = 0, maxRetries = 10) => {
+            // 注意：platformAdapter 只在 app_instance.start() 后才可用
+            const pushAutoStartStatus = async (retryCount = 0, maxRetries = 15) => {
                 try {
                     console.log(`[AUTO_START_INIT] 正在获取自启动状态... (尝试 ${retryCount + 1}/${maxRetries})`);
-                    const platformAdapter = app_instance?.getPlatformAdapter();
+
+                    // 首先检查 app_instance 是否存在
+                    if (!app_instance) {
+                        console.log('[AUTO_START_INIT] ⏳ App实例尚未创建,等待...');
+                        if (retryCount < maxRetries - 1) {
+                            setTimeout(() => pushAutoStartStatus(retryCount + 1, maxRetries), 2000);
+                        }
+                        return;
+                    }
+
+                    // 检查 app 是否已进入 RUNNING 状态
+                    const appState = app_instance.getState ? app_instance.getState() : null;
+                    console.log(`[AUTO_START_INIT] App状态: ${appState}`);
+
+                    if (appState !== 'running' && appState !== 'RUNNING') {
+                        console.log('[AUTO_START_INIT] ⏳ App尚未启动完成,等待... (当前状态:', appState, ')');
+                        if (retryCount < maxRetries - 1) {
+                            setTimeout(() => pushAutoStartStatus(retryCount + 1, maxRetries), 2000);
+                        } else {
+                            console.warn('[AUTO_START_INIT] ⚠️ App未在规定时间内启动,跳过自启动状态检查');
+                            // 仍然通知UI，设置为默认值
+                            if (mainWindow && !mainWindow.isDestroyed()) {
+                                mainWindow.webContents.send('autostart-status-changed', { enabled: false, unavailable: true });
+                            }
+                        }
+                        return;
+                    }
+
+                    // App已运行，获取平台适配器
+                    const platformAdapter = app_instance.getPlatformAdapter();
                     if (platformAdapter && typeof platformAdapter.isAutoStartEnabled === 'function') {
                         const enabled = await platformAdapter.isAutoStartEnabled();
                         console.log('[AUTO_START_INIT] ✅ 当前自启动状态:', enabled);
@@ -824,7 +854,7 @@ function createMainWindow() {
                             sendLogToRenderer(`[状态同步] 自启动状态: ${enabled ? '已开启' : '已关闭'}`);
                         }
                     } else {
-                        console.warn('[AUTO_START_INIT] ⚠️ 平台适配器不可用,继续重试...');
+                        console.warn('[AUTO_START_INIT] ⚠️ 平台适配器不可用(App已运行但适配器未就绪)');
                         // 平台适配器未初始化,继续重试
                         if (retryCount < maxRetries - 1) {
                             setTimeout(() => pushAutoStartStatus(retryCount + 1, maxRetries), 2000);
@@ -839,7 +869,7 @@ function createMainWindow() {
                 }
             };
 
-            // 首次尝试延迟3秒
+            // 首次尝试延迟3秒（等待App初始化）
             setTimeout(() => pushAutoStartStatus(), 3000);
 
             // 根据启动参数决定是否显示窗口
