@@ -1039,11 +1039,18 @@ jobs:
         run: |
           echo "📦 Installing ARM64 native dependencies..."
 
-          # 安装 sharp ARM64 版本
-          npm install --cpu=arm64 --os=linux sharp || {
-            echo "⚠️ Failed to install ARM64 sharp, trying alternative..."
-            npm install @img/sharp-linux-arm64 || true
-          }
+          # 强制安装 sharp ARM64 版本及其所有依赖
+          npm uninstall sharp 2>/dev/null || true
+
+          # 安装 sharp ARM64 预编译包（包含 libvips）
+          npm install --force --cpu=arm64 --os=linux @img/sharp-linux-arm64
+          npm install --force --cpu=arm64 --os=linux @img/sharp-libvips-linux-arm64
+          npm install --force --cpu=arm64 --os=linux sharp
+
+          # 验证安装
+          echo "📋 Checking sharp installation..."
+          ls -la node_modules/@img/ 2>/dev/null || echo "No @img modules"
+          ls -la node_modules/sharp/build/ 2>/dev/null || echo "No sharp build"
 
           echo "✅ ARM64 dependencies installed"
 

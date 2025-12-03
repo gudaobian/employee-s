@@ -137,11 +137,15 @@ files:
 
 asarUnpack:
   - "**/*.node"
+  - "**/*.so"
+  - "**/*.so.*"
   - dist/**/*
   - native-event-monitor/**/*
   - native-event-monitor-win/**/*
   - native-event-monitor-linux/**/*
   - node_modules/screenshot-desktop/**/*
+  - node_modules/sharp/**/*
+  - node_modules/@img/**/*
   - resources/native-modules/**/*
 
 extraMetadata:
