@@ -280,26 +280,63 @@ export class LinuxAdapter extends PlatformAdapterBase {
   private wrapNativeAddon(nativeAddon: any): LinuxEventMonitorInterface {
     const emitter = new EventEmitter();
 
+    // Create a shared monitor instance ONCE
+    // The native module exports: { LinuxEventMonitor: [class], createMonitor: [function] }
+    let monitorInstance: any = null;
+
+    // Try to create monitor instance
+    if (typeof nativeAddon.createMonitor === 'function') {
+      try {
+        monitorInstance = nativeAddon.createMonitor();
+        logger.info('[LINUX] Created monitor instance via createMonitor()');
+      } catch (e) {
+        logger.warn('[LINUX] Failed to create monitor via createMonitor():', e);
+      }
+    }
+
+    if (!monitorInstance && typeof nativeAddon.LinuxEventMonitor === 'function') {
+      try {
+        monitorInstance = new nativeAddon.LinuxEventMonitor();
+        logger.info('[LINUX] Created monitor instance via LinuxEventMonitor constructor');
+      } catch (e) {
+        logger.warn('[LINUX] Failed to create monitor via LinuxEventMonitor:', e);
+      }
+    }
+
+    // Log available methods for debugging
+    if (monitorInstance) {
+      const methods = Object.keys(monitorInstance).filter(k => typeof monitorInstance[k] === 'function');
+      logger.info('[LINUX] Monitor instance methods:', methods);
+    } else {
+      logger.warn('[LINUX] No monitor instance created, falling back to direct addon methods');
+    }
+
     // Create a wrapper object that implements LinuxEventMonitorInterface
     const wrapper: LinuxEventMonitorInterface = Object.assign(emitter, {
       start: () => {
+        // Use shared monitor instance
+        if (monitorInstance && typeof monitorInstance.start === 'function') {
+          return monitorInstance.start();
+        }
+        // Fallback to direct addon method
         if (typeof nativeAddon.start === 'function') {
           return nativeAddon.start();
-        }
-        // If using createMonitor pattern
-        if (typeof nativeAddon.createMonitor === 'function') {
-          const monitor = nativeAddon.createMonitor();
-          return monitor.start ? monitor.start() : true;
         }
         return false;
       },
       stop: () => {
+        if (monitorInstance && typeof monitorInstance.stop === 'function') {
+          return monitorInstance.stop();
+        }
         if (typeof nativeAddon.stop === 'function') {
           return nativeAddon.stop();
         }
         return true;
       },
       getCounts: (): NativeEventCounts => {
+        if (monitorInstance && typeof monitorInstance.getCounts === 'function') {
+          return monitorInstance.getCounts();
+        }
         if (typeof nativeAddon.getCounts === 'function') {
           return nativeAddon.getCounts();
         }
@@ -309,27 +346,43 @@ export class LinuxAdapter extends PlatformAdapterBase {
         return { keyboard: 0, mouse: 0, scrolls: 0, isMonitoring: false };
       },
       resetCounts: () => {
+        if (monitorInstance && typeof monitorInstance.resetCounts === 'function') {
+          return monitorInstance.resetCounts();
+        }
         if (typeof nativeAddon.resetCounts === 'function') {
           return nativeAddon.resetCounts();
         }
         return true;
       },
       isMonitoring: () => {
+        if (monitorInstance && typeof monitorInstance.isMonitoring === 'function') {
+          return monitorInstance.isMonitoring();
+        }
         if (typeof nativeAddon.isMonitoring === 'function') {
           return nativeAddon.isMonitoring();
         }
         return false;
       },
       getBackendType: () => {
+        if (monitorInstance && typeof monitorInstance.getBackendType === 'function') {
+          return monitorInstance.getBackendType();
+        }
         if (typeof nativeAddon.getBackendType === 'function') {
           return nativeAddon.getBackendType();
         }
         return 'none';
       },
       checkPermissions: (): NativePermissionStatus => {
+        // Use shared monitor instance for permission check
+        if (monitorInstance && typeof monitorInstance.checkPermissions === 'function') {
+          return monitorInstance.checkPermissions();
+        }
+        // Fallback to direct addon method
         if (typeof nativeAddon.checkPermissions === 'function') {
           return nativeAddon.checkPermissions();
         }
+        // If no checkPermissions available, return unavailable status
+        logger.warn('[LINUX] checkPermissions not available on native addon');
         return {
           hasInputAccess: false,
           hasX11Access: false,
@@ -338,6 +391,10 @@ export class LinuxAdapter extends PlatformAdapterBase {
         };
       },
       isAvailable: () => {
+        // If we have a monitor instance, check if it's available
+        if (monitorInstance && typeof monitorInstance.isAvailable === 'function') {
+          return monitorInstance.isAvailable();
+        }
         // If we got here, the addon loaded successfully
         return true;
       },
