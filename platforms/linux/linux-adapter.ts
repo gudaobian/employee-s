@@ -104,7 +104,7 @@ export class LinuxAdapter extends PlatformAdapterBase {
 
   /**
    * Load the native Linux event monitor module
-   * Tries multiple strategies: development path, packaged path, fallback
+   * Tries multiple strategies: precompiled binary, development path, packaged path
    */
   private async loadNativeEventMonitor(): Promise<void> {
     logger.info('[LINUX] Loading native event monitor module...');
@@ -112,46 +112,68 @@ export class LinuxAdapter extends PlatformAdapterBase {
     // Get Electron app paths for debugging
     const resourcesPath = (process as any).resourcesPath || '';
     const isPackaged = resourcesPath && resourcesPath.includes('resources');
+    const electronABI = process.versions.modules || '121';  // Electron 28 = Node ABI 121
+    const arch = process.arch;
 
     logger.info('[LINUX] Environment detection:', {
       resourcesPath,
       isPackaged,
       __dirname,
-      cwd: process.cwd()
+      cwd: process.cwd(),
+      arch,
+      electronABI
     });
 
     const strategies = [
-      // Strategy 1: AppImage/electron-builder unpacked path (PRIORITY for packaged apps)
+      // Strategy 1: Precompiled binary from bin directory (PRIORITY)
+      {
+        name: 'precompiled-bin',
+        path: path.join(resourcesPath, 'app.asar.unpacked', 'native-event-monitor-linux', 'bin', `linux-${arch}-${electronABI}`, 'linux_event_monitor.node'),
+        isDirect: true
+      },
+      // Strategy 2: Precompiled binary from precompiled directory
+      {
+        name: 'precompiled-dir',
+        path: path.join(resourcesPath, 'app.asar.unpacked', 'native-event-monitor-linux', 'precompiled', `linux-${arch}-${electronABI}`, 'linux_event_monitor.node'),
+        isDirect: true
+      },
+      // Strategy 3: Development precompiled binary
+      {
+        name: 'dev-precompiled',
+        path: path.join(__dirname, '../../native-event-monitor-linux/bin', `linux-${arch}-${electronABI}`, 'linux_event_monitor.node'),
+        isDirect: true
+      },
+      // Strategy 4: AppImage/electron-builder unpacked path (module entry)
       {
         name: 'appimage-unpacked',
         path: path.join(resourcesPath, 'app.asar.unpacked', 'native-event-monitor-linux')
       },
-      // Strategy 2: AppImage/electron-builder direct resources path
+      // Strategy 5: AppImage/electron-builder direct resources path
       {
         name: 'appimage-resources',
         path: path.join(resourcesPath, 'native-event-monitor-linux')
       },
-      // Strategy 3: Development path (TypeScript compiled)
+      // Strategy 6: Development path (TypeScript compiled)
       {
         name: 'development',
         path: path.join(__dirname, '../../native-event-monitor-linux/lib/index')
       },
-      // Strategy 4: Development path (JavaScript entry)
+      // Strategy 7: Development path (JavaScript entry)
       {
         name: 'development-js',
         path: path.join(__dirname, '../../native-event-monitor-linux/index')
       },
-      // Strategy 5: Packaged Electron app path (legacy)
+      // Strategy 8: Packaged Electron app path (legacy)
       {
         name: 'packaged',
         path: path.join(resourcesPath, 'native-event-monitor-linux')
       },
-      // Strategy 6: Relative to app path
+      // Strategy 9: Relative to app path
       {
         name: 'app-relative',
         path: path.join(process.cwd(), 'native-event-monitor-linux')
       },
-      // Strategy 7: __dirname based for compiled dist
+      // Strategy 10: __dirname based for compiled dist
       {
         name: 'dist-relative',
         path: path.join(__dirname, '../../../native-event-monitor-linux')
@@ -162,17 +184,22 @@ export class LinuxAdapter extends PlatformAdapterBase {
       try {
         logger.info(`[LINUX] Trying native module strategy: ${strategy.name} at ${strategy.path}`);
 
-        // Check if module file exists
         const modulePath = strategy.path;
-        let moduleExists = false;
+        const strategyConfig = strategy as any;
 
-        try {
-          // Try to resolve the module path
-          require.resolve(modulePath);
-          moduleExists = true;
-        } catch {
-          // Module doesn't exist at this path
-          moduleExists = false;
+        // Check if file/module exists
+        let moduleExists = false;
+        if (strategyConfig.isDirect) {
+          // Direct .node file - check if file exists
+          moduleExists = fs.existsSync(modulePath);
+        } else {
+          // Module directory - try to resolve
+          try {
+            require.resolve(modulePath);
+            moduleExists = true;
+          } catch {
+            moduleExists = false;
+          }
         }
 
         if (!moduleExists) {
@@ -180,17 +207,27 @@ export class LinuxAdapter extends PlatformAdapterBase {
           continue;
         }
 
-        // Try to load the module
-        const NativeModule = require(modulePath);
-        const LinuxEventMonitor = NativeModule.LinuxEventMonitor || NativeModule.default || NativeModule;
+        let monitor: LinuxEventMonitorInterface;
 
-        if (typeof LinuxEventMonitor !== 'function') {
-          logger.warn(`[LINUX] Invalid module export at ${strategy.path}`);
-          continue;
+        if (strategyConfig.isDirect) {
+          // Direct .node file - load and wrap in EventEmitter-compatible interface
+          logger.info(`[LINUX] Loading direct .node binary: ${modulePath}`);
+          const nativeAddon = require(modulePath);
+
+          // Wrap the native addon in our interface
+          monitor = this.wrapNativeAddon(nativeAddon);
+        } else {
+          // Module directory - load as before
+          const NativeModule = require(modulePath);
+          const LinuxEventMonitor = NativeModule.LinuxEventMonitor || NativeModule.default || NativeModule;
+
+          if (typeof LinuxEventMonitor !== 'function') {
+            logger.warn(`[LINUX] Invalid module export at ${strategy.path}`);
+            continue;
+          }
+
+          monitor = new LinuxEventMonitor() as LinuxEventMonitorInterface;
         }
-
-        // Create monitor instance
-        const monitor = new LinuxEventMonitor() as LinuxEventMonitorInterface;
 
         // Verify the monitor has required methods
         if (typeof monitor.start !== 'function' ||
@@ -228,11 +265,91 @@ export class LinuxAdapter extends PlatformAdapterBase {
     // No strategy succeeded
     this.nativeModuleLoaded = false;
     this.nativeModuleLoadError = 'Failed to load native event monitor from any location';
-    logger.warn('[LINUX] Native event monitor not available - activity monitoring will be limited');
+    logger.warn('[LINUX] Native event monitor not available - activity monitoring will use fallback');
     logger.warn('[LINUX] To enable full activity monitoring:');
     logger.warn('[LINUX]   1. Install dependencies: sudo apt install libinput-dev libudev-dev libx11-dev libxtst-dev');
     logger.warn('[LINUX]   2. Build native module: cd native-event-monitor-linux && npm run build:native');
     logger.warn('[LINUX]   3. Add user to input group: sudo usermod -aG input $USER');
+  }
+
+  /**
+   * Wrap a direct native addon (.node file) in our expected interface
+   * This is needed because direct .node binaries export functions directly,
+   * not a class constructor
+   */
+  private wrapNativeAddon(nativeAddon: any): LinuxEventMonitorInterface {
+    const emitter = new EventEmitter();
+
+    // Create a wrapper object that implements LinuxEventMonitorInterface
+    const wrapper: LinuxEventMonitorInterface = Object.assign(emitter, {
+      start: () => {
+        if (typeof nativeAddon.start === 'function') {
+          return nativeAddon.start();
+        }
+        // If using createMonitor pattern
+        if (typeof nativeAddon.createMonitor === 'function') {
+          const monitor = nativeAddon.createMonitor();
+          return monitor.start ? monitor.start() : true;
+        }
+        return false;
+      },
+      stop: () => {
+        if (typeof nativeAddon.stop === 'function') {
+          return nativeAddon.stop();
+        }
+        return true;
+      },
+      getCounts: (): NativeEventCounts => {
+        if (typeof nativeAddon.getCounts === 'function') {
+          return nativeAddon.getCounts();
+        }
+        if (typeof nativeAddon.getEventCounts === 'function') {
+          return nativeAddon.getEventCounts();
+        }
+        return { keyboard: 0, mouse: 0, scrolls: 0, isMonitoring: false };
+      },
+      resetCounts: () => {
+        if (typeof nativeAddon.resetCounts === 'function') {
+          return nativeAddon.resetCounts();
+        }
+        return true;
+      },
+      isMonitoring: () => {
+        if (typeof nativeAddon.isMonitoring === 'function') {
+          return nativeAddon.isMonitoring();
+        }
+        return false;
+      },
+      getBackendType: () => {
+        if (typeof nativeAddon.getBackendType === 'function') {
+          return nativeAddon.getBackendType();
+        }
+        return 'none';
+      },
+      checkPermissions: (): NativePermissionStatus => {
+        if (typeof nativeAddon.checkPermissions === 'function') {
+          return nativeAddon.checkPermissions();
+        }
+        return {
+          hasInputAccess: false,
+          hasX11Access: false,
+          currentBackend: 'none',
+          missingPermissions: ['permission_check_unavailable']
+        };
+      },
+      isAvailable: () => {
+        // If we got here, the addon loaded successfully
+        return true;
+      },
+      startPolling: (intervalMs: number = 1000) => {
+        // Not implemented for direct addon
+      },
+      stopPolling: () => {
+        // Not implemented for direct addon
+      }
+    });
+
+    return wrapper;
   }
 
   protected async performCleanup(): Promise<void> {
