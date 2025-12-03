@@ -3,6 +3,20 @@
  * 280x320px 小窗口，只包含7个核心功能
  */
 
+// ============================================================================
+// Linux 沙箱修复 - 必须在加载 Electron 之前执行
+// ============================================================================
+if (process.platform === 'linux') {
+    // 检查是否以非 root 运行，如果是则禁用沙箱
+    const uid = process.getuid ? process.getuid() : 1000;
+    if (uid !== 0) {
+        // 在 Electron 加载之前设置命令行参数
+        process.argv.push('--no-sandbox');
+        process.argv.push('--disable-gpu-sandbox');
+        console.log('[LINUX] Running as non-root (uid:', uid, '), adding --no-sandbox flags');
+    }
+}
+
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const os = require('os');
