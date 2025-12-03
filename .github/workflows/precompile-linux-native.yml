@@ -26,6 +26,10 @@ on:
         required: false
         default: 'true'
 
+permissions:
+  contents: write
+  actions: read
+
 jobs:
   # ========================================
   # x64 构建 - 使用标准 ubuntu runner
