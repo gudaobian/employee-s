@@ -784,20 +784,35 @@ X-GNOME-Autostart-enabled=true
 
   private async detectDesktopEnvironment(): Promise<void> {
     try {
-      // 检查 X11
-      if (process.env.DISPLAY) {
-        this.hasX11 = true;
-      }
-      
-      // 检查 Wayland
-      if (process.env.WAYLAND_DISPLAY) {
+      // 优先检查 XDG_SESSION_TYPE（更可靠）
+      const sessionType = process.env.XDG_SESSION_TYPE?.toLowerCase();
+
+      if (sessionType === 'wayland') {
+        // 明确是 Wayland 会话
         this.hasWayland = true;
+        this.hasX11 = false; // 即使 DISPLAY 存在（XWayland），也优先使用 Wayland 工具
+        logger.info('[LINUX] Detected Wayland session via XDG_SESSION_TYPE');
+      } else if (sessionType === 'x11') {
+        // 明确是 X11 会话
+        this.hasX11 = true;
+        this.hasWayland = false;
+        logger.info('[LINUX] Detected X11 session via XDG_SESSION_TYPE');
+      } else {
+        // 回退到环境变量检测
+        if (process.env.WAYLAND_DISPLAY) {
+          this.hasWayland = true;
+          logger.info('[LINUX] Detected Wayland via WAYLAND_DISPLAY');
+        }
+        if (process.env.DISPLAY && !this.hasWayland) {
+          this.hasX11 = true;
+          logger.info('[LINUX] Detected X11 via DISPLAY');
+        }
       }
-      
+
       // 检测桌面环境
       const xdgCurrentDesktop = process.env.XDG_CURRENT_DESKTOP?.toLowerCase();
       const desktopSession = process.env.DESKTOP_SESSION?.toLowerCase();
-      
+
       if (xdgCurrentDesktop?.includes('gnome') || desktopSession?.includes('gnome')) {
         this.desktopEnvironment = 'gnome';
       } else if (xdgCurrentDesktop?.includes('kde') || desktopSession?.includes('kde')) {
@@ -807,8 +822,8 @@ X-GNOME-Autostart-enabled=true
       } else {
         this.desktopEnvironment = 'unknown';
       }
-      
-      logger.info(`Desktop environment detected: ${this.desktopEnvironment}, X11: ${this.hasX11}, Wayland: ${this.hasWayland}`);
+
+      logger.info(`Desktop environment detected: ${this.desktopEnvironment}, X11: ${this.hasX11}, Wayland: ${this.hasWayland}, SessionType: ${sessionType || 'unknown'}`);
     } catch (error) {
       logger.warn('Failed to detect desktop environment', error);
     }
