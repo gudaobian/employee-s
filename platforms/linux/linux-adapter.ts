@@ -112,7 +112,7 @@ export class LinuxAdapter extends PlatformAdapterBase {
     // Get Electron app paths for debugging
     const resourcesPath = (process as any).resourcesPath || '';
     const isPackaged = resourcesPath && resourcesPath.includes('resources');
-    const electronABI = process.versions.modules || '121';  // Electron 28 = Node ABI 121
+    const electronABI = process.versions.modules || '119';  // Electron 28 = Node ABI 119
     const arch = process.arch;
 
     logger.info('[LINUX] Environment detection:', {
