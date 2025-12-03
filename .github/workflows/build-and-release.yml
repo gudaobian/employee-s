@@ -885,26 +885,40 @@ jobs:
 
       - name: Pre-download Electron binary
         run: |
-          echo "📥 Pre-downloading Electron binary from mirror..."
+          echo "📥 Pre-downloading Electron binary..."
 
           ELECTRON_VERSION="28.2.10"
           ELECTRON_CACHE_DIR="$HOME/.cache/electron"
           ELECTRON_ZIP="electron-v${ELECTRON_VERSION}-linux-x64.zip"
+
+          # Primary: GitHub releases (official)
+          GITHUB_URL="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/${ELECTRON_ZIP}"
+          # Fallback: npmmirror (China)
           MIRROR_URL="https://npmmirror.com/mirrors/electron/v${ELECTRON_VERSION}/${ELECTRON_ZIP}"
 
           # 创建缓存目录
           mkdir -p "$ELECTRON_CACHE_DIR"
 
-          # 下载 Electron
-          echo "Downloading from: $MIRROR_URL"
-          curl -L -o "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" "$MIRROR_URL"
+          # 下载 Electron (try GitHub first, then mirror)
+          echo "Trying GitHub releases: $GITHUB_URL"
+          if curl -L --connect-timeout 30 --max-time 300 -o "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" "$GITHUB_URL"; then
+            echo "✅ Downloaded from GitHub releases"
+          else
+            echo "⚠️ GitHub download failed, trying npmmirror..."
+            if curl -L --connect-timeout 30 --max-time 300 -o "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" "$MIRROR_URL"; then
+              echo "✅ Downloaded from npmmirror"
+            else
+              echo "❌ Both download sources failed"
+              exit 1
+            fi
+          fi
 
           # 验证下载
-          if [ -f "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" ]; then
+          if [ -f "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" ] && [ -s "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" ]; then
             ls -lh "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP"
             echo "✅ Electron binary downloaded successfully"
           else
-            echo "❌ Failed to download Electron binary"
+            echo "❌ Electron binary file is empty or missing"
             exit 1
           fi
 
