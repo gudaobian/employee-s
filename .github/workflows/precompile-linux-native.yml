@@ -41,7 +41,7 @@ jobs:
 
     env:
       ELECTRON_VERSION: "28.2.10"
-      NODE_ABI: "121"
+      NODE_ABI: "119"
 
     steps:
       - name: Checkout repository
@@ -182,7 +182,7 @@ jobs:
 
     env:
       ELECTRON_VERSION: "28.2.10"
-      NODE_ABI: "121"
+      NODE_ABI: "119"
 
     steps:
       - name: Checkout repository
@@ -201,6 +201,7 @@ jobs:
       - name: Build ARM64 native module in Docker
         run: |
           # Create a Dockerfile for ARM64 build
+          # Note: Electron 28 = Node ABI 119
           cat > Dockerfile.arm64-build << 'DOCKERFILE'
           FROM arm64v8/node:18-bookworm
 
@@ -226,13 +227,13 @@ jobs:
           RUN npm install
           RUN npm run build:native || node-gyp rebuild
 
-          # Create output directories
-          RUN mkdir -p /output/precompiled/linux-arm64-121 /output/bin/linux-arm64-121
-          RUN cp build/Release/linux_event_monitor.node /output/precompiled/linux-arm64-121/ || true
-          RUN cp build/Release/linux_event_monitor.node /output/bin/linux-arm64-121/ || true
+          # Create output directories (Electron 28 = ABI 119)
+          RUN mkdir -p /output/precompiled/linux-arm64-119 /output/bin/linux-arm64-119
+          RUN cp build/Release/linux_event_monitor.node /output/precompiled/linux-arm64-119/ || true
+          RUN cp build/Release/linux_event_monitor.node /output/bin/linux-arm64-119/ || true
 
           # Create metadata
-          RUN echo '{"buildTime":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","platform":"linux","arch":"arm64","nodeABI":"121","electronVersion":"28.2.10"}' > /output/precompiled/linux-arm64-121/build-metadata.json
+          RUN echo '{"buildTime":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","platform":"linux","arch":"arm64","nodeABI":"119","electronVersion":"28.2.10"}' > /output/precompiled/linux-arm64-119/build-metadata.json
           DOCKERFILE
 
           # Build using Docker with QEMU emulation
@@ -256,14 +257,14 @@ jobs:
           find arm64-output -type f -exec ls -la {} \;
 
           # Check if native module was built
-          if [ -f "arm64-output/precompiled/linux-arm64-121/linux_event_monitor.node" ]; then
+          if [ -f "arm64-output/precompiled/linux-arm64-119/linux_event_monitor.node" ]; then
             echo "✅ ARM64 native module built successfully"
-            file arm64-output/precompiled/linux-arm64-121/linux_event_monitor.node
+            file arm64-output/precompiled/linux-arm64-119/linux_event_monitor.node
           else
             echo "❌ ARM64 native module build failed"
             # Don't fail - we'll use JavaScript fallback
-            mkdir -p arm64-output/precompiled/linux-arm64-121
-            echo '{"buildTime":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","platform":"linux","arch":"arm64","nodeABI":"121","buildFailed":true,"fallbackAvailable":true}' > arm64-output/precompiled/linux-arm64-121/build-metadata.json
+            mkdir -p arm64-output/precompiled/linux-arm64-119
+            echo '{"buildTime":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","platform":"linux","arch":"arm64","nodeABI":"119","buildFailed":true,"fallbackAvailable":true}' > arm64-output/precompiled/linux-arm64-119/build-metadata.json
           fi
 
       - name: Copy artifacts to native-event-monitor-linux
