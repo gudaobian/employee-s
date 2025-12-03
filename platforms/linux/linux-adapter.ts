@@ -109,32 +109,58 @@ export class LinuxAdapter extends PlatformAdapterBase {
   private async loadNativeEventMonitor(): Promise<void> {
     logger.info('[LINUX] Loading native event monitor module...');
 
+    // Get Electron app paths for debugging
+    const resourcesPath = (process as any).resourcesPath || '';
+    const isPackaged = resourcesPath && resourcesPath.includes('resources');
+
+    logger.info('[LINUX] Environment detection:', {
+      resourcesPath,
+      isPackaged,
+      __dirname,
+      cwd: process.cwd()
+    });
+
     const strategies = [
-      // Strategy 1: Development path (TypeScript compiled)
+      // Strategy 1: AppImage/electron-builder unpacked path (PRIORITY for packaged apps)
+      {
+        name: 'appimage-unpacked',
+        path: path.join(resourcesPath, 'app.asar.unpacked', 'native-event-monitor-linux')
+      },
+      // Strategy 2: AppImage/electron-builder direct resources path
+      {
+        name: 'appimage-resources',
+        path: path.join(resourcesPath, 'native-event-monitor-linux')
+      },
+      // Strategy 3: Development path (TypeScript compiled)
       {
         name: 'development',
         path: path.join(__dirname, '../../native-event-monitor-linux/lib/index')
       },
-      // Strategy 2: Development path (JavaScript entry)
+      // Strategy 4: Development path (JavaScript entry)
       {
         name: 'development-js',
         path: path.join(__dirname, '../../native-event-monitor-linux/index')
       },
-      // Strategy 3: Packaged Electron app path
+      // Strategy 5: Packaged Electron app path (legacy)
       {
         name: 'packaged',
-        path: path.join((process as any).resourcesPath || '', 'native-event-monitor-linux')
+        path: path.join(resourcesPath, 'native-event-monitor-linux')
       },
-      // Strategy 4: Relative to app path
+      // Strategy 6: Relative to app path
       {
         name: 'app-relative',
         path: path.join(process.cwd(), 'native-event-monitor-linux')
+      },
+      // Strategy 7: __dirname based for compiled dist
+      {
+        name: 'dist-relative',
+        path: path.join(__dirname, '../../../native-event-monitor-linux')
       }
     ];
 
     for (const strategy of strategies) {
       try {
-        logger.debug(`[LINUX] Trying native module strategy: ${strategy.name} at ${strategy.path}`);
+        logger.info(`[LINUX] Trying native module strategy: ${strategy.name} at ${strategy.path}`);
 
         // Check if module file exists
         const modulePath = strategy.path;
@@ -150,7 +176,7 @@ export class LinuxAdapter extends PlatformAdapterBase {
         }
 
         if (!moduleExists) {
-          logger.debug(`[LINUX] Module not found at: ${strategy.path}`);
+          logger.info(`[LINUX] Module not found at: ${strategy.path}`);
           continue;
         }
 
@@ -195,7 +221,7 @@ export class LinuxAdapter extends PlatformAdapterBase {
 
         return;
       } catch (error) {
-        logger.debug(`[LINUX] Failed to load native module via ${strategy.name}:`, error);
+        logger.info(`[LINUX] Failed to load native module via ${strategy.name}:`, error);
       }
     }
 

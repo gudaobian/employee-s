@@ -67,7 +67,7 @@ export class Logger {
 
     this.config = {
       level: LogLevel.INFO,
-      enableConsole: !isElectron,     // Electron环境下禁用console输出,避免双重记录
+      enableConsole: true,     // 启用console输出，让UnifiedLogManager统一捕获
       enableFile: true,
       maxFileSize: 10 * 1024 * 1024, // 10MB (原5MB)
       maxFiles: 3,                    // 3个轮转文件 (原5个)
