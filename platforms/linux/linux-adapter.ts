@@ -987,7 +987,7 @@ X-GNOME-Autostart-enabled=true
         mouseClicks = this.currentPeriodMouseClicks;
         mouseScrolls = this.currentPeriodMouseScrolls;
 
-        logger.debug(`[LINUX] Activity data: keyboard=${keystrokes}, mouse=${mouseClicks}, scrolls=${mouseScrolls}`);
+        logger.debug(`[LINUX] Activity data (native): keyboard=${keystrokes}, mouse=${mouseClicks}, scrolls=${mouseScrolls}`);
       } catch (error) {
         logger.error('[LINUX] Error getting native event counts:', error);
       }
@@ -997,6 +997,16 @@ X-GNOME-Autostart-enabled=true
       keystrokes = this.currentPeriodKeystrokes;
       mouseClicks = this.currentPeriodMouseClicks;
       mouseScrolls = this.currentPeriodMouseScrolls;
+    } else {
+      // 🔧 FALLBACK: Use interrupt-based activity estimation
+      const fallbackData = this.getFallbackActivityData();
+      keystrokes = fallbackData.keystrokes;
+      mouseClicks = fallbackData.mouseClicks;
+      mouseScrolls = fallbackData.scrolls;
+
+      if (keystrokes > 0 || mouseClicks > 0) {
+        logger.debug(`[LINUX] Activity data (fallback): keyboard=${keystrokes}, mouse=${mouseClicks}, scrolls=${mouseScrolls}`);
+      }
     }
 
     return {
@@ -1004,7 +1014,7 @@ X-GNOME-Autostart-enabled=true
       activeWindow: activeWindow || undefined,
       keystrokes,
       mouseClicks,
-      mouseMovements: 0, // Not tracked by native module
+      mouseMovements: 0, // Not tracked
       mouseScrolls,
       idleTime: await this.getIdleTime()
     };
@@ -1088,13 +1098,13 @@ X-GNOME-Autostart-enabled=true
     if (!this.nativeEventMonitor) {
       logger.warn('[LINUX] Native event monitor not available for event listener');
 
-      // Return null to indicate no event monitoring available
-      // The caller should handle graceful degradation
       if (this.nativeModuleLoadError) {
         logger.warn(`[LINUX] Native module error: ${this.nativeModuleLoadError}`);
       }
 
-      return null;
+      // 🔧 FALLBACK: Use shell-based activity monitoring when native module is unavailable
+      logger.info('[LINUX] Attempting shell-based fallback for activity monitoring...');
+      return await this.createFallbackEventListener(eventEmitter, options);
     }
 
     // Check permissions
@@ -1204,6 +1214,9 @@ X-GNOME-Autostart-enabled=true
       this.lastNativeKeystrokes = 0;
       this.lastNativeMouseClicks = 0;
       this.lastNativeMouseScrolls = 0;
+
+      // Reset fallback counters
+      this.resetFallbackActivityCounters();
 
       // Reset last activity data
       this.lastActivityData = null;
@@ -1329,6 +1342,208 @@ X-GNOME-Autostart-enabled=true
     this.lastNativeKeystrokes = 0;
     this.lastNativeMouseClicks = 0;
     this.lastNativeMouseScrolls = 0;
+  }
+
+  // === Fallback Activity Monitoring ===
+
+  // Variables for fallback monitoring
+  private fallbackLastInterrupts: { keyboard: number; mouse: number } | null = null;
+  private fallbackLastIdleTime: number = 0;
+  private fallbackLastActiveWindow: string | null = null;
+  private fallbackActivityEstimate: { keystrokes: number; mouseClicks: number; scrolls: number } = {
+    keystrokes: 0,
+    mouseClicks: 0,
+    scrolls: 0
+  };
+
+  /**
+   * Create a fallback event listener using shell commands
+   * Used when native module is not available
+   */
+  private async createFallbackEventListener(
+    eventEmitter: EventEmitter,
+    options: { keyboard?: boolean; mouse?: boolean; idle?: boolean }
+  ): Promise<EventEmitter | null> {
+    logger.info('[LINUX] Creating fallback event listener using shell commands...');
+
+    // Check available tools
+    const hasXprintidle = await this.checkToolExists('xprintidle');
+    const hasXdotool = await this.checkToolExists('xdotool');
+    const hasProcInterrupts = fs.existsSync('/proc/interrupts');
+
+    logger.info('[LINUX] Fallback tools availability:', {
+      xprintidle: hasXprintidle,
+      xdotool: hasXdotool,
+      procInterrupts: hasProcInterrupts,
+      hasX11: this.hasX11,
+      hasWayland: this.hasWayland
+    });
+
+    // Need at least some capability
+    if (!hasProcInterrupts && !hasXprintidle && !hasXdotool) {
+      logger.warn('[LINUX] No fallback tools available. Activity monitoring will not work.');
+      logger.warn('[LINUX] To enable fallback monitoring, install: sudo apt install xdotool xprintidle');
+      return null;
+    }
+
+    // Initialize interrupt counters
+    if (hasProcInterrupts) {
+      this.fallbackLastInterrupts = await this.readInterruptCounts();
+    }
+
+    // Start activity monitoring (internal timer-based collection)
+    if (!this.monitoringActive) {
+      await this.startActivityMonitoring();
+    }
+
+    // Set up polling interval to emit events based on fallback methods
+    const pollingInterval = setInterval(async () => {
+      try {
+        // Method 1: Use /proc/interrupts to estimate keyboard/mouse activity
+        if (hasProcInterrupts && this.fallbackLastInterrupts) {
+          const currentInterrupts = await this.readInterruptCounts();
+          if (currentInterrupts) {
+            const keyboardDelta = Math.max(0, currentInterrupts.keyboard - this.fallbackLastInterrupts.keyboard);
+            const mouseDelta = Math.max(0, currentInterrupts.mouse - this.fallbackLastInterrupts.mouse);
+
+            // Interrupts don't map 1:1 to keystrokes/clicks, but they indicate activity
+            // We use a scaling factor to estimate actual events
+            if (keyboardDelta > 0) {
+              const estimatedKeystrokes = Math.ceil(keyboardDelta / 2); // Rough estimate
+              this.fallbackActivityEstimate.keystrokes += estimatedKeystrokes;
+              if (options.keyboard) {
+                eventEmitter.emit('keyboard', { count: estimatedKeystrokes });
+              }
+            }
+
+            if (mouseDelta > 0) {
+              const estimatedClicks = Math.ceil(mouseDelta / 10); // Mouse generates many interrupts
+              this.fallbackActivityEstimate.mouseClicks += estimatedClicks;
+              if (options.mouse) {
+                eventEmitter.emit('mouse', { type: 'click', count: estimatedClicks });
+              }
+            }
+
+            this.fallbackLastInterrupts = currentInterrupts;
+          }
+        }
+
+        // Method 2: Use idle time to detect activity
+        if (hasXprintidle && options.idle) {
+          const idleTime = await this.getIdleTime();
+          eventEmitter.emit('idle', { time: idleTime });
+
+          // If idle time decreased, user became active
+          if (idleTime < this.fallbackLastIdleTime && this.fallbackLastIdleTime > 1000) {
+            // Activity detected through idle time decrease
+            logger.debug('[LINUX] Activity detected via idle time decrease');
+          }
+          this.fallbackLastIdleTime = idleTime;
+        }
+
+        // Method 3: Detect window changes as activity proxy
+        if (hasXdotool && this.hasX11) {
+          try {
+            const activeWindow = await this.getActiveWindow();
+            if (activeWindow && activeWindow.title !== this.fallbackLastActiveWindow) {
+              // Window changed - indicates user activity
+              this.fallbackLastActiveWindow = activeWindow.title;
+              logger.debug('[LINUX] Activity detected via window change');
+            }
+          } catch {
+            // Ignore xdotool errors
+          }
+        }
+      } catch (error) {
+        logger.error('[LINUX] Error in fallback event listener polling:', error);
+      }
+    }, 1000);
+
+    // Add stop method to the emitter for cleanup
+    (eventEmitter as any).stop = async () => {
+      logger.info('[LINUX] Stopping fallback event listener');
+      clearInterval(pollingInterval);
+    };
+
+    (eventEmitter as any).pollingInterval = pollingInterval;
+    (eventEmitter as any).isFallback = true;
+
+    logger.info('[LINUX] ✅ Fallback event listener created successfully');
+    logger.info('[LINUX] Note: Fallback monitoring provides estimated activity counts based on system interrupts and idle time');
+    return eventEmitter;
+  }
+
+  /**
+   * Check if a shell tool exists
+   */
+  private async checkToolExists(tool: string): Promise<boolean> {
+    try {
+      await execAsync(`which ${tool}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Read keyboard and mouse interrupt counts from /proc/interrupts
+   * This provides a rough estimate of hardware-level input activity
+   */
+  private async readInterruptCounts(): Promise<{ keyboard: number; mouse: number } | null> {
+    try {
+      const content = await fs.promises.readFile('/proc/interrupts', 'utf8');
+      const lines = content.split('\n');
+
+      let keyboardCount = 0;
+      let mouseCount = 0;
+
+      for (const line of lines) {
+        const lowerLine = line.toLowerCase();
+
+        // Look for keyboard-related interrupts (i8042, keyboard, AT keyboard)
+        if (lowerLine.includes('keyboard') || lowerLine.includes('i8042') || lowerLine.includes('at keyboard')) {
+          const numbers = line.match(/\d+/g);
+          if (numbers && numbers.length > 1) {
+            // Sum all CPU columns (skip first which might be IRQ number)
+            for (let i = 1; i < Math.min(numbers.length, 9); i++) {
+              keyboardCount += parseInt(numbers[i]) || 0;
+            }
+          }
+        }
+
+        // Look for mouse-related interrupts (mouse, PS/2, i8042)
+        if (lowerLine.includes('mouse') || lowerLine.includes('ps/2') ||
+            (lowerLine.includes('i8042') && !lowerLine.includes('keyboard'))) {
+          const numbers = line.match(/\d+/g);
+          if (numbers && numbers.length > 1) {
+            for (let i = 1; i < Math.min(numbers.length, 9); i++) {
+              mouseCount += parseInt(numbers[i]) || 0;
+            }
+          }
+        }
+      }
+
+      return { keyboard: keyboardCount, mouse: mouseCount };
+    } catch (error) {
+      logger.debug('[LINUX] Failed to read /proc/interrupts:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get fallback activity data when native module is unavailable
+   * Returns estimated counts from interrupt-based monitoring
+   */
+  public getFallbackActivityData(): { keystrokes: number; mouseClicks: number; scrolls: number } {
+    return { ...this.fallbackActivityEstimate };
+  }
+
+  /**
+   * Reset fallback activity counters
+   */
+  public resetFallbackActivityCounters(): void {
+    this.fallbackActivityEstimate = { keystrokes: 0, mouseClicks: 0, scrolls: 0 };
+    logger.info('[LINUX] Fallback activity counters reset');
   }
 }
 
