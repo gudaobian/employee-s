@@ -1100,39 +1100,94 @@ function showPermissionFallback(permissions) {
 }
 
 function createDefaultIcon() {
-    console.log('Creating macOS compatible tray icon...');
-    
-    // 方法1: 使用macOS推荐的Template Image格式
-    try {
-        console.log('Creating macOS template icon...');
-        // 创建符合macOS托盘图标规范的图标
-        // macOS托盘图标应该是黑白的，并使用template image模式
-        const macOSIconSvg = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-            <!-- 符合macOS托盘图标规范：黑色图形，透明背景 -->
-            <circle cx="8" cy="8" r="7" fill="none" stroke="#000000" stroke-width="2"/>
-            <circle cx="8" cy="6" r="1.5" fill="#000000"/>
-            <rect x="6" y="10" width="4" height="1" fill="#000000"/>
-        </svg>`;
-        
-        const iconBuffer = Buffer.from(macOSIconSvg);
-        const icon = nativeImage.createFromBuffer(iconBuffer);
-        
-        if (process.platform === 'darwin') {
+    const platform = process.platform;
+    console.log(`[TRAY_ICON] Creating default tray icon for platform: ${platform}`);
+
+    // Linux平台：创建彩色PNG图标（Linux托盘图标通常需要彩色）
+    if (platform === 'linux') {
+        try {
+            console.log('[LINUX_TRAY] Creating Linux tray icon (PNG format)...');
+            // Linux托盘图标使用彩色SVG，22x22是常见尺寸
+            const linuxIconSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
+                <circle cx="11" cy="11" r="10" fill="#4A90D9"/>
+                <circle cx="11" cy="9" r="3" fill="#ffffff"/>
+                <rect x="8" y="14" width="6" height="2" rx="1" fill="#ffffff"/>
+            </svg>`;
+
+            const iconBuffer = Buffer.from(linuxIconSvg);
+            const icon = nativeImage.createFromBuffer(iconBuffer);
+
+            if (!icon.isEmpty()) {
+                console.log('[LINUX_TRAY] Linux tray icon created successfully');
+                return icon;
+            }
+        } catch (error) {
+            console.log('[LINUX_TRAY] SVG icon creation failed:', error.message);
+        }
+
+        // Linux备选方案：创建简单的彩色PNG
+        try {
+            console.log('[LINUX_TRAY] Creating fallback solid color icon...');
+            const fallbackSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22">
+                <rect width="22" height="22" fill="#4A90D9" rx="4"/>
+                <text x="11" y="15" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#ffffff">ES</text>
+            </svg>`;
+
+            const iconBuffer = Buffer.from(fallbackSvg);
+            const icon = nativeImage.createFromBuffer(iconBuffer);
+
+            if (!icon.isEmpty()) {
+                console.log('[LINUX_TRAY] Fallback icon created successfully');
+                return icon;
+            }
+        } catch (error) {
+            console.log('[LINUX_TRAY] Fallback icon creation failed:', error.message);
+        }
+    }
+
+    // macOS平台：使用Template Image格式
+    if (platform === 'darwin') {
+        try {
+            console.log('[MACOS_TRAY] Creating macOS template icon...');
+            // macOS托盘图标应该是黑白的，并使用template image模式
+            const macOSIconSvg = `
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <circle cx="8" cy="8" r="7" fill="none" stroke="#000000" stroke-width="2"/>
+                <circle cx="8" cy="6" r="1.5" fill="#000000"/>
+                <rect x="6" y="10" width="4" height="1" fill="#000000"/>
+            </svg>`;
+
+            const iconBuffer = Buffer.from(macOSIconSvg);
+            const icon = nativeImage.createFromBuffer(iconBuffer);
+
             // 使用Template Image模式（这是macOS推荐的方式）
             icon.setTemplateImage(true);
-            console.log('macOS template icon created, template mode enabled');
+            console.log('[MACOS_TRAY] macOS template icon created successfully');
+            return icon;
+        } catch (error) {
+            console.log('[MACOS_TRAY] Template icon creation failed:', error.message);
         }
-        
-        console.log('macOS template icon created successfully');
-        return icon;
-    } catch (error) {
-        console.log('macOS template icon creation failed:', error.message);
+
+        // macOS备选：尝试使用系统图标
+        try {
+            console.log('[MACOS_TRAY] Trying macOS native system icon...');
+            const systemIcon = nativeImage.createFromNamedImage('NSApplicationIcon');
+            if (!systemIcon.isEmpty()) {
+                const resizedIcon = systemIcon.resize({ width: 16, height: 16 });
+                resizedIcon.setTemplateImage(false);
+                console.log('[MACOS_TRAY] macOS system icon created successfully');
+                return resizedIcon;
+            }
+        } catch (error) {
+            console.log('[MACOS_TRAY] System icon creation failed:', error.message);
+        }
     }
-    
-    // 方法2: 创建实心的黑色图标
+
+    // Windows平台或通用备选方案：创建实心图标
     try {
-        console.log('Creating solid black icon...');
+        console.log('[TRAY_ICON] Creating solid icon (Windows/fallback)...');
         const solidIconSvg = `
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
             <rect x="0" y="0" width="16" height="16" fill="#000000"/>
@@ -1140,36 +1195,18 @@ function createDefaultIcon() {
             <rect x="4" y="4" width="8" height="8" fill="#000000"/>
             <text x="8" y="11" text-anchor="middle" font-family="Arial, sans-serif" font-size="6" fill="#ffffff">安</text>
         </svg>`;
-        
+
         const iconBuffer = Buffer.from(solidIconSvg);
         const icon = nativeImage.createFromBuffer(iconBuffer);
-        
-        if (process.platform === 'darwin') {
+
+        if (platform === 'darwin') {
             icon.setTemplateImage(false);
-            console.log('Solid icon created, template disabled');
         }
-        
-        console.log('Solid black icon created successfully');
+
+        console.log('[TRAY_ICON] Solid icon created successfully');
         return icon;
     } catch (error) {
-        console.log('Solid icon creation failed:', error.message);
-    }
-    
-    // 方法2: 使用系统原生方法创建图标 
-    try {
-        console.log('Trying macOS native system icon...');
-        if (process.platform === 'darwin') {
-            // 尝试使用macOS系统图标
-            const systemIcon = nativeImage.createFromNamedImage('NSApplicationIcon');
-            if (!systemIcon.isEmpty()) {
-                const resizedIcon = systemIcon.resize({ width: 16, height: 16 });
-                resizedIcon.setTemplateImage(false);
-                console.log('macOS system icon created successfully');
-                return resizedIcon;
-            }
-        }
-    } catch (error) {
-        console.log('System icon creation failed:', error.message);
+        console.log('[TRAY_ICON] Solid icon creation failed:', error.message);
     }
     
     // 方法2: 创建简单的PNG数据图标
