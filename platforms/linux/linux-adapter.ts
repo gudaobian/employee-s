@@ -598,31 +598,36 @@ export class LinuxAdapter extends PlatformAdapterBase {
           }
         }
       } else if (this.hasWayland) {
-        // Wayland 截图优先级：
-        // 1. D-Bus Portal (静默，推荐)
-        // 2. grim (静默，Sway/wlroots)
-        // 3. gnome-screenshot (有闪屏)
+        // Wayland 截图优先级（静默优先）：
+        // 1. GNOME Shell Screenshot D-Bus (静默，flash=false)
+        // 2. grim (静默，wlroots)
+        // 3. spectacle (静默，KDE)
+        // 4. maim via XWayland (静默)
+        // 5. gnome-screenshot (有闪屏，最后手段)
         let screenshotSuccess = false;
 
-        // 方法 1: 使用 D-Bus Screenshot Portal (GNOME 41+，静默截图)
+        // 方法 1: 使用 GNOME Shell Screenshot D-Bus (静默截图)
+        // 参数: include_cursor (bool), flash (bool), filename (string)
+        // 返回: (success, filename_used)
         if (this.desktopEnvironment === 'gnome') {
           try {
-            // 使用 gdbus 调用 Screenshot Portal
-            const portalCmd = `gdbus call --session --dest org.gnome.Shell.Screenshot --object-path /org/gnome/Shell/Screenshot --method org.gnome.Shell.Screenshot.Screenshot false false "${tempPath}"`;
-            await execAsync(portalCmd, { timeout: 5000 });
-            if (fs.existsSync(tempPath)) {
+            // 注意：第二个参数 flash=false 禁用闪屏
+            const portalCmd = `dbus-send --session --print-reply --dest=org.gnome.Shell.Screenshot /org/gnome/Shell/Screenshot org.gnome.Shell.Screenshot.Screenshot boolean:false boolean:false string:"${tempPath}" 2>/dev/null`;
+            const { stdout } = await execAsync(portalCmd, { timeout: 5000 });
+            // 检查返回值中是否包含 true
+            if (stdout.includes('boolean true') && fs.existsSync(tempPath)) {
               screenshotSuccess = true;
-              logger.info('[LINUX] Screenshot taken via GNOME Shell Portal (silent)');
+              logger.info('[LINUX] Screenshot taken via GNOME Shell D-Bus (silent)');
             }
           } catch (e) {
-            logger.debug('[LINUX] GNOME Shell Screenshot Portal failed, trying alternatives...', e);
+            logger.debug('[LINUX] GNOME Shell Screenshot D-Bus failed:', e);
           }
         }
 
-        // 方法 2: 使用 grim (适用于 wlroots 合成器，静默)
+        // 方法 2: 使用 grim (wlroots 合成器，完全静默)
         if (!screenshotSuccess) {
           try {
-            await execAsync(`grim "${tempPath}"`, { timeout: 5000 });
+            await execAsync(`grim "${tempPath}" 2>/dev/null`, { timeout: 5000 });
             if (fs.existsSync(tempPath)) {
               screenshotSuccess = true;
               logger.info('[LINUX] Screenshot taken via grim (silent)');
@@ -632,13 +637,40 @@ export class LinuxAdapter extends PlatformAdapterBase {
           }
         }
 
-        // 方法 3: gnome-screenshot (会有闪屏，作为最后手段)
-        if (!screenshotSuccess) {
+        // 方法 3: 使用 spectacle (KDE，静默模式)
+        if (!screenshotSuccess && this.desktopEnvironment === 'kde') {
           try {
-            await execAsync(`gnome-screenshot -f "${tempPath}"`, { timeout: 10000 });
+            await execAsync(`spectacle -b -n -f -o "${tempPath}" 2>/dev/null`, { timeout: 5000 });
             if (fs.existsSync(tempPath)) {
               screenshotSuccess = true;
-              logger.info('[LINUX] Screenshot taken via gnome-screenshot');
+              logger.info('[LINUX] Screenshot taken via spectacle (silent)');
+            }
+          } catch {
+            logger.debug('[LINUX] spectacle not available');
+          }
+        }
+
+        // 方法 4: 使用 maim via XWayland (如果有 DISPLAY)
+        if (!screenshotSuccess && process.env.DISPLAY) {
+          try {
+            await execAsync(`maim "${tempPath}" 2>/dev/null`, { timeout: 5000 });
+            if (fs.existsSync(tempPath)) {
+              screenshotSuccess = true;
+              logger.info('[LINUX] Screenshot taken via maim/XWayland (silent)');
+            }
+          } catch {
+            logger.debug('[LINUX] maim not available');
+          }
+        }
+
+        // 方法 5: gnome-screenshot (会有闪屏，最后手段)
+        if (!screenshotSuccess) {
+          try {
+            // -B 参数移除窗口边框，但不能禁用闪屏
+            await execAsync(`gnome-screenshot -f "${tempPath}" 2>/dev/null`, { timeout: 10000 });
+            if (fs.existsSync(tempPath)) {
+              screenshotSuccess = true;
+              logger.warn('[LINUX] Screenshot taken via gnome-screenshot (may flash)');
             }
           } catch {
             logger.debug('[LINUX] gnome-screenshot failed');
@@ -1096,8 +1128,59 @@ X-GNOME-Autostart-enabled=true
     // Wayland 安全模型限制了对其他窗口的访问
     // 尝试多种方法获取活动窗口信息
 
-    // 方法 1: 使用 xdotool via XWayland (对 X11 应用有效)
-    // XWayland 运行的应用可以通过 xdotool 获取
+    // 方法 1: 使用 gdbus 获取 GNOME Shell 的焦点窗口信息 (通过 window-list 扩展)
+    if (this.desktopEnvironment === 'gnome') {
+      try {
+        // 使用 qdbus/gdbus 获取 KWin 或 GNOME 窗口信息
+        // GNOME Shell 通过 org.gnome.Shell 提供 Looking Glass 接口
+        const script = `
+          let win = global.display.focus_window;
+          if (win) {
+            JSON.stringify({
+              title: win.get_title() || '',
+              wmClass: win.get_wm_class() || '',
+              pid: win.get_pid() || 0
+            });
+          } else {
+            '{}';
+          }
+        `;
+        const { stdout } = await execAsync(
+          `gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Eval "${script.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`,
+          { timeout: 3000 }
+        );
+
+        // 解析结果格式: (true, '{"title":"...", "wmClass":"...", "pid":123}')
+        const match = stdout.match(/\(true,\s*'(.*)'\)/);
+        if (match && match[1]) {
+          try {
+            const winInfo = JSON.parse(match[1].replace(/\\'/g, "'"));
+            if (winInfo.title || winInfo.wmClass) {
+              logger.debug('[LINUX] Active window via GNOME Shell Eval:', winInfo);
+              return {
+                title: winInfo.title || 'Unknown',
+                application: winInfo.wmClass || 'Unknown',
+                pid: winInfo.pid || 0
+              };
+            }
+          } catch {
+            // JSON 解析失败，尝试简单解析
+            if (match[1] && match[1] !== '{}') {
+              return {
+                title: match[1],
+                application: 'Unknown',
+                pid: 0
+              };
+            }
+          }
+        }
+      } catch (e) {
+        // GNOME Shell Eval 被禁用 - 这在许多发行版中是默认的
+        logger.debug('[LINUX] GNOME Shell Eval disabled (security setting)');
+      }
+    }
+
+    // 方法 2: 使用 xdotool via XWayland (对 X11 应用有效)
     if (process.env.DISPLAY) {
       try {
         const { stdout: windowId } = await execAsync('xdotool getactivewindow 2>/dev/null', { timeout: 2000 });
@@ -1129,47 +1212,76 @@ X-GNOME-Autostart-enabled=true
         }
       } catch {
         // xdotool 失败，尝试其他方法
+        logger.debug('[LINUX] xdotool failed on Wayland');
       }
     }
 
-    // 方法 2: 使用 GNOME Shell DBus (需要 Looking Glass 或扩展支持)
+    // 方法 3: 使用 wmctrl (如果可用)
+    try {
+      const { stdout } = await execAsync('wmctrl -l -p 2>/dev/null | head -1', { timeout: 2000 });
+      if (stdout && stdout.trim()) {
+        // 格式: 0x04800003  0 12345  hostname Window Title
+        const parts = stdout.trim().split(/\s+/);
+        if (parts.length >= 5) {
+          const pid = parseInt(parts[2]) || 0;
+          const title = parts.slice(4).join(' ');
+          logger.debug('[LINUX] Active window via wmctrl:', { title, pid });
+          return {
+            title: title || 'Unknown',
+            application: 'Unknown',
+            pid
+          };
+        }
+      }
+    } catch {
+      logger.debug('[LINUX] wmctrl not available');
+    }
+
+    // 方法 4: 通过 D-Bus Window List 扩展 (需要安装 Window List GNOME 扩展)
     if (this.desktopEnvironment === 'gnome') {
       try {
-        // 尝试 GNOME Shell Eval (可能因安全设置被禁用)
+        // 尝试通过 org.gnome.Shell.Extensions.Windows 获取
         const { stdout } = await execAsync(
-          'gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Eval "global.display.focus_window ? global.display.focus_window.get_title() : \'\'"',
+          'gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell/Extensions/Windows --method org.gnome.Shell.Extensions.Windows.List 2>/dev/null || echo ""',
           { timeout: 2000 }
         );
-
-        // 解析结果格式: (true, 'Window Title')
-        const match = stdout.match(/\(true,\s*'(.*)'\)/);
-        if (match && match[1]) {
-          logger.debug('[LINUX] Active window via GNOME Shell Eval:', match[1]);
+        // 如果成功，解析窗口列表
+        if (stdout && stdout.includes('focus')) {
+          logger.debug('[LINUX] Got window list from GNOME extension');
+          // 简化处理：返回部分信息
           return {
-            title: match[1],
+            title: 'GNOME Window',
             application: 'Unknown',
             pid: 0
           };
         }
       } catch {
-        // GNOME Shell Eval 被禁用或失败
-        logger.debug('[LINUX] GNOME Shell Eval disabled or failed');
+        // 扩展不可用
       }
     }
 
-    // 方法 3: 尝试获取前台进程信息
-    try {
-      // 获取当前 TTY 的前台进程组
-      const { stdout: fgPid } = await execAsync('cat /proc/$(xdotool getactivewindow getwindowpid 2>/dev/null || echo 1)/comm 2>/dev/null || echo ""', { timeout: 2000 });
-      if (fgPid && fgPid.trim()) {
-        return {
-          title: 'Unknown',
-          application: fgPid.trim(),
-          pid: 0
-        };
+    // 方法 5: 使用 qdbus (KDE Plasma)
+    if (this.desktopEnvironment === 'kde') {
+      try {
+        const { stdout: activeWin } = await execAsync(
+          'qdbus org.kde.KWin /KWin activeClient 2>/dev/null',
+          { timeout: 2000 }
+        );
+        if (activeWin && activeWin.trim()) {
+          const { stdout: caption } = await execAsync(
+            `qdbus org.kde.KWin /KWin caption ${activeWin.trim()} 2>/dev/null`,
+            { timeout: 2000 }
+          );
+          logger.debug('[LINUX] Active window via KDE KWin:', caption?.trim());
+          return {
+            title: caption?.trim() || 'Unknown',
+            application: 'KDE Application',
+            pid: 0
+          };
+        }
+      } catch {
+        logger.debug('[LINUX] KDE KWin query failed');
       }
-    } catch {
-      // 忽略错误
     }
 
     logger.debug('[LINUX] Could not get active window on Wayland - this is expected due to Wayland security model');
