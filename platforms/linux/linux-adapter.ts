@@ -20,6 +20,7 @@ import {
   ActivityData
 } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
+import { LinuxURLCollector, LinuxURLInfo } from './url-collector';
 
 const execAsync = promisify(exec);
 
@@ -71,6 +72,9 @@ export class LinuxAdapter extends PlatformAdapterBase {
   private nativeModuleLoaded = false;
   private nativeModuleLoadError: string | null = null;
 
+  // URL collector for browser URL extraction
+  private urlCollector: LinuxURLCollector | null = null;
+
   // Activity counters for current period
   private currentPeriodKeystrokes = 0;
   private currentPeriodMouseClicks = 0;
@@ -92,6 +96,9 @@ export class LinuxAdapter extends PlatformAdapterBase {
       // 加载原生事件监控模块
       await this.loadNativeEventMonitor();
 
+      // 初始化 URL 采集器
+      await this.initializeURLCollector();
+
       // 检查权限
       await this.checkInitialPermissions();
 
@@ -99,6 +106,50 @@ export class LinuxAdapter extends PlatformAdapterBase {
     } catch (error) {
       logger.error('Failed to initialize Linux adapter', error);
       throw error;
+    }
+  }
+
+  /**
+   * 初始化 URL 采集器
+   */
+  private async initializeURLCollector(): Promise<void> {
+    try {
+      this.urlCollector = new LinuxURLCollector();
+      const atspiAvailable = await this.urlCollector.isAtspiAvailable();
+      const supportedBrowsers = this.urlCollector.getSupportedBrowsers();
+
+      logger.info('[LINUX] URL collector initialized:', {
+        atspiAvailable,
+        supportedBrowsers
+      });
+    } catch (error) {
+      logger.warn('[LINUX] Failed to initialize URL collector:', error);
+      this.urlCollector = null;
+    }
+  }
+
+  /**
+   * 获取浏览器当前 URL
+   * @param browserName 浏览器名称 (Chrome, Firefox, Edge, etc.)
+   * @param windowTitle 窗口标题（可选，用于匹配正确的标签页）
+   * @returns URL 字符串，失败返回 null
+   */
+  async getActiveURL(browserName: string, windowTitle?: string): Promise<string | null> {
+    if (!this.urlCollector) {
+      logger.warn('[LINUX] URL collector not initialized');
+      return null;
+    }
+
+    try {
+      const urlInfo = await this.urlCollector.getActiveURL(browserName, windowTitle);
+      if (urlInfo) {
+        logger.info(`[LINUX] ✅ URL collected: ${urlInfo.browser} - ${urlInfo.url} (method: ${urlInfo.collectionMethod})`);
+        return urlInfo.url;
+      }
+      return null;
+    } catch (error) {
+      logger.error('[LINUX] Failed to get active URL:', error);
+      return null;
     }
   }
 
