@@ -913,28 +913,43 @@ X-GNOME-Autostart-enabled=true
 
   private async detectDesktopEnvironment(): Promise<void> {
     try {
-      // 优先检查 XDG_SESSION_TYPE（更可靠）
-      const sessionType = process.env.XDG_SESSION_TYPE?.toLowerCase();
+      // 记录所有相关环境变量用于调试
+      const envInfo = {
+        XDG_SESSION_TYPE: process.env.XDG_SESSION_TYPE,
+        WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY,
+        DISPLAY: process.env.DISPLAY,
+        XDG_CURRENT_DESKTOP: process.env.XDG_CURRENT_DESKTOP,
+        DESKTOP_SESSION: process.env.DESKTOP_SESSION
+      };
+      logger.info('[LINUX] Environment variables for session detection:', envInfo);
 
-      if (sessionType === 'wayland') {
-        // 明确是 Wayland 会话
+      // 🔧 修复: 优先检查 WAYLAND_DISPLAY
+      // 原因: Electron/AppImage 可能会覆盖 XDG_SESSION_TYPE 为 'x11'
+      // 但如果宿主系统有 WAYLAND_DISPLAY，说明实际是 Wayland 会话
+      if (process.env.WAYLAND_DISPLAY) {
+        // WAYLAND_DISPLAY 存在说明是 Wayland 会话
         this.hasWayland = true;
-        this.hasX11 = false; // 即使 DISPLAY 存在（XWayland），也优先使用 Wayland 工具
-        logger.info('[LINUX] Detected Wayland session via XDG_SESSION_TYPE');
-      } else if (sessionType === 'x11') {
-        // 明确是 X11 会话
-        this.hasX11 = true;
-        this.hasWayland = false;
-        logger.info('[LINUX] Detected X11 session via XDG_SESSION_TYPE');
+        this.hasX11 = false; // 优先使用 Wayland 方法，即使 DISPLAY 存在（XWayland）
+        logger.info('[LINUX] Detected Wayland session via WAYLAND_DISPLAY (takes priority over XDG_SESSION_TYPE)');
       } else {
-        // 回退到环境变量检测
-        if (process.env.WAYLAND_DISPLAY) {
+        // 没有 WAYLAND_DISPLAY，检查 XDG_SESSION_TYPE
+        const sessionType = process.env.XDG_SESSION_TYPE?.toLowerCase();
+
+        if (sessionType === 'wayland') {
           this.hasWayland = true;
-          logger.info('[LINUX] Detected Wayland via WAYLAND_DISPLAY');
-        }
-        if (process.env.DISPLAY && !this.hasWayland) {
+          this.hasX11 = false;
+          logger.info('[LINUX] Detected Wayland session via XDG_SESSION_TYPE');
+        } else if (sessionType === 'x11') {
           this.hasX11 = true;
-          logger.info('[LINUX] Detected X11 via DISPLAY');
+          this.hasWayland = false;
+          logger.info('[LINUX] Detected X11 session via XDG_SESSION_TYPE');
+        } else if (process.env.DISPLAY) {
+          // 最后回退到 DISPLAY 检测
+          this.hasX11 = true;
+          this.hasWayland = false;
+          logger.info('[LINUX] Detected X11 via DISPLAY (fallback)');
+        } else {
+          logger.warn('[LINUX] No display server detected');
         }
       }
 
@@ -952,7 +967,7 @@ X-GNOME-Autostart-enabled=true
         this.desktopEnvironment = 'unknown';
       }
 
-      logger.info(`Desktop environment detected: ${this.desktopEnvironment}, X11: ${this.hasX11}, Wayland: ${this.hasWayland}, SessionType: ${sessionType || 'unknown'}`);
+      logger.info(`[LINUX] Desktop environment: ${this.desktopEnvironment}, X11: ${this.hasX11}, Wayland: ${this.hasWayland}`);
     } catch (error) {
       logger.warn('Failed to detect desktop environment', error);
     }
@@ -1093,12 +1108,18 @@ X-GNOME-Autostart-enabled=true
   private async getActiveWindowX11(): Promise<{ title: string; application: string; pid: number } | null> {
     try {
       // 使用 xdotool 或 xprop
-      const { stdout: windowId } = await execAsync('xdotool getactivewindow');
-      const { stdout: windowInfo } = await execAsync(`xprop -id ${windowId.trim()} WM_NAME _NET_WM_PID`);
-      
+      const { stdout: windowId } = await execAsync('xdotool getactivewindow 2>/dev/null', { timeout: 3000 });
+      if (!windowId || !windowId.trim()) {
+        logger.debug('[LINUX] xdotool returned empty window ID');
+        return null;
+      }
+
+      const { stdout: windowInfo } = await execAsync(`xprop -id ${windowId.trim()} WM_NAME _NET_WM_PID WM_CLASS 2>/dev/null`, { timeout: 3000 });
+
       let title = '';
       let pid = 0;
-      
+      let wmClass = '';
+
       const lines = windowInfo.split('\n');
       for (const line of lines) {
         if (line.includes('WM_NAME')) {
@@ -1107,19 +1128,45 @@ X-GNOME-Autostart-enabled=true
         } else if (line.includes('_NET_WM_PID')) {
           const match = line.match(/= (\d+)/);
           if (match) pid = parseInt(match[1]);
+        } else if (line.includes('WM_CLASS')) {
+          const match = line.match(/"([^"]+)",\s*"([^"]+)"/);
+          if (match) wmClass = match[2] || match[1];
         }
       }
-      
+
+      // 🔧 安全检查: 过滤无效结果
+      // PID 1 是 systemd/init，说明 xdotool 在 Wayland 下返回了错误的窗口
+      if (pid === 1) {
+        logger.warn('[LINUX] X11 detection returned PID 1 (systemd/init), likely running on Wayland - ignoring result');
+        return null;
+      }
+
+      // 过滤系统进程名
+      const invalidProcesses = ['systemd', 'init', 'Xorg', 'Xwayland', 'gnome-shell', 'kwin', 'plasmashell'];
+
       let application = 'Unknown';
       if (pid > 0) {
         try {
           const { stdout } = await execAsync(`ps -p ${pid} -o comm=`);
           application = stdout.trim();
+
+          // 检查是否是系统进程
+          if (invalidProcesses.includes(application.toLowerCase())) {
+            logger.warn(`[LINUX] X11 detection returned system process: ${application} - ignoring result`);
+            return null;
+          }
         } catch {}
       }
-      
+
+      // 如果有 WM_CLASS 但没有 application，使用 WM_CLASS
+      if (application === 'Unknown' && wmClass) {
+        application = wmClass;
+      }
+
+      logger.debug('[LINUX] X11 active window:', { title, application, pid });
       return { title, application, pid };
-    } catch {
+    } catch (error) {
+      logger.debug('[LINUX] X11 active window detection failed:', error);
       return null;
     }
   }
