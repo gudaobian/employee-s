@@ -598,15 +598,55 @@ export class LinuxAdapter extends PlatformAdapterBase {
           }
         }
       } else if (this.hasWayland) {
-        // 使用 grim 或 gnome-screenshot
-        try {
-          await execAsync(`grim "${tempPath}"`);
-        } catch {
+        // Wayland 截图优先级：
+        // 1. D-Bus Portal (静默，推荐)
+        // 2. grim (静默，Sway/wlroots)
+        // 3. gnome-screenshot (有闪屏)
+        let screenshotSuccess = false;
+
+        // 方法 1: 使用 D-Bus Screenshot Portal (GNOME 41+，静默截图)
+        if (this.desktopEnvironment === 'gnome') {
           try {
-            await execAsync(`gnome-screenshot -f "${tempPath}"`);
-          } catch {
-            throw new Error('No Wayland screenshot tool available');
+            // 使用 gdbus 调用 Screenshot Portal
+            const portalCmd = `gdbus call --session --dest org.gnome.Shell.Screenshot --object-path /org/gnome/Shell/Screenshot --method org.gnome.Shell.Screenshot.Screenshot false false "${tempPath}"`;
+            await execAsync(portalCmd, { timeout: 5000 });
+            if (fs.existsSync(tempPath)) {
+              screenshotSuccess = true;
+              logger.info('[LINUX] Screenshot taken via GNOME Shell Portal (silent)');
+            }
+          } catch (e) {
+            logger.debug('[LINUX] GNOME Shell Screenshot Portal failed, trying alternatives...', e);
           }
+        }
+
+        // 方法 2: 使用 grim (适用于 wlroots 合成器，静默)
+        if (!screenshotSuccess) {
+          try {
+            await execAsync(`grim "${tempPath}"`, { timeout: 5000 });
+            if (fs.existsSync(tempPath)) {
+              screenshotSuccess = true;
+              logger.info('[LINUX] Screenshot taken via grim (silent)');
+            }
+          } catch {
+            logger.debug('[LINUX] grim not available');
+          }
+        }
+
+        // 方法 3: gnome-screenshot (会有闪屏，作为最后手段)
+        if (!screenshotSuccess) {
+          try {
+            await execAsync(`gnome-screenshot -f "${tempPath}"`, { timeout: 10000 });
+            if (fs.existsSync(tempPath)) {
+              screenshotSuccess = true;
+              logger.info('[LINUX] Screenshot taken via gnome-screenshot');
+            }
+          } catch {
+            logger.debug('[LINUX] gnome-screenshot failed');
+          }
+        }
+
+        if (!screenshotSuccess) {
+          throw new Error('No Wayland screenshot tool available');
         }
       } else {
         throw new Error('No supported display server found');
@@ -1053,27 +1093,87 @@ X-GNOME-Autostart-enabled=true
   }
 
   private async getActiveWindowWayland(): Promise<{ title: string; application: string; pid: number } | null> {
-    try {
-      // Wayland 下的窗口信息获取相对困难
-      // 这里提供一个基本实现
-      if (this.desktopEnvironment === 'gnome') {
-        // GNOME 可能支持通过 gdbus 获取
-        const { stdout } = await execAsync('gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Eval "global.display.focus_window.get_title()"');
-        
-        const match = stdout.match(/\('(.+)'\)/);
-        if (match) {
+    // Wayland 安全模型限制了对其他窗口的访问
+    // 尝试多种方法获取活动窗口信息
+
+    // 方法 1: 使用 xdotool via XWayland (对 X11 应用有效)
+    // XWayland 运行的应用可以通过 xdotool 获取
+    if (process.env.DISPLAY) {
+      try {
+        const { stdout: windowId } = await execAsync('xdotool getactivewindow 2>/dev/null', { timeout: 2000 });
+        if (windowId && windowId.trim()) {
+          const { stdout: windowInfo } = await execAsync(`xprop -id ${windowId.trim()} WM_NAME _NET_WM_PID WM_CLASS 2>/dev/null`, { timeout: 2000 });
+
+          let title = '';
+          let pid = 0;
+          let application = '';
+
+          const lines = windowInfo.split('\n');
+          for (const line of lines) {
+            if (line.includes('WM_NAME')) {
+              const match = line.match(/"(.+)"/);
+              if (match) title = match[1];
+            } else if (line.includes('_NET_WM_PID')) {
+              const match = line.match(/= (\d+)/);
+              if (match) pid = parseInt(match[1]);
+            } else if (line.includes('WM_CLASS')) {
+              const match = line.match(/"([^"]+)",\s*"([^"]+)"/);
+              if (match) application = match[2] || match[1];
+            }
+          }
+
+          if (title || application) {
+            logger.debug('[LINUX] Active window via XWayland xdotool:', { title, application, pid });
+            return { title: title || 'Unknown', application: application || 'Unknown', pid };
+          }
+        }
+      } catch {
+        // xdotool 失败，尝试其他方法
+      }
+    }
+
+    // 方法 2: 使用 GNOME Shell DBus (需要 Looking Glass 或扩展支持)
+    if (this.desktopEnvironment === 'gnome') {
+      try {
+        // 尝试 GNOME Shell Eval (可能因安全设置被禁用)
+        const { stdout } = await execAsync(
+          'gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Eval "global.display.focus_window ? global.display.focus_window.get_title() : \'\'"',
+          { timeout: 2000 }
+        );
+
+        // 解析结果格式: (true, 'Window Title')
+        const match = stdout.match(/\(true,\s*'(.*)'\)/);
+        if (match && match[1]) {
+          logger.debug('[LINUX] Active window via GNOME Shell Eval:', match[1]);
           return {
             title: match[1],
             application: 'Unknown',
             pid: 0
           };
         }
+      } catch {
+        // GNOME Shell Eval 被禁用或失败
+        logger.debug('[LINUX] GNOME Shell Eval disabled or failed');
       }
-      
-      return null;
-    } catch {
-      return null;
     }
+
+    // 方法 3: 尝试获取前台进程信息
+    try {
+      // 获取当前 TTY 的前台进程组
+      const { stdout: fgPid } = await execAsync('cat /proc/$(xdotool getactivewindow getwindowpid 2>/dev/null || echo 1)/comm 2>/dev/null || echo ""', { timeout: 2000 });
+      if (fgPid && fgPid.trim()) {
+        return {
+          title: 'Unknown',
+          application: fgPid.trim(),
+          pid: 0
+        };
+      }
+    } catch {
+      // 忽略错误
+    }
+
+    logger.debug('[LINUX] Could not get active window on Wayland - this is expected due to Wayland security model');
+    return null;
   }
 
   private getNetworkInterfaces(): Array<{ name: string; ip: string; mac: string; type: string }> {
