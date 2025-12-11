@@ -1340,12 +1340,17 @@ export class DataCollectStateHandler extends BaseStateHandler {
         return;
       }
 
-      // CRITICAL: Force GC before screenshot to free memory and prevent OOM crash
-      // Screenshot at 5 minutes was causing OOM due to large Base64 string allocation
-      if (global.gc) {
-        logger.info('[DATA_COLLECT] 🧹 Forcing GC before screenshot to prevent OOM...');
-        global.gc();
-        logger.info('[DATA_COLLECT] ✅ GC completed');
+      // NOTE: 移除了截图前的强制 GC 调用
+      // 原因：当前配置(quality=10, 1280x720)每次截图仅占用约1.8MB内存
+      // 5分钟间隔不会导致OOM，而强制GC会阻塞主线程300-500ms
+      // 导致与ClassIn等教学软件的屏幕共享冲突，造成上课卡顿
+
+      // 添加随机延迟(0-3秒)，避免截屏与教学软件的屏幕共享产生固定时间点的冲突
+      // 这样截屏时机会分散，减少与视频帧捕获的碰撞概率
+      const randomDelay = Math.floor(Math.random() * 3000);
+      if (randomDelay > 0) {
+        logger.info(`[DATA_COLLECT] 📸 截图随机延迟 ${randomDelay}ms，避免与教学软件冲突`);
+        await new Promise(resolve => setTimeout(resolve, randomDelay));
       }
 
       // 执行截图采集 - 使用原有的截图逻辑
@@ -1402,16 +1407,10 @@ export class DataCollectStateHandler extends BaseStateHandler {
             });
             logger.info('[DATA_COLLECT] ✅ 截图数据已通过WebSocket服务上传');
 
-            // CRITICAL: Immediately free screenshot memory after upload
+            // 释放截图内存引用，让 V8 自然回收
+            // NOTE: 移除了强制 GC，避免阻塞主线程导致教学软件卡顿
             screenshotResult.data = null;
             (screenshotResult as any).buffer = null;
-
-            // Force GC after screenshot upload to reclaim memory
-            if (global.gc) {
-              logger.info('[DATA_COLLECT] 🧹 Forcing GC after screenshot upload...');
-              global.gc();
-              logger.info('[DATA_COLLECT] ✅ Post-screenshot GC completed');
-            }
 
             this.emitEvent('screenshot-uploaded', { timestamp: screenshotResult.timestamp });
           } catch (error: any) {
