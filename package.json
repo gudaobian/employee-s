@@ -1,17 +1,14 @@
 {
   "name": "employee-safety-client",
-  "version": "1.0.129",
+  "version": "1.0.130",
   "description": "Employee Safety Client - Comprehensive Employee Security Solution",
   "main": "electron/main-minimal.js",
-  "bin": {
-    "employee-safety": "dist/main/cli.js"
-  },
   "scripts": {
-    "clean": "npx rimraf dist",
+    "clean": "npx rimraf out",
     "compile": "tsc --project tsconfig.json",
     "build": "npm run clean && npm run compile",
-    "build:native:mac": "cd native-event-monitor && npm install && npm run build && npx electron-rebuild --version=$(npx electron --version | cut -d'v' -f2)",
-    "build:native:win": "cd native-event-monitor-win && npm install && npm run build",
+    "build:native:mac": "cd native/macos && npm install && npm run build && npx electron-rebuild --version=$(npx electron --version | cut -d'v' -f2)",
+    "build:native:win": "cd native/windows && npm install && npm run build",
     "build:mac": "npm run clean && npm run compile && npm run build:native:mac",
     "build:win": "npm run clean && npm run compile && npm run build:native:win",
     "electron": "npm run compile && npx electron --expose-gc electron/main-minimal.js",
@@ -20,15 +17,9 @@
     "pack:mac:dmg": "bash scripts/create-dmg.sh",
     "pack:mac:builder": "npm run build:mac && npx electron-builder --mac --config electron-builder.yml",
     "pack:win": "node scripts/build-windows.js",
-    "build:native:linux": "node scripts/build-native-linux.js",
-    "pack:linux": "npm run build && npm run pack:linux:appimage",
-    "pack:linux:appimage": "npx electron-builder --linux AppImage",
-    "pack:linux:deb": "npx electron-builder --linux deb",
-    "pack:linux:rpm": "npx electron-builder --linux rpm",
-    "pack:linux:all": "npx electron-builder --linux AppImage deb rpm",
     "test": "jest",
-    "lint": "eslint **/*.ts",
-    "lint:fix": "eslint **/*.ts --fix",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "keywords": [
