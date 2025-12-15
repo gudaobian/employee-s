@@ -50,23 +50,23 @@ jobs:
           if (Test-Path "node_modules") { Remove-Item "node_modules" -Recurse -Force }
           if (Test-Path "package-lock.json") { Remove-Item "package-lock.json" -Force }
           if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
-          if (Test-Path "native-event-monitor-win/build") { Remove-Item "native-event-monitor-win/build" -Recurse -Force }
-          if (Test-Path "native-event-monitor-win/node_modules") { Remove-Item "native-event-monitor-win/node_modules" -Recurse -Force }
+          if (Test-Path "native/windows/build") { Remove-Item "native/windows/build" -Recurse -Force }
+          if (Test-Path "native/windows/node_modules") { Remove-Item "native/windows/node_modules" -Recurse -Force }
           npm cache clean --force
 
       - name: Install native module dependencies
         run: |
-          cd native-event-monitor-win
+          cd native/windows
           npm install
 
       - name: Build native module
         run: |
-          cd native-event-monitor-win
+          cd native/windows
           npm run build
 
       - name: Verify native module
         run: |
-          cd native-event-monitor-win
+          cd native/windows
           if (Test-Path "build/Release/event_monitor.node") {
             $module = Get-Item "build/Release/event_monitor.node"
             Write-Host "✅ Native module built successfully"
@@ -132,8 +132,8 @@ jobs:
         with:
           name: clean-build-${{ github.event.inputs.version }}
           path: |
-            release/*.exe
-            release/*.zip
+            out/release/*.exe
+            out/release/*.zip
           retention-days: 30
 
       - name: Create Release
@@ -154,7 +154,7 @@ jobs:
             - Commit: ${{ github.sha }}
             - Workflow: Clean Build (cache disabled)
           files: |
-            release/*.exe
-            release/*.zip
+            out/release/*.exe
+            out/release/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

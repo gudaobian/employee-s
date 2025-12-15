@@ -1,85 +1,171 @@
+# ============================================
 # Dependencies
+# ============================================
 node_modules/
-*/node_modules/
+native/*/node_modules/
 .npm-cache/
-*/build/
+native/*/.npm-cache/
 
+# ============================================
+# Build Outputs
+# ============================================
+# Main build output
+out/
+
+# Native module builds (keep precompiled binaries)
+native/windows/build/
+native/macos/build/
+!native/windows/precompiled/
+!native/macos/bin/
+
+# ============================================
 # Logs
+# ============================================
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
 app*.log
 test*.log
 final*.log
+electron*.log
 
-# Runtime data
+# ============================================
+# Runtime & Process Files
+# ============================================
 pids
 *.pid
 *.seed
 *.pid.lock
 
-# Built outputs
-dist/
-build/
-release/
-
-# Exception: Keep precompiled native modules for CI/CD
-!native-event-monitor-win/build/
-!native-event-monitor-win/build/Release/
-!native-event-monitor-win/build/Release/*.node
-
-# Cache directories
+# ============================================
+# Cache Directories
+# ============================================
+.cache/
 cache/
 .electron/
-.cache/
+.npm/
+.eslintcache
+.node-gyp
 
-# macOS specific
+# ============================================
+# macOS Specific
+# ============================================
 .DS_Store
 .DS_Store?
+._*
+.AppleDouble
+.LSOverride
 *.DS_Store
 
-# NPM package locks (keeping package-lock.json)
+# ============================================
+# Windows Specific
+# ============================================
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+
+# ============================================
+# Package Manager Locks (keeping package-lock.json)
+# ============================================
 pnpm-lock.yaml
+pnpm-workspace.yaml
 yarn.lock
 
-# Electron artifacts
+# ============================================
+# Electron Build Artifacts
+# ============================================
 *.dmg
+*.pkg
 *.zip
 *.exe
 *.msi
+*.AppImage
+*.asar
 
-# Temporary files
+# ============================================
+# Temporary Files
+# ============================================
 *.tmp
 *.temp
-/tmp/
-
-# IDE/Editor files
-.vscode/
-.idea/
 *.swp
 *.swo
 *~
+/tmp/
+temp/
 
-# OS generated files
-Thumbs.db
-ehthumbs.db
+# ============================================
+# IDE & Editor Files
+# ============================================
+# VSCode
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 
-# Test coverage
+# JetBrains (WebStorm, IntelliJ)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+
+# ============================================
+# Test Coverage
+# ============================================
 coverage/
 .nyc_output/
+*.lcov
 
-# Environment variables
+# ============================================
+# Environment Variables
+# ============================================
 .env
 .env.local
+.env.development
 .env.development.local
+.env.test
 .env.test.local
+.env.production
 .env.production.local
 
-# Debug files
-debug*.js
-*.debug
+# ============================================
+# Development Config Files
+# ============================================
+# Runtime reads from user directories, not project root
+employee-monitor-config.json
 
-doc/
-# Native module build artifacts
-native-event-monitor-win/build/
+# ============================================
+# Debug & Test Files
+# ============================================
+debug*.js
+debug*.ts
+test-*.js
+*.debug
+*.test.local.*
+
+# ============================================
+# Documentation (if needed, uncomment)
+# ============================================
+# doc/
+# docs/build/
+
+# ============================================
+# Optional: Uncomment if needed
+# ============================================
+# scripts/test/temp/
+# scripts/verify/temp/

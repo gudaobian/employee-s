@@ -3,8 +3,8 @@
     "target": "ES2020",
     "module": "commonjs",
     "lib": ["ES2020", "DOM"],
-    "outDir": "./dist",
-    "rootDir": "./",
+    "outDir": "./out/dist",
+    "rootDir": "./src",
     "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -17,9 +17,9 @@
     "emitDecoratorMetadata": true,
     "baseUrl": ".",
     "paths": {
-      "@common/*": ["common/*"],
-      "@platforms/*": ["platforms/*"],
-      "@main/*": ["main/*"]
+      "@common/*": ["src/common/*"],
+      "@platforms/*": ["src/platforms/*"],
+      "@main/*": ["src/main/*"]
     },
     "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
@@ -34,22 +34,17 @@
     "strictPropertyInitialization": false
   },
   "include": [
-    "main/**/*",
-    "common/**/*",
-    "platforms/**/*",
-    "electron/**/*",
-    "types/**/*",
-    "native-event-monitor-win/**/*",
-    "test/**/*",
-    "*.ts"
+    "src/**/*"
   ],
   "typeRoots": [
-    "./types",
+    "./src/types",
     "./node_modules/@types"
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "out",
+    "native",
+    "electron"
   ],
   "ts-node": {
     "esm": false,

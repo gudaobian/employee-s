@@ -3,20 +3,12 @@ productName: EmployeeSafety
 copyright: Copyright © 2025
 
 directories:
-  output: release
+  output: out/release
 
 mac:
   category: public.app-category.business
   target:
     - target: dmg
-      arch:
-        - x64
-        - arm64
-    - target: pkg
-      arch:
-        - x64
-        - arm64
-    - target: zip
       arch:
         - x64
         - arm64
@@ -26,11 +18,11 @@ mac:
   hardenedRuntime: false
   gatekeeperAssess: false
   extraResources:
-    - from: installer-scripts/cleanup-macos.sh
+    - from: scripts/installer/macos/cleanup-macos.sh
       to: installer-scripts/cleanup-macos.sh
-    - from: installer-scripts/uninstall-macos.sh
+    - from: scripts/installer/macos/uninstall-macos.sh
       to: installer-scripts/uninstall-macos.sh
-    - from: installer-scripts/auto-install-update-macos.sh
+    - from: scripts/installer/macos/auto-install-update-macos.sh
       to: installer-scripts/auto-install-update-macos.sh
     - from: app-update.yml
       to: app-update.yml
@@ -53,70 +45,6 @@ dmg:
   iconSize: 100
   format: UDZO
 
-# Linux Configuration
-linux:
-  target:
-    - target: AppImage
-      arch:
-        - x64
-        - arm64
-    - target: deb
-      arch:
-        - x64
-    - target: rpm
-      arch:
-        - x64
-
-  category: Utility
-  icon: build/icons
-  synopsis: Employee Safety Monitoring Client
-  description: |
-    Cross-platform employee activity monitoring solution.
-    Features keyboard, mouse, and screenshot monitoring.
-
-  # Desktop entry configuration
-  desktop:
-    Name: Employee Safety
-    GenericName: Activity Monitor
-    Comment: Employee activity monitoring client
-    Categories: Utility;System;Monitor;
-    Keywords: monitor;activity;employee;
-    StartupNotify: true
-    StartupWMClass: employee-safety
-
-# AppImage configuration
-appImage:
-  license: LICENSE
-  artifactName: "${productName}-${version}-${arch}.AppImage"
-
-# Debian package configuration
-deb:
-  depends:
-    - libinput10
-    - libudev1
-    - libx11-6
-    - libxtst6
-    - libxi6
-  recommends:
-    - scrot
-    - xdotool
-    - xprintidle
-  afterInstall: scripts/linux/postinstall.sh
-  afterRemove: scripts/linux/postremove.sh
-  priority: optional
-  compression: xz
-
-# RPM package configuration
-rpm:
-  depends:
-    - libinput
-    - systemd-libs
-    - libX11
-    - libXtst
-    - libXi
-  fpm:
-    - "--rpm-rpmbuild-define=_build_id_links none"
-
 files:
   - "!**/*.ts"
   - "!test-*.js"
@@ -124,25 +52,23 @@ files:
   - "!*.spec.js"
   - "!**/*.old"
   - "!electron/test-log-manager.js"
-  - dist/**/*
+  - out/dist/**/*
   - electron/**/*
   - assets/**/*
   - package.json
   - app-update.yml
   - node_modules/**/*
-  - native-event-monitor/**/*
-  - native-event-monitor-win/**/*
-  - native-event-monitor-linux/**/*
+  - native/macos/**/*
+  - native/windows/**/*
   - resources/**/*
 
 asarUnpack:
   - "**/*.node"
   - "**/*.so"
   - "**/*.so.*"
-  - dist/**/*
-  - native-event-monitor/**/*
-  - native-event-monitor-win/**/*
-  - native-event-monitor-linux/**/*
+  - out/dist/**/*
+  - native/macos/**/*
+  - native/windows/**/*
   - node_modules/screenshot-desktop/**/*
   - node_modules/sharp/**/*
   - node_modules/@img/**/*
@@ -170,7 +96,7 @@ nsis:
   createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: "Employee Safety"
-  include: installer-scripts/installer.nsh
+  include: scripts/installer/windows/installer.nsh
   # installerIcon: assets/icons/icon.ico  # Disabled - requires 256x256
   # uninstallerIcon: assets/icons/icon.ico
   # installerHeader: assets/icons/icon.ico
@@ -181,5 +107,5 @@ nsis:
   artifactName: "${productName}-Setup-${version}.${ext}"
 
 extraResources:
-  - from: installer-scripts/cleanup.ps1
+  - from: scripts/installer/windows/cleanup.ps1
     to: cleanup.ps1

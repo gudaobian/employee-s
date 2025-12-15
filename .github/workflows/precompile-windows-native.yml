@@ -4,13 +4,13 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'native-event-monitor-win/**'
+      - 'native/windows/**'
       - 'scripts/precompile-windows-native.js'
       # 移除 workflow 文件触发，避免重复构建
   pull_request:
     branches: [ main ]
     paths:
-      - 'native-event-monitor-win/**'
+      - 'native/windows/**'
       - 'scripts/precompile-windows-native.js'
   workflow_dispatch:
     inputs:
@@ -58,16 +58,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            native-event-monitor-win/build
-            native-event-monitor-win/node_modules
+            native/windows/build
+            native/windows/node_modules
             ~/.npm
-          key: windows-native-v2-${{ matrix.arch }}-node${{ matrix.node_version }}-${{ hashFiles('native-event-monitor-win/package.json', 'native-event-monitor-win/binding.gyp', 'native-event-monitor-win/src/**/*.cpp', 'native-event-monitor-win/src/**/*.h') }}
+          key: windows-native-v2-${{ matrix.arch }}-node${{ matrix.node_version }}-${{ hashFiles('native/windows/package.json', 'native/windows/binding.gyp', 'native/windows/src/**/*.cpp', 'native/windows/src/**/*.h') }}
           restore-keys: |
             windows-native-v2-${{ matrix.arch }}-node${{ matrix.node_version }}-
 
       - name: Install dependencies
         run: |
-          cd native-event-monitor-win
+          cd native/windows
           npm install
         
       - name: Run precompilation script
@@ -78,7 +78,7 @@ jobs:
           
       - name: Verify precompiled module
         run: |
-          cd native-event-monitor-win
+          cd native/windows
           node verify-installation.js
           
       - name: Create build info
@@ -97,7 +97,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $artifactPath
 
           # Copy precompiled files
-          Copy-Item -Path "native-event-monitor-win/precompiled/*" -Destination $artifactPath -Recurse -Force
+          Copy-Item -Path "native/windows/precompiled/*" -Destination $artifactPath -Recurse -Force
 
           # Create artifact info
           $runnerOS = '${{ runner.os }}'
@@ -145,8 +145,8 @@ jobs:
         with:
           name: build-logs-node${{ matrix.node_version }}-${{ matrix.arch }}
           path: |
-            native-event-monitor-win/build/config.gypi
-            native-event-monitor-win/build/*.log
+            native/windows/build/config.gypi
+            native/windows/build/*.log
           retention-days: 7
           if-no-files-found: ignore
 

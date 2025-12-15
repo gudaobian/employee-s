@@ -11,7 +11,7 @@ Employee Monitoring System **Employee Client** - A cross-platform desktop applic
 **IMPORTANT**: The user ALWAYS downloads and installs the latest version immediately after each build completes.
 
 - **Version Management**: Do NOT repeatedly suggest checking version or updating the application
-- **Build Pipeline**: User uses `/build-windows` command (GitHub Actions) for production builds
+- **Build Pipeline**: User uses `/build-client` command (GitHub Actions) for production builds
 - **Installation Practice**: User downloads the latest installer from GitHub releases as soon as it's available
 - **Assumption**: When troubleshooting, assume the user is running the most recent released version unless explicitly stated otherwise
 

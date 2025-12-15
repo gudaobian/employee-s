@@ -42,13 +42,9 @@ jobs:
 
           # 删除所有可能残留的构建产物
           Write-Host "🧹 Cleaning build artifacts..."
-          if (Test-Path "dist") {
-            Remove-Item "dist" -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "   ✅ dist/ removed"
-          }
-          if (Test-Path "release") {
-            Remove-Item "release" -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "   ✅ release/ removed"
+          if (Test-Path "out") {
+            Remove-Item "out" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "   ✅ out/ removed"
           }
           if (Test-Path "node_modules") {
             Remove-Item "node_modules" -Recurse -Force -ErrorAction SilentlyContinue
@@ -126,8 +122,8 @@ jobs:
           # 清理环境和缓存（但保留原生模块）
           if (Test-Path "package-lock.json") { Remove-Item "package-lock.json" -Force }
           if (Test-Path "node_modules") { Remove-Item "node_modules" -Recurse -Force }
-          # ❌ 不要删除 native-event-monitor-win/build/ - 它包含从 artifact 下载的编译好的模块
-          if (Test-Path "native-event-monitor-win/node_modules") { Remove-Item "native-event-monitor-win/node_modules" -Recurse -Force }
+          # ❌ 不要删除 native/windows/build/ - 它包含从 artifact 下载的编译好的模块
+          if (Test-Path "native/windows/node_modules") { Remove-Item "native/windows/node_modules" -Recurse -Force }
           
           # 设置 npm 配置以避免权限问题
           npm config set fund false
@@ -192,8 +188,8 @@ jobs:
 
           # 🔴 步骤1: 清理旧的构建产物
           Write-Host "🧹 Step 1: Cleaning old native module build..."
-          if (Test-Path "native-event-monitor-win\build") {
-            Remove-Item "native-event-monitor-win\build" -Recurse -Force
+          if (Test-Path "native\windows\build") {
+            Remove-Item "native\windows\build" -Recurse -Force
             Start-Sleep -Seconds 1
             Write-Host "   ✅ Removed old build/"
           } else {
@@ -203,9 +199,9 @@ jobs:
           # 🔴 步骤2: 安装原生模块的依赖
           Write-Host ""
           Write-Host "📦 Step 2: Installing native module dependencies..."
-          cd native-event-monitor-win
+          cd native/windows
           npm install
-          cd ..
+          cd ../..
           Write-Host "   ✅ Dependencies installed"
 
           # 🔴 步骤3: 使用 node-gyp 配合 Electron 头文件编译
@@ -215,10 +211,10 @@ jobs:
           Write-Host "   This will take 5-10 minutes for C++ compilation..."
           Write-Host ""
 
-          cd native-event-monitor-win
+          cd native/windows
 
           # 获取 Electron 版本
-          $electronVersion = (Get-Content "..\package.json" -Raw | ConvertFrom-Json).devDependencies.electron
+          $electronVersion = (Get-Content "..\..\package.json" -Raw | ConvertFrom-Json).devDependencies.electron
           $electronVersion = $electronVersion -replace '\^', ''
           Write-Host "   Electron version: $electronVersion"
 
@@ -249,7 +245,7 @@ jobs:
           Write-Host "   Running: node-gyp rebuild --verbose"
           npx node-gyp rebuild --verbose 2>&1 | Tee-Object -Variable gypOutput | Write-Host
 
-          cd ..
+          cd ../..
 
           Write-Host ""
           Write-Host "🔍 Checking if compilation actually ran..."
@@ -264,15 +260,15 @@ jobs:
           Write-Host ""
           Write-Host "🔍 Step 4: Verifying compilation result..."
 
-          $modulePath = "native-event-monitor-win\build\Release\event_monitor.node"
+          $modulePath = "native\windows\build\Release\event_monitor.node"
           if (-not (Test-Path $modulePath)) {
             Write-Host ""
             Write-Host "❌ CRITICAL: Native module not found!"
             Write-Host "   Expected: $modulePath"
             Write-Host ""
             Write-Host "Checking build directory:"
-            if (Test-Path "native-event-monitor-win\build") {
-              Get-ChildItem "native-event-monitor-win\build" -Recurse | Format-Table Name, Length, LastWriteTime
+            if (Test-Path "native\windows\build") {
+              Get-ChildItem "native\windows\build" -Recurse | Format-Table Name, Length, LastWriteTime
             } else {
               Write-Host "   ❌ build/ doesn't exist - node-gyp failed!"
             }
@@ -387,7 +383,7 @@ jobs:
 
           # 6. 验证编译结果
           Write-Host "🔍 Verifying compilation..."
-          $adapterPath = "dist/platforms/windows/windows-adapter.js"
+          $adapterPath = "out/out/dist/platforms/windows/windows-adapter.js"
           if (-not (Test-Path $adapterPath)) {
             Write-Host "❌ CRITICAL: WindowsAdapter not compiled!"
             exit 1
@@ -403,7 +399,7 @@ jobs:
           Write-Host "验证编译后的 WindowsAdapter"
           Write-Host "========================================="
 
-          $adapterPath = "dist/platforms/windows/windows-adapter.js"
+          $adapterPath = "out/dist/platforms/windows/windows-adapter.js"
 
           if (-not (Test-Path $adapterPath)) {
             Write-Host "❌ WindowsAdapter not found at: $adapterPath"
@@ -444,8 +440,8 @@ jobs:
           Write-Host "========================================="
 
           # 验证原生模块仍然存在
-          if (Test-Path "native-event-monitor-win/build/Release/event_monitor.node") {
-            $module = Get-Item "native-event-monitor-win/build/Release/event_monitor.node"
+          if (Test-Path "native/windows/build/Release/event_monitor.node") {
+            $module = Get-Item "native/windows/build/Release/event_monitor.node"
             $hash = (Get-FileHash $module.FullName -Algorithm SHA256).Hash.Substring(0,8)
             $lastModified = $module.LastWriteTime
 
@@ -483,7 +479,7 @@ jobs:
             Write-Host "   如果最后修改时间太新，可能是被意外重新编译了！"
           } else {
             Write-Host "❌ 严重错误: 原生模块文件丢失！"
-            Write-Host "   预期位置: native-event-monitor-win/build/Release/event_monitor.node"
+            Write-Host "   预期位置: native/windows/build/Release/event_monitor.node"
             Write-Host "   electron-builder 将无法打包正确的文件"
             exit 1
           }
@@ -503,7 +499,7 @@ jobs:
           Write-Host "打包前验证dist目录内容（防止打包旧代码）"
           Write-Host "========================================="
 
-          $adapterPath = "dist/platforms/windows/windows-adapter.js"
+          $adapterPath = "out/dist/platforms/windows/windows-adapter.js"
 
           if (-not (Test-Path $adapterPath)) {
             Write-Host "❌ WindowsAdapter not found at: $adapterPath"
@@ -512,7 +508,7 @@ jobs:
 
           $content = Get-Content $adapterPath -Raw
 
-          Write-Host "🔍 Checking dist/platforms/windows/windows-adapter.js..."
+          Write-Host "🔍 Checking out/dist/platforms/windows/windows-adapter.js..."
           if ($content -match "getActiveURL\s*\(") {
             Write-Host "✅ getActiveURL found in dist/ (pre-packaging)"
           } else {
@@ -551,25 +547,25 @@ jobs:
           Write-Host "调试: 检查 release 目录结构"
           Write-Host "========================================="
 
-          if (Test-Path "release/win-unpacked") {
-            Write-Host "📁 release/win-unpacked 存在"
+          if (Test-Path "out/release/win-unpacked") {
+            Write-Host "📁 out/release/win-unpacked 存在"
             Write-Host ""
             Write-Host "📂 资源目录结构:"
-            Get-ChildItem "release/win-unpacked/resources" -Recurse | Select-Object -First 50 | Format-Table Name, FullName
+            Get-ChildItem "out/release/win-unpacked/resources" -Recurse | Select-Object -First 50 | Format-Table Name, FullName
 
             Write-Host ""
             Write-Host "📂 查找所有 .node 文件:"
-            Get-ChildItem "release/win-unpacked" -Recurse -Filter "*.node" | Format-Table Name, FullName, Length
+            Get-ChildItem "out/release/win-unpacked" -Recurse -Filter "*.node" | Format-Table Name, FullName, Length
 
             Write-Host ""
             Write-Host "📂 检查 app.asar.unpacked 内容:"
-            if (Test-Path "release/win-unpacked/resources/app.asar.unpacked") {
-              Get-ChildItem "release/win-unpacked/resources/app.asar.unpacked" -Recurse | Select-Object -First 100 | Format-Table Name, FullName
+            if (Test-Path "out/release/win-unpacked/resources/app.asar.unpacked") {
+              Get-ChildItem "out/release/win-unpacked/resources/app.asar.unpacked" -Recurse | Select-Object -First 100 | Format-Table Name, FullName
             } else {
               Write-Host "❌ app.asar.unpacked 不存在！"
             }
           } else {
-            Write-Host "❌ release/win-unpacked 不存在"
+            Write-Host "❌ out/release/win-unpacked 不存在"
           }
           Write-Host "========================================="
 
@@ -582,7 +578,7 @@ jobs:
           Write-Host "========================================="
 
           # 检查 win-unpacked 目录（electron-builder 的解压版本）
-          $unpackedPath = "release/win-unpacked/resources/app.asar.unpacked/native-event-monitor-win/build/Release/event_monitor.node"
+          $unpackedPath = "out/release/win-unpacked/resources/app.asar.unpacked/native/windows/build/Release/event_monitor.node"
 
           if (Test-Path $unpackedPath) {
             $packedModule = Get-Item $unpackedPath
@@ -700,7 +696,7 @@ jobs:
           asar extract $asarPath temp-installer-asar-extracted
 
           # 检查WindowsAdapter
-          $extractedAdapter = "temp-installer-asar-extracted/dist/platforms/windows/windows-adapter.js"
+          $extractedAdapter = "temp-installer-asar-extracted/out/dist/platforms/windows/windows-adapter.js"
           if (-not (Test-Path $extractedAdapter)) {
             Write-Host "❌ WindowsAdapter not found at: $extractedAdapter"
             Write-Host "Available files:"
@@ -727,7 +723,7 @@ jobs:
             Write-Host "🔍 Comparing with win-unpacked version..."
 
             # 对比win-unpacked版本
-            $unpackedAdapter = "release/win-unpacked/dist/platforms/windows/windows-adapter.js"
+            $unpackedAdapter = "out/release/win-unpacked/out/dist/platforms/windows/windows-adapter.js"
             if (Test-Path $unpackedAdapter) {
               $unpackedContent = Get-Content $unpackedAdapter -Raw
               if ($unpackedContent -match "getActiveURL\s*\(") {
@@ -770,7 +766,7 @@ jobs:
           Write-Host "NSIS installer WindowsAdapter SHA256: $nsisAdapterHash"
 
           # 对比原始dist/中的hash
-          $origAdapter = "dist/platforms/windows/windows-adapter.js"
+          $origAdapter = "out/dist/platforms/windows/windows-adapter.js"
           if (Test-Path $origAdapter) {
             $origHash = (Get-FileHash $origAdapter -Algorithm SHA256).Hash
             Write-Host "Original dist/ WindowsAdapter SHA256:  $origHash"
@@ -819,367 +815,17 @@ jobs:
         with:
           name: windows-installer
           path: |
-            release/*.exe
-            release/*.msi
-            release/*.zip
+            out/release/*.exe
+            out/release/*.msi
+            out/release/*.zip
           retention-days: 1
           if-no-files-found: error
 
-  # 构建Linux应用
-  build-linux:
-    name: Build Linux Application
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Linux build dependencies
-        run: |
-          echo "========================================="
-          echo "安装 Linux 构建依赖"
-          echo "========================================="
-          sudo apt-get update
-          sudo apt-get install -y \
-            libinput-dev \
-            libudev-dev \
-            libx11-dev \
-            libxtst-dev \
-            libxi-dev \
-            libxkbcommon-dev \
-            build-essential \
-            python3 \
-            pkg-config \
-            rpm \
-            fakeroot
-
-          echo "✅ Linux dependencies installed"
-
-      - name: Verify environment
-        run: |
-          echo "========================================="
-          echo "环境信息检查"
-          echo "========================================="
-          echo "Node.js 版本:"
-          node --version
-          echo ""
-          echo "npm 版本:"
-          npm --version
-          echo ""
-          echo "系统信息:"
-          uname -a
-          echo ""
-          echo "GCC 版本:"
-          gcc --version | head -1
-          echo ""
-          echo "Python 版本:"
-          python3 --version
-          echo "========================================="
-
-      - name: Pre-download Electron binary
-        run: |
-          echo "📥 Pre-downloading Electron binary..."
-
-          ELECTRON_VERSION="28.2.10"
-          ELECTRON_CACHE_DIR="$HOME/.cache/electron"
-          ELECTRON_ZIP="electron-v${ELECTRON_VERSION}-linux-x64.zip"
-
-          # Primary: GitHub releases (official)
-          GITHUB_URL="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/${ELECTRON_ZIP}"
-          # Fallback: npmmirror (China)
-          MIRROR_URL="https://npmmirror.com/mirrors/electron/v${ELECTRON_VERSION}/${ELECTRON_ZIP}"
-
-          # 创建缓存目录
-          mkdir -p "$ELECTRON_CACHE_DIR"
-
-          # 下载 Electron (try GitHub first, then mirror)
-          echo "Trying GitHub releases: $GITHUB_URL"
-          if curl -L --connect-timeout 30 --max-time 300 -o "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" "$GITHUB_URL"; then
-            echo "✅ Downloaded from GitHub releases"
-          else
-            echo "⚠️ GitHub download failed, trying npmmirror..."
-            if curl -L --connect-timeout 30 --max-time 300 -o "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" "$MIRROR_URL"; then
-              echo "✅ Downloaded from npmmirror"
-            else
-              echo "❌ Both download sources failed"
-              exit 1
-            fi
-          fi
-
-          # 验证下载
-          if [ -f "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" ] && [ -s "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP" ]; then
-            ls -lh "$ELECTRON_CACHE_DIR/$ELECTRON_ZIP"
-            echo "✅ Electron binary downloaded successfully"
-          else
-            echo "❌ Electron binary file is empty or missing"
-            exit 1
-          fi
-
-          # 创建 SHASUMS256.txt（electron 安装脚本需要）
-          cd "$ELECTRON_CACHE_DIR"
-          sha256sum "$ELECTRON_ZIP" > "SHASUMS256.txt-${ELECTRON_VERSION}"
-          cat "SHASUMS256.txt-${ELECTRON_VERSION}"
-
-      - name: Install application dependencies
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: 0
-        run: |
-          echo "🔄 Installing application dependencies..."
-
-          # 设置 electron 缓存路径
-          export electron_config_cache="$HOME/.cache/electron"
-          export ELECTRON_CACHE="$HOME/.cache/electron"
-
-          # 清理环境
-          rm -rf node_modules package-lock.json
-          rm -rf native-event-monitor-linux/node_modules
-
-          # npm 配置
-          npm config set fund false
-          npm config set audit false
-          npm config set progress false
-
-          # 清理 npm 缓存（但不清理 electron 缓存）
-          npm cache clean --force
-
-          # 安装依赖
-          npm install --production=false --legacy-peer-deps
-
-          echo "✅ Dependencies installation completed"
-
-      - name: Build native Linux module
-        run: |
-          echo "========================================="
-          echo "构建 Linux 原生模块"
-          echo "========================================="
-
-          cd native-event-monitor-linux
-
-          # 安装原生模块依赖
-          echo "📦 Installing native module dependencies..."
-          npm install
-
-          # 构建原生模块
-          echo "🔨 Building native module..."
-          npm run build:native || npm run build || node-gyp rebuild
-
-          # 构建 TypeScript
-          echo "📝 Compiling TypeScript..."
-          npm run build:ts || npx tsc
-
-          # 验证构建结果
-          if [ -f "build/Release/linux_event_monitor.node" ]; then
-            echo "✅ 原生模块编译成功"
-            ls -la build/Release/linux_event_monitor.node
-          else
-            echo "❌ 原生模块编译失败"
-            exit 1
-          fi
-
-          cd ..
-          echo "========================================="
-
-      - name: Rebuild native module for Electron
-        run: |
-          echo "========================================="
-          echo "为 Electron 重新编译原生模块"
-          echo "========================================="
-
-          cd native-event-monitor-linux
-
-          # 使用 electron-rebuild 确保 ABI 兼容
-          npx electron-rebuild --version=28.2.10 --force || true
-
-          # 验证
-          if [ -f "build/Release/linux_event_monitor.node" ]; then
-            echo "✅ 原生模块 Electron 兼容编译成功"
-            ls -la build/Release/linux_event_monitor.node
-          fi
-
-          cd ..
-          echo "========================================="
-
-      - name: Update package version from git tag
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
-            echo "📌 Extracted version from tag: $VERSION"
-
-            # 更新 package.json 版本号
-            npm version $VERSION --no-git-tag-version --allow-same-version
-
-            echo "✅ Updated package.json version to: $VERSION"
-          else
-            echo "⚠️ Not a tag push, using package.json version"
-          fi
-
-      - name: Build TypeScript
-        run: |
-          npm run compile
-
-      - name: Build Linux packages (x64)
-        run: |
-          echo "========================================="
-          echo "构建 Linux 安装包 (x64)"
-          echo "========================================="
-
-          # 构建 AppImage (x64)
-          echo "📦 Building AppImage (x64)..."
-          npx electron-builder --linux AppImage --x64
-
-          # 构建 DEB 包
-          echo "📦 Building DEB package (x64)..."
-          npx electron-builder --linux deb --x64
-
-          echo "========================================="
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-          ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/'
-          ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
-
-      - name: Setup QEMU for ARM64 cross-compilation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Install ARM64 cross-compilation toolchain
-        run: |
-          echo "📦 Installing ARM64 cross-compilation toolchain..."
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-
-          # 安装 ARM64 开发库（用于原生模块交叉编译）
-          # 注意：这些库可能不可用，所以使用 || true
-          sudo apt-get install -y libinput-dev:arm64 libudev-dev:arm64 || {
-            echo "⚠️ ARM64 开发库安装失败，原生模块可能无法交叉编译"
-          }
-
-          # 验证工具链
-          aarch64-linux-gnu-gcc --version || echo "ARM64 GCC not found"
-          aarch64-linux-gnu-g++ --version || echo "ARM64 G++ not found"
-
-          echo "✅ ARM64 toolchain installed"
-
-      - name: Install ARM64 native dependencies
-        run: |
-          echo "📦 Installing ARM64 native dependencies..."
-
-          # 强制安装 sharp ARM64 版本及其所有依赖
-          npm uninstall sharp 2>/dev/null || true
-
-          # 安装 sharp ARM64 预编译包（包含 libvips）
-          npm install --force --cpu=arm64 --os=linux @img/sharp-linux-arm64
-          npm install --force --cpu=arm64 --os=linux @img/sharp-libvips-linux-arm64
-          npm install --force --cpu=arm64 --os=linux sharp
-
-          # 验证安装
-          echo "📋 Checking sharp installation..."
-          ls -la node_modules/@img/ 2>/dev/null || echo "No @img modules"
-          ls -la node_modules/sharp/build/ 2>/dev/null || echo "No sharp build"
-
-          echo "✅ ARM64 dependencies installed"
-
-      - name: Build native Linux module for ARM64
-        run: |
-          echo "========================================="
-          echo "交叉编译 Linux 原生模块 (ARM64)"
-          echo "========================================="
-
-          cd native-event-monitor-linux
-
-          # 清理之前的 x64 构建
-          rm -rf build node_modules
-
-          # 安装依赖
-          npm install
-
-          # 使用 node-gyp 交叉编译 ARM64
-          # 注意：这需要 ARM64 工具链，可能需要使用预编译二进制
-          echo "🔨 Cross-compiling native module for ARM64..."
-
-          # 尝试使用 prebuildify 或直接交叉编译
-          if command -v aarch64-linux-gnu-gcc &> /dev/null; then
-            echo "使用 ARM64 工具链进行交叉编译..."
-            CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ \
-            npm_config_arch=arm64 \
-            npm_config_target_arch=arm64 \
-            node-gyp rebuild --arch=arm64 || {
-              echo "⚠️ ARM64 交叉编译失败，尝试使用 QEMU..."
-            }
-          fi
-
-          # 如果交叉编译失败，跳过原生模块（键盘/鼠标监控将不可用）
-          if [ -f "build/Release/linux_event_monitor.node" ]; then
-            echo "✅ ARM64 原生模块编译成功"
-            ls -la build/Release/linux_event_monitor.node
-            file build/Release/linux_event_monitor.node
-          else
-            echo "⚠️ ARM64 原生模块编译失败 - 键盘/鼠标监控将不可用"
-            echo "⚠️ 这是预期的行为，因为交叉编译原生模块比较复杂"
-            echo "⚠️ 用户可以在 ARM64 设备上手动编译原生模块"
-
-            # 创建占位目录
-            mkdir -p build/Release
-            touch build/Release/.placeholder
-          fi
-
-          cd ..
-          echo "========================================="
-
-      - name: Build Linux packages (ARM64)
-        run: |
-          echo "========================================="
-          echo "构建 Linux 安装包 (ARM64)"
-          echo "========================================="
-
-          # 构建 AppImage (arm64) - 使用 electron-builder 的交叉编译功能
-          echo "📦 Building AppImage (arm64)..."
-          npx electron-builder --linux AppImage --arm64 || {
-            echo "⚠️ ARM64 AppImage build failed, skipping..."
-          }
-
-          echo "========================================="
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-          ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/'
-          ELECTRON_BUILDER_BINARIES_MIRROR: 'https://npmmirror.com/mirrors/electron-builder-binaries/'
-          npm_config_arch: arm64
-          npm_config_platform: linux
-
-      - name: List build outputs
-        run: |
-          echo "Build outputs:"
-          if [ -d "release" ]; then
-            find release -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) -exec ls -lh {} \;
-          else
-            echo "❌ Release directory not found"
-            ls -la
-          fi
-
-      - name: Upload Linux build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-installer
-          path: |
-            release/*.AppImage
-            release/*.deb
-            release/*.rpm
-          retention-days: 1
-          if-no-files-found: error
-
-  # 第三阶段：构建macOS应用（可选）
+  # 第二阶段：构建macOS应用（可选）
   build-macos:
     name: Build macOS Application
     runs-on: macos-latest
-    if: github.event_name == 'workflow_dispatch'
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -1272,8 +918,8 @@ jobs:
         with:
           name: macos-installer
           path: |
-            release/*.dmg
-            release/*.zip
+            out/release/*.dmg
+            out/release/*.zip
           retention-days: 1
           if-no-files-found: warn
 
@@ -1281,8 +927,8 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-linux]
-    if: always() && (needs.build-windows.result == 'success' || needs.build-linux.result == 'success')
+    needs: [build-windows]
+    if: always() && needs.build-windows.result == 'success'
     
     steps:
       - name: Checkout repository
@@ -1309,13 +955,6 @@ jobs:
           name: windows-installer
           path: release-artifacts/windows/
 
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: linux-installer
-          path: release-artifacts/linux/
-
       - name: Download macOS artifacts (if available)
         uses: actions/download-artifact@v4
         continue-on-error: true
@@ -1337,50 +976,36 @@ jobs:
           - `EmployeeSafety-Setup-${{ steps.version.outputs.version }}.exe` - Windows 安装程序（推荐）
           - `EmployeeSafety-${{ steps.version.outputs.version }}-win.zip` - Windows 便携版
 
-          **Linux 用户：**
-          - `EmployeeSafety-${{ steps.version.outputs.version }}-x64.AppImage` - 通用 Linux 版本（推荐）
-          - `EmployeeSafety-${{ steps.version.outputs.version }}-amd64.deb` - Debian/Ubuntu 安装包
-
           **macOS 用户：**
           - `EmployeeSafety-${{ steps.version.outputs.version }}.dmg` - macOS 安装包
-          
+
           ### ✨ 主要特性
 
-          - 🖥️ 跨平台支持（Windows、macOS、Linux）
+          - 🖥️ 跨平台支持（Windows、macOS）
           - 📊 实时活动监控
           - 📸 自动截屏功能
           - 🔒 本地数据安全存储
           - 🌐 服务器同步支持
           - ⚙️ 灵活的配置选项
-          
+
           ### 🔧 技术信息
-          
+
           - **构建时间**: $(date -u +'%Y-%m-%d %H:%M:%S') UTC
           - **提交哈希**: ${{ github.sha }}
           - **Node.js 版本**: ${{ env.NODE_VERSION }}
           - **原生模块**: ✅ 使用预编译模块（代码库）
-          
+
           ### 📋 安装说明
 
           1. **Windows**: 下载 `.exe` 安装程序，右键以管理员身份运行
-          2. **Linux (AppImage)**: 下载 `.AppImage`，添加执行权限后运行：`chmod +x *.AppImage && ./*.AppImage`
-          3. **Linux (DEB)**: 下载 `.deb`，使用 `sudo dpkg -i *.deb` 安装
-          4. **macOS**: 下载 `.dmg` 文件，拖拽到应用程序文件夹
+          2. **macOS**: 下载 `.dmg` 文件，拖拽到应用程序文件夹
 
-          ### 🐧 Linux 特别说明
-
-          为获得完整功能，请将用户添加到 `input` 组：
-          ```bash
-          sudo usermod -a -G input $USER
-          # 然后注销并重新登录
-          ```
-          
           ### 🆘 技术支持
-          
+
           如遇问题，请访问 [Issues](https://github.com/${{ github.repository }}/issues) 页面报告。
-          
+
           EOF
-          
+
           echo "Release notes prepared"
 
       - name: Create GitHub Release
@@ -1395,9 +1020,6 @@ jobs:
             release-artifacts/windows/*.exe
             release-artifacts/windows/*.msi
             release-artifacts/windows/*.zip
-            release-artifacts/linux/*.AppImage
-            release-artifacts/linux/*.deb
-            release-artifacts/linux/*.rpm
             release-artifacts/macos/*.dmg
             release-artifacts/macos/*.zip
         env:
@@ -1419,16 +1041,15 @@ jobs:
   notify-completion:
     name: Notify Build Completion
     runs-on: ubuntu-latest
-    needs: [build-windows, build-linux, create-release]
+    needs: [build-windows, create-release]
     if: always()
-    
+
     steps:
       - name: Notify success
         if: needs.create-release.result == 'success'
         run: |
           echo "🎉 Employee Monitor 构建和发布成功完成！"
           echo "✅ Windows 应用构建完成"
-          echo "✅ Linux 应用构建完成"
           echo "📦 安装包已上传到 GitHub Releases"
           echo "🔗 立即下载: https://github.com/${{ github.repository }}/releases/latest"
           
