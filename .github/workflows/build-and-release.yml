@@ -821,119 +821,15 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  # 第二阶段：构建macOS应用（可选）
-  build-macos:
-    name: Build macOS Application
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup Python 3.11 for node-gyp
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install application dependencies (macOS)
-        run: |
-          echo "🔄 Installing macOS application dependencies..."
-          
-          # 设置 npm 配置
-          npm config set fund false
-          npm config set audit false
-          npm config set progress false
-          
-          # 清理缓存
-          npm cache clean --force
-          
-          # 安装所有依赖包括 devDependencies（构建需要）
-          echo "📱 macOS build - installing all dependencies..."
-          npm install --production=false --legacy-peer-deps
-          
-          # 验证关键构建依赖
-          echo "🔍 Verifying critical build dependencies..."
-          for dep in "electron" "electron-builder" "@electron/packager" "typescript"; do
-            if [ ! -d "node_modules/$dep" ]; then
-              echo "❌ Critical dependency missing: $dep"
-              echo "🔧 Attempting individual install..."
-              npm install $dep --legacy-peer-deps
-            else
-              echo "✅ $dep is installed"
-            fi
-          done
-          
-          echo "✅ Dependencies installation completed"
-          
-          echo "📋 Final dependency status:"
-          npm list --depth=0 2>/dev/null || echo "Dependencies installed successfully"
-
-      - name: Build TypeScript
-        run: |
-          echo "========================================="
-          echo "清理并编译 TypeScript"
-          echo "========================================="
-
-          # 1. 清理 dist 目录
-          echo "🧹 Cleaning dist directory..."
-          npm run clean
-
-          # 2. 清理 electron-builder 缓存
-          echo "🧹 Cleaning electron-builder cache..."
-          if [ -d "$HOME/Library/Caches/electron-builder" ]; then
-            rm -rf "$HOME/Library/Caches/electron-builder"
-            echo "   ✅ electron-builder cache cleared"
-          else
-            echo "   ℹ️ No electron-builder cache found"
-          fi
-
-          # 3. 清理 release 目录
-          echo "🧹 Cleaning release directory..."
-          if [ -d "release" ]; then
-            rm -rf release
-            echo "   ✅ release directory cleared"
-          fi
-
-          # 4. 编译 TypeScript
-          echo "🔨 Compiling TypeScript..."
-          npm run compile
-
-          echo "✅ Build preparation complete"
-          echo "========================================="
-
-      - name: Build native modules for macOS
-        run: |
-          npm run build:native:mac
-
-      - name: Create macOS bundle
-        run: |
-          npm run pack:mac
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload macOS build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-installer
-          path: |
-            out/release/*.dmg
-            out/release/*.zip
-          retention-days: 1
-          if-no-files-found: warn
+  # 第二阶段：macOS 构建已移除（本地构建）
+  # macOS 安装包请使用本地命令构建: npm run pack:mac
 
   # 第三阶段：创建GitHub Release
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-macos]
-    if: always() && needs.build-windows.result == 'success' && needs.build-macos.result == 'success'
+    needs: [build-windows]
+    if: always() && needs.build-windows.result == 'success'
     
     steps:
       - name: Checkout repository
@@ -960,12 +856,6 @@ jobs:
           name: windows-installer
           path: release-artifacts/windows/
 
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-installer
-          path: release-artifacts/macos/
-
       - name: Prepare release notes
         id: release-notes
         run: |
@@ -981,7 +871,7 @@ jobs:
           - `EmployeeSafety-${{ steps.version.outputs.version }}-win.zip` - Windows 便携版
 
           **macOS 用户：**
-          - `EmployeeSafety-${{ steps.version.outputs.version }}.dmg` - macOS 安装包
+          - macOS 安装包请本地构建：`npm run pack:mac`
 
           ### ✨ 主要特性
 
@@ -997,12 +887,19 @@ jobs:
           - **构建时间**: $(date -u +'%Y-%m-%d %H:%M:%S') UTC
           - **提交哈希**: ${{ github.sha }}
           - **Node.js 版本**: ${{ env.NODE_VERSION }}
-          - **原生模块**: ✅ 使用预编译模块（代码库）
+          - **平台**: Windows (CI 构建), macOS (本地构建)
 
           ### 📋 安装说明
 
-          1. **Windows**: 下载 `.exe` 安装程序，右键以管理员身份运行
-          2. **macOS**: 下载 `.dmg` 文件，拖拽到应用程序文件夹
+          **Windows**: 下载 `.exe` 安装程序，右键以管理员身份运行
+
+          **macOS**: 本地构建步骤
+          ```bash
+          npm install
+          npm run build:native:mac
+          npm run pack:mac
+          # 构建产物位于 out/release/ 目录
+          ```
 
           ### 🆘 技术支持
 
@@ -1024,8 +921,6 @@ jobs:
             release-artifacts/windows/*.exe
             release-artifacts/windows/*.msi
             release-artifacts/windows/*.zip
-            release-artifacts/macos/*.dmg
-            release-artifacts/macos/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1045,7 +940,7 @@ jobs:
   notify-completion:
     name: Notify Build Completion
     runs-on: ubuntu-latest
-    needs: [build-windows, build-macos, create-release]
+    needs: [build-windows, create-release]
     if: always()
 
     steps:
@@ -1053,8 +948,9 @@ jobs:
         if: needs.create-release.result == 'success'
         run: |
           echo "🎉 Employee Monitor 构建和发布成功完成！"
-          echo "✅ Windows 和 macOS 应用构建完成"
-          echo "📦 安装包已上传到 GitHub Releases"
+          echo "✅ Windows 应用构建完成"
+          echo "📦 Windows 安装包已上传到 GitHub Releases"
+          echo "📝 macOS 安装包请本地构建"
           echo "🔗 立即下载: https://github.com/${{ github.repository }}/releases/latest"
           
       - name: Notify failure
