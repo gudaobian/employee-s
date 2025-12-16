@@ -12,11 +12,12 @@ const os = require('os');
 
 class WindowsNativePrecompiler {
     constructor() {
-        this.projectRoot = path.resolve(__dirname, '..');
-        this.nativeModuleDir = path.join(this.projectRoot, 'native-event-monitor-win');
+        // __dirname is scripts/build/, so go up two levels to reach project root
+        this.projectRoot = path.resolve(__dirname, '..', '..');
+        this.nativeModuleDir = path.join(this.projectRoot, 'native', 'windows');
         this.precompiledDir = path.join(this.nativeModuleDir, 'precompiled');
         this.releaseDir = path.join(this.nativeModuleDir, 'build', 'Release');
-        
+
         console.log('🔨 Windows原生模块预编译器 v2.0');
         console.log(`📁 项目根目录: ${this.projectRoot}`);
         console.log(`📁 原生模块目录: ${this.nativeModuleDir}`);
