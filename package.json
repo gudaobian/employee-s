@@ -16,7 +16,7 @@
     "pack:mac:universal": "node scripts/pack-mac-universal.js",
     "pack:mac:dmg": "bash scripts/create-dmg.sh",
     "pack:mac:builder": "npm run build:mac && npx electron-builder --mac --config electron-builder.yml",
-    "pack:win": "node scripts/build-windows.js",
+    "pack:win": "node scripts/build/build-windows.js",
     "test": "jest",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
