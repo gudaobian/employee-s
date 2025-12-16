@@ -5,13 +5,13 @@ on:
     branches: [ main, develop ]
     paths:
       - 'native/windows/**'
-      - 'scripts/precompile-windows-native.js'
+      - 'scripts/build/precompile-windows-native.js'
       # 移除 workflow 文件触发，避免重复构建
   pull_request:
     branches: [ main ]
     paths:
       - 'native/windows/**'
-      - 'scripts/precompile-windows-native.js'
+      - 'scripts/build/precompile-windows-native.js'
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -72,7 +72,7 @@ jobs:
         
       - name: Run precompilation script
         run: |
-          node scripts/precompile-windows-native.js
+          node scripts/build/precompile-windows-native.js
         env:
           NODE_ENV: production
           
