@@ -20,6 +20,7 @@ import * as crypto from 'crypto';
 import { machineIdSync } from 'node-machine-id';
 import { updateLogger } from '../utils/update-logger';
 import { UpdateApiClient } from './update-api-client';
+import { appConfig } from '../config/app-config-manager';
 import {
   UpdateStatus,
   UpdateStatusReport,
@@ -29,7 +30,7 @@ import {
 } from '../interfaces/update-status-interface';
 
 export interface AutoUpdateServiceOptions {
-  updateServerUrl: string;
+  updateServerUrl?: string; // 可选，如果不提供则使用 URLConfigManager
   channel?: 'stable' | 'beta' | 'dev';
   autoDownload?: boolean;
   autoInstallOnQuit?: boolean;
@@ -64,18 +65,25 @@ export class AutoUpdateService extends EventEmitter {
     }
 
     this.channel = options.channel || 'stable';
+
+    // 优先使用传入的 updateServerUrl，否则使用 AppConfigManager
+    const updateServerUrl = options.updateServerUrl || appConfig.getUpdateServerUrl();
+
     this.apiClient = new UpdateApiClient(
-      options.updateServerUrl,
+      updateServerUrl,
       app.getVersion()
     );
 
-    this.configureAutoUpdater(options);
+    this.configureAutoUpdater(options, updateServerUrl);
     this.setupEventHandlers();
+
+    // 监听配置变更，支持热更新
+    appConfig.on('config-updated', this.handleConfigUpdate.bind(this));
 
     updateLogger.info('AutoUpdateService initialized', {
       version: app.getVersion(),
       channel: this.channel,
-      updateServerUrl: options.updateServerUrl,
+      updateServerUrl,
       deviceId: this.deviceId
     });
   }
@@ -83,9 +91,9 @@ export class AutoUpdateService extends EventEmitter {
   /**
    * Configure electron-updater
    */
-  private configureAutoUpdater(options: AutoUpdateServiceOptions): void {
+  private configureAutoUpdater(options: AutoUpdateServiceOptions, updateServerUrl: string): void {
     // Build feed URL with deviceId query parameter for multi-region OSS support
-    const feedURL = `${options.updateServerUrl}?deviceId=${this.deviceId}`;
+    const feedURL = `${updateServerUrl}?deviceId=${this.deviceId}`;
 
     // Set feed URL
     autoUpdater.setFeedURL({
@@ -555,5 +563,51 @@ export class AutoUpdateService extends EventEmitter {
       channel
     });
     updateLogger.info('Update channel changed', { channel, feedURL, deviceId: this.deviceId });
+  }
+
+  /**
+   * 处理配置更新事件（支持热更新）
+   */
+  private handleConfigUpdate(updates: any): void {
+    try {
+      if (updates.baseUrl) {
+        const newUpdateServerUrl = appConfig.getUpdateServerUrl();
+
+        if (!newUpdateServerUrl) {
+          updateLogger.warn('baseUrl changed but updateServerUrl is undefined, skipping update');
+          return;
+        }
+
+        const oldUpdateServerUrl = this.apiClient.getBaseURL();
+
+        if (oldUpdateServerUrl !== newUpdateServerUrl) {
+          updateLogger.info('Update server URL changed, reconfiguring AutoUpdateService', {
+            oldUrl: oldUpdateServerUrl,
+            newUrl: newUpdateServerUrl
+          });
+
+          // 重新创建 API 客户端
+          this.apiClient = new UpdateApiClient(
+            newUpdateServerUrl,
+            app.getVersion()
+          );
+
+          // 重新配置 autoUpdater
+          const feedURL = `${newUpdateServerUrl}?deviceId=${this.deviceId}`;
+          autoUpdater.setFeedURL({
+            provider: 'generic',
+            url: feedURL,
+            channel: this.channel
+          });
+
+          updateLogger.info('AutoUpdateService reconfigured with new URL', {
+            feedURL,
+            channel: this.channel
+          });
+        }
+      }
+    } catch (error: any) {
+      updateLogger.error('Failed to handle config update in AutoUpdateService', error);
+    }
   }
 }

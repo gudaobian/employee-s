@@ -1,12 +1,16 @@
 /**
  * Update Configuration Service
  *
- * Manages update system configuration including:
- * - Update server URL
- * - Update channel (stable, beta, dev)
- * - Auto-download and auto-install settings
- * - Check interval
+ * 配置优先级（从高到低）：
+ * 1. 配置文件（electron-store）- 用户/管理员/安装时写入
+ * 2. 注册表/Plist（企业部署）
+ * 3. 默认值（硬编码）
+ *
+ * 不再使用环境变量，改用专业的企业部署方案
  */
+
+import Store from 'electron-store';
+import { app } from 'electron';
 
 export interface UpdateConfig {
   enabled: boolean;
@@ -17,33 +21,144 @@ export interface UpdateConfig {
   autoInstallOnQuit: boolean;
 }
 
+// 默认配置
+const DEFAULT_CONFIG: UpdateConfig = {
+  enabled: true,
+  checkInterval: 2 * 60 * 1000, // 2分钟
+  updateServerUrl: 'http://23.95.193.155:3000/api/updates',
+  channel: 'stable',
+  autoDownload: true,
+  autoInstallOnQuit: true
+};
+
 export class UpdateConfigService {
+  private store: Store<UpdateConfig>;
   private config: UpdateConfig;
 
   constructor() {
+    // 初始化配置存储
+    this.store = new Store<UpdateConfig>({
+      name: 'update-config',
+      defaults: DEFAULT_CONFIG,
+      cwd: app.getPath('userData')
+    });
+
     this.config = this.loadConfig();
   }
 
   /**
-   * Load configuration from environment variables with defaults
+   * 加载配置
+   * 优先级：配置文件 > 注册表/Plist > 默认值
    */
   private loadConfig(): UpdateConfig {
-    return {
-      enabled: this.parseBoolean(process.env.UPDATE_ENABLED, true),
-      checkInterval: this.parseNumber(
-        process.env.UPDATE_CHECK_INTERVAL,
-        2 * 60 * 1000 // 2 minutes for testing (default was 6 hours)
-      ),
-      updateServerUrl:
-        process.env.UPDATE_SERVER_URL ||
-        'http://23.95.193.155:3000/api/updates',
-      channel: this.parseChannel(process.env.UPDATE_CHANNEL, 'stable'),
-      autoDownload: this.parseBoolean(process.env.UPDATE_AUTO_DOWNLOAD, true),
-      autoInstallOnQuit: this.parseBoolean(
-        process.env.UPDATE_AUTO_INSTALL,
-        true
-      )
+    const config: UpdateConfig = {
+      enabled: this.getConfigValue('enabled'),
+      checkInterval: this.getConfigValue('checkInterval'),
+      updateServerUrl: this.getConfigValue('updateServerUrl'),
+      channel: this.getConfigValue('channel'),
+      autoDownload: this.getConfigValue('autoDownload'),
+      autoInstallOnQuit: this.getConfigValue('autoInstallOnQuit')
     };
+
+    return config;
+  }
+
+  /**
+   * 获取配置项
+   * 优先级：配置文件 > 注册表 > 默认值
+   */
+  private getConfigValue<K extends keyof UpdateConfig>(key: K): UpdateConfig[K] {
+    // 1. 从配置文件读取
+    const fileValue = this.store.get(key);
+    if (fileValue !== undefined) {
+      return fileValue;
+    }
+
+    // 2. 从注册表/Plist读取（企业部署）
+    const registryValue = this.getFromRegistry(key);
+    if (registryValue !== undefined) {
+      return registryValue;
+    }
+
+    // 3. 使用默认值
+    return DEFAULT_CONFIG[key];
+  }
+
+  /**
+   * 从注册表/Plist读取配置（企业部署支持）
+   * Windows: HKLM\SOFTWARE\EmployeeMonitor
+   * macOS: /Library/Preferences/com.employee-monitor.plist
+   */
+  private getFromRegistry<K extends keyof UpdateConfig>(key: K): UpdateConfig[K] | undefined {
+    try {
+      if (process.platform === 'win32') {
+        // Windows 注册表读取
+        const { execSync } = require('child_process');
+        const keyMap: Record<string, string> = {
+          updateServerUrl: 'UpdateServerUrl',
+          channel: 'Channel',
+          enabled: 'Enabled',
+          checkInterval: 'CheckInterval',
+          autoDownload: 'AutoDownload',
+          autoInstallOnQuit: 'AutoInstallOnQuit'
+        };
+
+        const regKey = keyMap[key];
+        if (!regKey) return undefined;
+
+        const cmd = `reg query "HKLM\\SOFTWARE\\EmployeeMonitor" /v ${regKey}`;
+        const output = execSync(cmd, { encoding: 'utf-8' });
+
+        // 解析注册表输出
+        const match = output.match(/REG_SZ\s+(.+)/);
+        if (match && match[1]) {
+          return this.parseValue(key, match[1].trim());
+        }
+      } else if (process.platform === 'darwin') {
+        // macOS Plist 读取
+        const { execSync } = require('child_process');
+        const plistPath = '/Library/Preferences/com.employee-monitor.plist';
+
+        try {
+          const cmd = `defaults read ${plistPath} ${key}`;
+          const output = execSync(cmd, { encoding: 'utf-8' }).trim();
+          return this.parseValue(key, output);
+        } catch {
+          // Plist key 不存在
+          return undefined;
+        }
+      }
+    } catch (error) {
+      // 注册表/Plist 读取失败，忽略
+      return undefined;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * 解析配置值
+   */
+  private parseValue<K extends keyof UpdateConfig>(key: K, value: string): UpdateConfig[K] {
+    switch (key) {
+      case 'enabled':
+      case 'autoDownload':
+      case 'autoInstallOnQuit':
+        return (value === 'true' || value === '1') as UpdateConfig[K];
+
+      case 'checkInterval':
+        return parseInt(value, 10) as UpdateConfig[K];
+
+      case 'channel':
+        const channel = value.toLowerCase();
+        if (channel === 'stable' || channel === 'beta' || channel === 'dev') {
+          return channel as UpdateConfig[K];
+        }
+        return DEFAULT_CONFIG.channel as UpdateConfig[K];
+
+      default:
+        return value as UpdateConfig[K];
+    }
   }
 
   /**

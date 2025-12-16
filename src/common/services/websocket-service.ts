@@ -6,6 +6,7 @@
 import { EventEmitter } from 'events';
 import { io, Socket } from 'socket.io-client';
 import { IConfigService, IWebSocketService } from '../interfaces/service-interfaces';
+import { appConfig } from '../config/app-config-manager';
 
 interface WebSocketMessage {
   type: string;
@@ -38,6 +39,7 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
   private heartbeatIntervalMs = 30000; // 30秒心跳
   private messageQueue: WebSocketMessage[] = [];
   private maxQueueSize = 100;
+  private maxScreenshotQueueSize = 5; // ✅ 修复OOM: 最多5张截图在队列中
 
   private stats: ConnectionStats = {
     messagesSent: 0,
@@ -237,33 +239,25 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
   }
 
   private buildWebSocketUrl(): string {
+    // 优先使用配置服务中的 websocketUrl（如果UI设置了）
     const config = this.configService.getConfig();
-    
-    console.log(`[WEBSOCKET] Building WebSocket URL from config:`, {
-      serverUrl: config.serverUrl,
-      websocketUrl: config.websocketUrl
-    });
-    
+
+    console.log(`[WEBSOCKET] Building WebSocket URL from URLConfigManager`);
+
     if (config.websocketUrl) {
       console.log(`[WEBSOCKET] Using configured websocketUrl: ${config.websocketUrl}`);
       return config.websocketUrl;
     }
 
-    // 从HTTP URL构建Socket.IO URL，连接到/client命名空间
-    // Socket.IO官方推荐使用HTTP/HTTPS URL，它会自动处理WebSocket升级
-    if (config.serverUrl) {
-      try {
-        const baseUrl = config.serverUrl.endsWith('/') ? config.serverUrl.slice(0, -1) : config.serverUrl;
-        const socketUrl = `${baseUrl}/client`;
-        console.log(`[WEBSOCKET] Built Socket.IO URL from serverUrl: ${socketUrl}`);
-        return socketUrl;
-      } catch (error: any) {
-        console.error(`[WEBSOCKET] Invalid server URL: ${config.serverUrl}`, error);
-        throw new Error(`Invalid server URL for Socket.IO: ${config.serverUrl}`);
-      }
+    // 使用 AppConfigManager 自动生成 WebSocket URL
+    try {
+      const socketUrl = appConfig.getWebSocketUrl();
+      console.log(`[WEBSOCKET] Built Socket.IO URL from AppConfigManager: ${socketUrl}`);
+      return socketUrl;
+    } catch (error: any) {
+      console.error(`[WEBSOCKET] Failed to build WebSocket URL from AppConfigManager`, error);
+      throw new Error(`Failed to build WebSocket URL: ${error.message}`);
     }
-
-    throw new Error('No WebSocket URL or server URL configured');
   }
 
   private setupEventListeners(): void {
@@ -488,13 +482,8 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
     try {
       const startTime = Date.now();
 
-      // 计算数据大小
-      let dataSize = 0;
-      try {
-        dataSize = JSON.stringify(data).length;
-      } catch {
-        dataSize = data?.buffer?.length || 0;
-      }
+      // ✅ 修复OOM: 使用优化的数据大小计算，避免对大对象使用 JSON.stringify
+      const dataSize = this.calculateDataSize(event, data);
 
       console.log(`[WEBSOCKET] Sending ${event} (${Math.round(dataSize / 1024)} KB)`);
 
@@ -533,6 +522,13 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
               dataSize: `${Math.round(dataSize / 1024)} KB`,
               response: response.message || 'OK'
             });
+
+            // ✅ 修复OOM: 发送成功后立即释放大数据引用
+            if (event === 'client:screenshot' && data.data) {
+              delete data.data; // 释放 Base64 字符串
+              console.log('[WEBSOCKET] Screenshot data reference released');
+            }
+
             resolve();
           } else {
             const errorMsg = response?.error || response?.message || 'Unknown error';
@@ -577,6 +573,26 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
   }
 
   private addToQueue(message: WebSocketMessage): void {
+    // ✅ 修复OOM: 截图数据特殊处理，防止内存泄漏
+    if (message.type === 'client:screenshot') {
+      const screenshotCount = this.messageQueue.filter(
+        m => m.type === 'client:screenshot'
+      ).length;
+
+      if (screenshotCount >= this.maxScreenshotQueueSize) {
+        console.warn(`[WEBSOCKET] Screenshot queue full (${screenshotCount}/${this.maxScreenshotQueueSize}), dropping oldest screenshot`);
+        // 移除最旧的截图
+        const screenshotIndex = this.messageQueue.findIndex(
+          m => m.type === 'client:screenshot'
+        );
+        if (screenshotIndex >= 0) {
+          const removed = this.messageQueue.splice(screenshotIndex, 1)[0];
+          console.warn(`[WEBSOCKET] Dropped screenshot: ${removed.messageId}`);
+        }
+      }
+    }
+
+    // 通用队列限制
     if (this.messageQueue.length >= this.maxQueueSize) {
       // 移除最旧的消息
       const removed = this.messageQueue.shift();
@@ -660,6 +676,37 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
     } else {
       console.error('[WEBSOCKET] Authentication failed:', data.error);
       this.emit('authentication-failed', data.error);
+    }
+  }
+
+  /**
+   * ✅ 修复OOM: 优化数据大小计算，避免对大对象使用 JSON.stringify
+   */
+  private calculateDataSize(event: string, data: any): number {
+    // 截图数据：直接使用 data.data 的字符串长度（Base64）
+    if (event === 'client:screenshot' && data.data && typeof data.data === 'string') {
+      return data.data.length;
+    }
+
+    // 其他数据：估算大小（避免序列化大对象）
+    try {
+      // 如果数据有明确的大小属性，使用它
+      if (data.size && typeof data.size === 'number') {
+        return data.size;
+      }
+
+      // 如果是 Buffer，使用 length
+      if (data.buffer && data.buffer.length) {
+        return data.buffer.length;
+      }
+
+      // 其他小对象：安全地序列化
+      const str = JSON.stringify(data);
+      return str.length;
+    } catch (error) {
+      // 序列化失败，返回0
+      console.warn('[WEBSOCKET] Failed to calculate data size:', error);
+      return 0;
     }
   }
 

@@ -3,20 +3,6 @@
  * 280x320px 小窗口，只包含7个核心功能
  */
 
-// ============================================================================
-// Linux 沙箱修复 - 必须在加载 Electron 之前执行
-// ============================================================================
-if (process.platform === 'linux') {
-    // 检查是否以非 root 运行，如果是则禁用沙箱
-    const uid = process.getuid ? process.getuid() : 1000;
-    if (uid !== 0) {
-        // 在 Electron 加载之前设置命令行参数
-        process.argv.push('--no-sandbox');
-        process.argv.push('--disable-gpu-sandbox');
-        console.log('[LINUX] Running as non-root (uid:', uid, '), adding --no-sandbox flags');
-    }
-}
-
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const os = require('os');
@@ -47,388 +33,6 @@ const APP_CONFIG = {
     height: 750, // Windows标题栏需要更高，确保自启动按钮不被遮挡
     resizable: false
 };
-
-// ============================================================================
-// Linux 平台初始化 - 必须在 app.whenReady() 之前调用
-// ============================================================================
-
-/**
- * 检测系统输入法
- * @returns {string|null} 检测到的输入法模块名称
- */
-function detectInputMethod() {
-    const { execSync } = require('child_process');
-
-    // 检测常见输入法
-    const imMethods = ['fcitx5', 'fcitx', 'ibus', 'scim'];
-
-    for (const im of imMethods) {
-        try {
-            execSync(`which ${im}`, { stdio: 'ignore' });
-            return im === 'fcitx5' ? 'fcitx' : im;
-        } catch {
-            // 继续检查下一个
-        }
-    }
-
-    return null;
-}
-
-/**
- * Linux 平台初始化
- * 配置 Wayland/X11 兼容性、输入法和沙箱
- */
-function initLinuxPlatform() {
-    if (process.platform !== 'linux') return;
-
-    console.log('[LINUX] Initializing Linux platform...');
-
-    // 沙箱问题修复 - Linux AppImage 需要禁用 SUID 沙箱
-    // 检查是否以 root 运行，如果不是则禁用沙箱
-    if (process.getuid && process.getuid() !== 0) {
-        console.log('[LINUX] Running as non-root, disabling sandbox for AppImage compatibility');
-        app.commandLine.appendSwitch('no-sandbox');
-        app.commandLine.appendSwitch('disable-gpu-sandbox');
-    }
-
-    // Wayland 支持 - 启用 Ozone 平台和窗口装饰
-    app.commandLine.appendSwitch('enable-features', 'UseOzonePlatform,WaylandWindowDecorations');
-    app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
-
-    // PipeWire 屏幕捕获支持 (Wayland 必需)
-    if (process.env.WAYLAND_DISPLAY) {
-        console.log('[LINUX] Wayland detected, enabling PipeWire capturer');
-        app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
-    }
-
-    // 输入法兼容性配置
-    if (!process.env.GTK_IM_MODULE) {
-        // 尝试检测已安装的输入法
-        const imModule = detectInputMethod();
-        if (imModule) {
-            console.log(`[LINUX] Setting input method to: ${imModule}`);
-            process.env.GTK_IM_MODULE = imModule;
-            process.env.QT_IM_MODULE = imModule;
-            process.env.XMODIFIERS = `@im=${imModule}`;
-        }
-    }
-
-    // GPU 相关设置
-    // 某些 Linux 发行版需要禁用 GPU 沙箱以避免崩溃
-    if (process.env.DISABLE_GPU_SANDBOX === '1') {
-        app.commandLine.appendSwitch('disable-gpu-sandbox');
-    }
-
-    console.log('[LINUX] Platform initialization complete');
-    console.log(`  - Session type: ${process.env.XDG_SESSION_TYPE || 'unknown'}`);
-    console.log(`  - Desktop: ${process.env.XDG_CURRENT_DESKTOP || 'unknown'}`);
-    console.log(`  - Wayland display: ${process.env.WAYLAND_DISPLAY || 'none'}`);
-    console.log(`  - X11 display: ${process.env.DISPLAY || 'none'}`);
-}
-
-// 在 app 事件处理之前调用 Linux 初始化
-initLinuxPlatform();
-
-// ============================================================================
-// Linux 托盘图标支持
-// ============================================================================
-
-/**
- * 获取 Linux 托盘图标路径
- * 根据主题深浅选择合适的图标
- * @returns {string} 图标文件路径
- */
-function getLinuxTrayIconPath() {
-    const { nativeTheme } = require('electron');
-    const fs = require('fs');
-    const darkMode = nativeTheme.shouldUseDarkColors;
-    const iconName = darkMode ? 'tray-icon-light.png' : 'tray-icon-dark.png';
-
-    let iconPath;
-    if (app.isPackaged) {
-        iconPath = path.join(process.resourcesPath, 'icons', iconName);
-    } else {
-        iconPath = path.join(__dirname, 'icons', iconName);
-    }
-
-    // 如果主题特定图标不存在，使用默认图标
-    if (!fs.existsSync(iconPath)) {
-        const defaultIcon = app.isPackaged
-            ? path.join(process.resourcesPath, 'icons', 'icon.png')
-            : path.join(__dirname, 'icons', 'icon.png');
-
-        if (fs.existsSync(defaultIcon)) {
-            return defaultIcon;
-        }
-        return null; // 图标文件不存在
-    }
-
-    return iconPath;
-}
-
-/**
- * 获取 Linux 窗口图标
- * 尝试加载多种尺寸的图标
- * @returns {string|null} 图标文件路径
- */
-function getLinuxWindowIcon() {
-    const fs = require('fs');
-    const iconSizes = ['256x256', '128x128', '64x64', '48x48', '32x32', '16x16'];
-
-    for (const size of iconSizes) {
-        const iconPath = app.isPackaged
-            ? path.join(process.resourcesPath, 'icons', `icon-${size}.png`)
-            : path.join(__dirname, 'icons', `icon-${size}.png`);
-
-        if (fs.existsSync(iconPath)) {
-            return iconPath;
-        }
-    }
-
-    // 回退到默认图标
-    const defaultIcon = app.isPackaged
-        ? path.join(process.resourcesPath, 'icons', 'icon.png')
-        : path.join(__dirname, 'icons', 'icon.png');
-
-    if (fs.existsSync(defaultIcon)) {
-        return defaultIcon;
-    }
-
-    return null;
-}
-
-/**
- * 创建 Linux 托盘菜单
- * @returns {Electron.Menu} 托盘上下文菜单
- */
-function createLinuxTrayMenu() {
-    let statusText = '未知';
-    let isRunning = false;
-
-    // 获取当前状态
-    if (app_instance) {
-        try {
-            if (app_instance.getStateMachine && typeof app_instance.getStateMachine === 'function') {
-                const stateMachine = app_instance.getStateMachine();
-                if (stateMachine && typeof stateMachine.getCurrentState === 'function') {
-                    currentState = stateMachine.getCurrentState();
-                    if (typeof stateMachine.isServiceRunning === 'function') {
-                        isRunning = stateMachine.isServiceRunning();
-                    } else {
-                        const runningStates = ['DATA_COLLECT', 'CONFIG_FETCH', 'WS_CHECK', 'HEARTBEAT'];
-                        isRunning = runningStates.includes(currentState);
-                    }
-                }
-            }
-            statusText = isRunning ? '运行中' : '已停止';
-        } catch (error) {
-            statusText = '错误';
-        }
-    }
-
-    return Menu.buildFromTemplate([
-        { label: `状态: ${statusText}`, enabled: false, id: 'status' },
-        { type: 'separator' },
-        {
-            label: '显示窗口',
-            click: () => {
-                if (mainWindow) {
-                    mainWindow.show();
-                    mainWindow.focus();
-                }
-            }
-        },
-        { type: 'separator' },
-        {
-            label: '启动服务',
-            enabled: !isRunning,
-            click: async () => {
-                const result = await startAppService(true);
-                console.log('[LINUX_TRAY] Start service result:', result);
-                setTimeout(() => updateTrayMenu(), 1000);
-            }
-        },
-        {
-            label: '停止服务',
-            enabled: isRunning,
-            click: async () => {
-                const result = await stopAppService();
-                console.log('[LINUX_TRAY] Stop service result:', result);
-                setTimeout(() => updateTrayMenu(), 1000);
-            }
-        },
-        { type: 'separator' },
-        {
-            label: '检查权限',
-            click: () => showLinuxPermissionGuide()
-        }
-        // 注意: 不添加"退出应用"选项，这是监控程序
-    ]);
-}
-
-/**
- * 显示 Linux 权限指引
- */
-async function showLinuxPermissionGuide() {
-    try {
-        // 发送到渲染进程显示权限状态
-        if (mainWindow) {
-            mainWindow.show();
-            mainWindow.focus();
-            // 触发权限检查
-            mainWindow.webContents.send('show-permission-guide', {
-                platform: 'linux',
-                message: '请检查 Linux 权限设置'
-            });
-        }
-    } catch (error) {
-        console.error('[LINUX_TRAY] Failed to show permission guide:', error);
-    }
-}
-
-/**
- * 创建 Linux 托盘
- * 检测桌面环境并适配
- * @returns {Electron.Tray|null} 托盘实例
- */
-function createTrayLinux() {
-    const desktop = process.env.XDG_CURRENT_DESKTOP?.toLowerCase() || '';
-    const sessionType = process.env.XDG_SESSION_TYPE || '';
-
-    console.log(`[LINUX_TRAY] Creating Linux tray, desktop: ${desktop}, session: ${sessionType}`);
-
-    // GNOME 桌面环境下的特殊处理
-    if (desktop.includes('gnome')) {
-        console.log('[LINUX_TRAY] GNOME detected, using AppIndicator compatible mode');
-        console.log('[LINUX_TRAY] Note: GNOME may require AppIndicator extension for tray support');
-    }
-
-    // 尝试获取图标路径
-    const iconPath = getLinuxTrayIconPath();
-    let trayIcon;
-
-    if (iconPath) {
-        console.log(`[LINUX_TRAY] Using icon from: ${iconPath}`);
-        trayIcon = nativeImage.createFromPath(iconPath);
-    } else {
-        // 回退到默认创建的图标
-        console.log('[LINUX_TRAY] No icon file found, using default icon');
-        trayIcon = createDefaultIcon();
-    }
-
-    if (!trayIcon || trayIcon.isEmpty()) {
-        console.error('[LINUX_TRAY] Failed to create tray icon!');
-        return null;
-    }
-
-    const trayInstance = new Tray(trayIcon);
-    trayInstance.setToolTip(APP_CONFIG.name);
-
-    // X11 支持右键菜单
-    if (sessionType === 'x11' || !process.env.WAYLAND_DISPLAY) {
-        console.log('[LINUX_TRAY] X11 session, enabling context menu');
-        trayInstance.setContextMenu(createLinuxTrayMenu());
-    } else {
-        console.log('[LINUX_TRAY] Wayland session, context menu may have limitations');
-        // Wayland 下也尝试设置菜单
-        trayInstance.setContextMenu(createLinuxTrayMenu());
-    }
-
-    // 点击显示窗口
-    trayInstance.on('click', () => {
-        if (mainWindow) {
-            if (mainWindow.isVisible()) {
-                mainWindow.hide();
-            } else {
-                mainWindow.show();
-                mainWindow.focus();
-            }
-        }
-    });
-
-    // 监听主题变化，更新图标
-    const { nativeTheme } = require('electron');
-    nativeTheme.on('updated', () => {
-        if (trayInstance && !trayInstance.isDestroyed()) {
-            const newIconPath = getLinuxTrayIconPath();
-            if (newIconPath) {
-                const newIcon = nativeImage.createFromPath(newIconPath);
-                if (!newIcon.isEmpty()) {
-                    trayInstance.setImage(newIcon);
-                    console.log('[LINUX_TRAY] Theme changed, updated tray icon');
-                }
-            }
-        }
-    });
-
-    console.log('[LINUX_TRAY] Tray created successfully');
-    return trayInstance;
-}
-
-// ============================================================================
-// Linux 窗口创建适配
-// ============================================================================
-
-/**
- * 为 Linux 创建主窗口
- * 处理 Wayland 特有的限制
- * @returns {Electron.BrowserWindow} 主窗口实例
- */
-function createMainWindowLinux() {
-    const fs = require('fs');
-    const isWayland = !!process.env.WAYLAND_DISPLAY;
-    const { screen } = require('electron');
-
-    const windowOptions = {
-        width: APP_CONFIG.width || 340,
-        height: APP_CONFIG.height || 750,
-        resizable: APP_CONFIG.resizable || false,
-        frame: true,  // Linux 需要窗口装饰
-        webPreferences: {
-            nodeIntegration: false,
-            contextIsolation: true,
-            preload: path.join(__dirname, 'preload-js.js')
-        },
-        show: false,
-        title: APP_CONFIG.name,
-        minimizable: true,
-        maximizable: false,
-        closable: true,
-        autoHideMenuBar: true
-    };
-
-    // 设置窗口图标
-    const iconPath = getLinuxWindowIcon();
-    if (iconPath) {
-        windowOptions.icon = iconPath;
-    }
-
-    // Wayland 不支持窗口定位
-    if (isWayland) {
-        console.log('[LINUX] Wayland mode: window positioning disabled');
-        // 不设置 x, y 坐标，让窗口管理器决定位置
-    } else {
-        // X11 可以指定位置
-        try {
-            const primaryDisplay = screen.getPrimaryDisplay();
-            const { width, height } = primaryDisplay.workAreaSize;
-
-            windowOptions.x = Math.floor((width - windowOptions.width) / 2);
-            windowOptions.y = Math.floor((height - windowOptions.height) / 2);
-            console.log(`[LINUX] X11 mode: window positioned at (${windowOptions.x}, ${windowOptions.y})`);
-        } catch (error) {
-            console.log('[LINUX] Failed to get display info, using default position');
-        }
-    }
-
-    const win = new BrowserWindow(windowOptions);
-
-    // 隐藏菜单栏
-    win.setMenuBarVisibility(false);
-    win.setAutoHideMenuBar(true);
-
-    return win;
-}
 
 // 防止多实例运行
 const gotTheLock = app.requestSingleInstanceLock();
@@ -464,7 +68,7 @@ app.whenReady().then(() => {
     
     // 初始化日志管理器
     logManager = new UnifiedLogManager({
-        logLevel: process.env.NODE_ENV === 'production' ? 'INFO' : 'DEBUG'
+        logLevel: 'WARN'
     });
     console.log('[LOG_MANAGER] 统一日志管理器已启动');
     
@@ -757,13 +361,8 @@ app.whenReady().then(() => {
 });
 
 function createMainWindow() {
-    // Linux 平台使用专门的窗口创建函数
-    if (process.platform === 'linux') {
-        console.log('[WINDOW] Using Linux-specific window creation');
-        mainWindow = createMainWindowLinux();
-    } else {
-        // macOS 和 Windows 使用原有逻辑
-        mainWindow = new BrowserWindow({
+    // macOS 和 Windows 使用原有逻辑
+    mainWindow = new BrowserWindow({
             width: APP_CONFIG.width,
             height: APP_CONFIG.height,
             resizable: APP_CONFIG.resizable,
@@ -992,18 +591,6 @@ function createMainWindow() {
 
 function createTray() {
     console.log('Creating system tray...');
-
-    // Linux 平台使用专门的托盘创建函数
-    if (process.platform === 'linux') {
-        console.log('[TRAY] Using Linux-specific tray creation');
-        tray = createTrayLinux();
-        if (tray) {
-            console.log('[TRAY] Linux tray created successfully');
-        } else {
-            console.error('[TRAY] Failed to create Linux tray');
-        }
-        return;
-    }
 
     // macOS 和 Windows 使用原有逻辑
     const trayIcon = createDefaultIcon();
@@ -1857,136 +1444,6 @@ function setupIPCHandlers() {
             return { success: false, error: error.message };
         }
     });
-
-    // === Linux Permission Management ===
-    if (process.platform === 'linux') {
-        console.log('[LINUX] Initializing Linux permission handlers...');
-
-        // Dynamic import of LinuxPermissionManager
-        let LinuxPermissionManager = null;
-        let linuxPermManager = null;
-
-        try {
-            // Try multiple paths for loading the permission manager
-            const possiblePaths = [
-                // Development path (TypeScript compiled)
-                path.join(__dirname, '..', 'dist', 'platforms', 'linux', 'permission-manager'),
-                // Packaged app path
-                path.join(app.getAppPath(), 'dist', 'platforms', 'linux', 'permission-manager'),
-                // Alternative packaged path
-                path.join(process.resourcesPath || '', 'app', 'dist', 'platforms', 'linux', 'permission-manager')
-            ];
-
-            for (const modulePath of possiblePaths) {
-                try {
-                    const fs = require('fs');
-                    if (fs.existsSync(modulePath + '.js')) {
-                        console.log('[LINUX] Loading LinuxPermissionManager from:', modulePath);
-                        const permModule = require(modulePath);
-                        LinuxPermissionManager = permModule.LinuxPermissionManager || permModule.default;
-                        if (LinuxPermissionManager) {
-                            linuxPermManager = new LinuxPermissionManager();
-                            console.log('[LINUX] LinuxPermissionManager loaded successfully');
-                            break;
-                        }
-                    }
-                } catch (loadError) {
-                    console.warn('[LINUX] Failed to load from:', modulePath, '-', loadError.message);
-                }
-            }
-        } catch (e) {
-            console.warn('[LINUX] Failed to load LinuxPermissionManager:', e.message);
-        }
-
-        if (linuxPermManager) {
-            // Check all Linux permissions
-            ipcMain.handle('linux:check-permissions', async () => {
-                try {
-                    console.log('[LINUX] Checking permissions...');
-                    const status = await linuxPermManager.checkAllPermissions();
-                    console.log('[LINUX] Permission status:', status.overallStatus);
-                    return { success: true, data: status };
-                } catch (error) {
-                    console.error('[LINUX] Permission check failed:', error);
-                    return { success: false, error: error.message };
-                }
-            });
-
-            // Get setup instructions
-            ipcMain.handle('linux:get-setup-instructions', async (event, status) => {
-                try {
-                    // If no status provided, get current status first
-                    const permStatus = status || await linuxPermManager.checkAllPermissions();
-                    const instructions = linuxPermManager.generateSetupInstructions(permStatus);
-                    return { success: true, data: instructions };
-                } catch (error) {
-                    console.error('[LINUX] Failed to generate setup instructions:', error);
-                    return { success: false, error: error.message };
-                }
-            });
-
-            // Copy text to clipboard
-            ipcMain.handle('linux:copy-to-clipboard', async (event, text) => {
-                try {
-                    clipboard.writeText(text);
-                    return { success: true };
-                } catch (error) {
-                    console.error('[LINUX] Clipboard write failed:', error);
-                    return { success: false, error: error.message };
-                }
-            });
-
-            // Get udev rules
-            ipcMain.handle('linux:get-udev-rules', async () => {
-                try {
-                    const rules = linuxPermManager.generateUdevRules();
-                    return { success: true, data: rules };
-                } catch (error) {
-                    console.error('[LINUX] Failed to generate udev rules:', error);
-                    return { success: false, error: error.message };
-                }
-            });
-
-            // Get quick permission summary
-            ipcMain.handle('linux:get-permission-summary', async () => {
-                try {
-                    const summary = await linuxPermManager.getQuickSummary();
-                    return { success: true, data: summary };
-                } catch (error) {
-                    console.error('[LINUX] Failed to get permission summary:', error);
-                    return { success: false, error: error.message };
-                }
-            });
-
-            // Clear permission cache
-            ipcMain.handle('linux:clear-permission-cache', async () => {
-                try {
-                    linuxPermManager.clearCache();
-                    return { success: true };
-                } catch (error) {
-                    console.error('[LINUX] Failed to clear permission cache:', error);
-                    return { success: false, error: error.message };
-                }
-            });
-
-            console.log('[LINUX] All permission IPC handlers registered');
-        } else {
-            console.warn('[LINUX] LinuxPermissionManager not available, registering stub handlers');
-
-            // Register stub handlers that return appropriate error messages
-            const stubHandler = async () => ({
-                success: false,
-                error: 'LinuxPermissionManager not loaded. Build the application first: npm run build'
-            });
-
-            ipcMain.handle('linux:check-permissions', stubHandler);
-            ipcMain.handle('linux:get-setup-instructions', stubHandler);
-            ipcMain.handle('linux:copy-to-clipboard', stubHandler);
-            ipcMain.handle('linux:get-udev-rules', stubHandler);
-            ipcMain.handle('linux:get-permission-summary', stubHandler);
-            ipcMain.handle('linux:clear-permission-cache', stubHandler);
-        }
-    }
 }
 
 // 辅助函数
@@ -2292,9 +1749,6 @@ async function checkSystemPermissions() {
         } else if (process.platform === 'win32') {
             // Windows权限检查
             await checkWindowsPermissions(permissions);
-        } else {
-            // Linux和其他平台
-            await checkLinuxPermissions(permissions);
         }
     } catch (error) {
         console.error('Permission check failed:', error);
@@ -2376,22 +1830,6 @@ async function checkWindowsPermissions(permissions) {
     }
 }
 
-async function checkLinuxPermissions(permissions) {
-    try {
-        // Linux权限检查取决于桌面环境和安装方式
-        permissions.screenRecording = await checkLinuxDisplayAccess();
-        permissions.accessibility = true; // 大多数Linux发行版默认允许
-        permissions.inputMonitoring = await checkLinuxInputAccess();
-        
-        sendLogToRenderer(`Linux权限状态 - 屏幕:${permissions.screenRecording ? '✓' : '✗'} 输入:${permissions.inputMonitoring ? '✓' : '✗'}`);
-        
-    } catch (error) {
-        console.error('Linux permission check error:', error);
-        sendLogToRenderer('Linux权限检查异常: ' + error.message, 'error');
-        throw error;
-    }
-}
-
 // 权限检查的辅助函数
 async function checkMacOSScreenPermissionFallback() {
     try {
@@ -2456,24 +1894,6 @@ async function checkWindowsAdminPrivileges() {
         
         await execPromise('net session >nul 2>&1', { timeout: 3000 });
         return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-async function checkLinuxDisplayAccess() {
-    try {
-        return !!process.env.DISPLAY || !!process.env.WAYLAND_DISPLAY;
-    } catch (error) {
-        return false;
-    }
-}
-
-async function checkLinuxInputAccess() {
-    try {
-        const fs = require('fs');
-        // 检查是否可以访问输入设备
-        return fs.existsSync('/dev/input') && fs.existsSync('/proc/bus/input');
     } catch (error) {
         return false;
     }
@@ -2821,9 +2241,6 @@ function getConfigDirectory() {
         case 'win32':
             // Windows: %APPDATA%\EmployeeMonitor
             return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'EmployeeMonitor');
-        case 'linux':
-            // Linux: ~/.config/EmployeeMonitor
-            return path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir, '.config'), 'EmployeeMonitor');
         default:
             // 其他平台使用 ~/.employee-monitor
             return path.join(homeDir, '.employee-monitor');

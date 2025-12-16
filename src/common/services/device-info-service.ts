@@ -437,7 +437,7 @@ export class DeviceInfoService extends EventEmitter implements IDeviceInfoServic
       nodeVersion: process.version,
       platform: process.platform,
       arch: process.arch,
-      environment: process.env.NODE_ENV || 'production',
+      environment: 'production',
       workingDirectory: process.cwd(),
       executablePath: process.execPath
     };

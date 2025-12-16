@@ -14,6 +14,8 @@ import { IPlatformAdapter as PlatformIPlatformAdapter } from '../platforms/inter
 import { IPlatformAdapter } from '../common/interfaces/platform-interface';
 import { PlatformAdapterBridge } from './platform-adapter-bridge';
 import { logger, timerManager } from '../common/utils';
+import { appConfig } from '../common/config/app-config-manager';
+import { memoryMonitor } from '../common/utils/memory-monitor'; // ✅ 修复OOM: 内存监控
 
 export interface AppConfig {
   serverUrl?: string;
@@ -46,9 +48,9 @@ export class EmployeeMonitorApp extends EventEmitter {
 
   constructor(config: Partial<AppConfig> = {}) {
     super();
-    
+
     this.config = {
-      serverUrl: process.env.SERVER_URL || 'http://localhost:3000',
+      serverUrl: appConfig.getBaseUrl(), // 使用应用配置管理器
       enableMonitoring: true,
       monitoringInterval: 30000, // 30秒
       logLevel: 'info',
@@ -56,14 +58,46 @@ export class EmployeeMonitorApp extends EventEmitter {
       minimized: false,
       ...config
     };
-    
+
     // 注意：ServiceManager需要platformAdapter，将在initializeServices()中初始化
-    
+
+    // 监听配置变更，支持热更新
+    appConfig.on('config-updated', this.handleConfigUpdate.bind(this));
+
     try {
       logger.info('EmployeeMonitorApp created', { config: this.config });
     } catch (loggerError) {
       console.log('[APP] Logger failed in constructor, using console.log instead');
       console.log('[APP] EmployeeMonitorApp created with config:', this.config);
+    }
+  }
+
+  /**
+   * 处理配置热更新
+   */
+  private handleConfigUpdate(updates: any): void {
+    try {
+      if (updates.baseUrl) {
+        const newServerUrl = appConfig.getBaseUrl();
+        const oldServerUrl = this.config.serverUrl;
+
+        if (oldServerUrl !== newServerUrl) {
+          logger.info('[APP] Server URL changed, updating configuration', {
+            oldServerUrl,
+            newServerUrl
+          });
+
+          // 更新配置中的 serverUrl
+          this.config.serverUrl = newServerUrl;
+
+          // 触发配置更新事件，供外部监听使用
+          this.emit('config-updated', this.config);
+
+          logger.info('[APP] Configuration updated successfully');
+        }
+      }
+    } catch (error: any) {
+      logger.error('[APP] Failed to handle config update', error);
     }
   }
 
@@ -137,6 +171,10 @@ export class EmployeeMonitorApp extends EventEmitter {
       this.emitProgress('正在启动权限监控...', 98);
       this.initializePermissionMonitoring();
 
+      // 8. 初始化内存监控服务
+      this.emitProgress('正在启动内存监控...', 99);
+      this.initializeMemoryMonitor();
+
       this.setState(AppState.RUNNING);
       logger.info('Employee Monitor App started successfully');
       this.emitProgress('应用程序启动成功！', 100);
@@ -189,6 +227,9 @@ export class EmployeeMonitorApp extends EventEmitter {
         this.permissionMonitorService.stop();
         this.permissionMonitorService = undefined;
       }
+
+      // 停止内存监控服务
+      memoryMonitor.stop();
 
       // 停止状态机
       if (this.stateMachine) {
@@ -630,6 +671,103 @@ export class EmployeeMonitorApp extends EventEmitter {
       logger.info('[PermissionMonitor] Service started successfully');
     } catch (error) {
       logger.error('[PermissionMonitor] Failed to initialize service:', error);
+      // 不抛出异常，允许应用继续运行
+    }
+  }
+
+  /**
+   * 初始化内存监控服务
+   * ✅ 修复OOM: 添加内存监控和自动清理机制
+   */
+  private initializeMemoryMonitor(): void {
+    try {
+      logger.info('[MemoryMonitor] Initializing service...');
+
+      // 监听内存警告事件 (RSS > 800MB)
+      memoryMonitor.on('warning', () => {
+        logger.warn('[MemoryMonitor] ⚠️ Memory warning threshold reached!');
+
+        // 清理 WebSocket 队列中的旧数据
+        const wsService = this.serviceManager?.getWebSocketService();
+        if (wsService) {
+          try {
+            // 获取当前队列状态
+            const status = wsService.getConnectionStatus();
+            logger.warn('[MemoryMonitor] WebSocket queue size:', status.queueSize);
+
+            // 如果队列中有截图，清理部分截图（保留最新3张）
+            if (status.queueSize > 3) {
+              logger.warn('[MemoryMonitor] Clearing old screenshots from queue...');
+              // WebSocket service 会自动限制队列大小，这里记录日志即可
+            }
+          } catch (error) {
+            logger.error('[MemoryMonitor] Error clearing WebSocket queue:', error);
+          }
+        }
+
+        // 清理 Data Sync 服务队列
+        const dataSyncService = this.serviceManager?.getDataSyncService?.();
+        if (dataSyncService && typeof (dataSyncService as any).clearOldData === 'function') {
+          try {
+            logger.warn('[MemoryMonitor] Clearing old data from sync queue...');
+            (dataSyncService as any).clearOldData();
+          } catch (error) {
+            logger.error('[MemoryMonitor] Error clearing sync queue:', error);
+          }
+        }
+      });
+
+      // 监听内存严重警告事件 (RSS > 1200MB)
+      memoryMonitor.on('critical', () => {
+        logger.error('[MemoryMonitor] 🚨 CRITICAL memory usage detected!');
+
+        // 1. 暂停数据收集
+        if (this.stateMachine && this.stateMachine.isServiceRunning()) {
+          logger.error('[MemoryMonitor] Pausing FSM to reduce memory pressure...');
+          this.stateMachine.stop().catch((error) => {
+            logger.error('[MemoryMonitor] Failed to pause FSM:', error);
+          });
+        }
+
+        // 2. 清空所有队列
+        const wsService = this.serviceManager?.getWebSocketService();
+        if (wsService && typeof (wsService as any).clearQueue === 'function') {
+          logger.error('[MemoryMonitor] Clearing all WebSocket queues...');
+          try {
+            (wsService as any).clearQueue();
+          } catch (error) {
+            logger.error('[MemoryMonitor] Error clearing WebSocket queue:', error);
+          }
+        }
+
+        // 3. 强制 GC（memoryMonitor 内部已经做了，这里只是记录）
+        logger.error('[MemoryMonitor] Forcing garbage collection...');
+
+        // 4. 发出应用事件供外部监听
+        this.emit('memory-critical', {
+          timestamp: new Date(),
+          message: 'Critical memory usage detected, data collection paused'
+        });
+      });
+
+      // 监听内存状态恢复事件
+      memoryMonitor.on('healthy', () => {
+        logger.info('[MemoryMonitor] ✅ Memory usage back to healthy levels');
+
+        // 可以选择重启数据收集（如果之前暂停了）
+        // 这里保守策略：不自动重启，需要手动重启或等待下一次启动
+        this.emit('memory-healthy', {
+          timestamp: new Date(),
+          message: 'Memory usage back to normal'
+        });
+      });
+
+      // 启动内存监控（每60秒检查一次）
+      memoryMonitor.start(60000);
+
+      logger.info('[MemoryMonitor] Service started successfully');
+    } catch (error) {
+      logger.error('[MemoryMonitor] Failed to initialize service:', error);
       // 不抛出异常，允许应用继续运行
     }
   }

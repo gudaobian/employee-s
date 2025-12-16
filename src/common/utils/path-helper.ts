@@ -102,7 +102,8 @@ export class PathHelper {
       } else if (process.platform === 'darwin') {
         configDir = this.join(os.homedir(), 'Library', 'Application Support', this.appName);
       } else {
-        configDir = this.join(process.env.XDG_CONFIG_HOME || this.join(os.homedir(), '.config'), this.appName);
+        // 其他平台（不支持）
+        configDir = this.join(os.homedir(), '.config', this.appName);
       }
 
       return configDir;
@@ -124,7 +125,8 @@ export class PathHelper {
       } else if (process.platform === 'darwin') {
         dataDir = this.join(os.homedir(), 'Library', 'Application Support', this.appName);
       } else {
-        dataDir = this.join(process.env.XDG_DATA_HOME || this.join(os.homedir(), '.local', 'share'), this.appName);
+        // 其他平台（不支持）
+        dataDir = this.join(os.homedir(), '.local', 'share', this.appName);
       }
 
       return dataDir;
@@ -146,7 +148,8 @@ export class PathHelper {
       } else if (process.platform === 'darwin') {
         logDir = this.join(os.homedir(), 'Library', 'Logs', this.appName);
       } else {
-        logDir = this.join(process.env.XDG_STATE_HOME || this.join(os.homedir(), '.local', 'state'), this.appName, 'logs');
+        // 其他平台（不支持）
+        logDir = this.join(os.homedir(), '.local', 'state', this.appName, 'logs');
       }
 
       return logDir;
@@ -168,7 +171,8 @@ export class PathHelper {
       } else if (process.platform === 'darwin') {
         cacheDir = this.join(os.homedir(), 'Library', 'Caches', this.appName);
       } else {
-        cacheDir = this.join(process.env.XDG_CACHE_HOME || this.join(os.homedir(), '.cache'), this.appName);
+        // 其他平台（不支持）
+        cacheDir = this.join(os.homedir(), '.cache', this.appName);
       }
 
       return cacheDir;

@@ -9,6 +9,7 @@
  * interfering with live teaching sessions (ClassIn, Zoom, etc.)
  */
 
+import { EventEmitter } from 'events';
 import { logger } from './logger';
 import { TeachingModeService } from '../services/teaching-mode-service';
 
@@ -29,7 +30,7 @@ interface MemoryTrend {
   heapUsedMB: number;
 }
 
-export class MemoryMonitor {
+export class MemoryMonitor extends EventEmitter {
   private static instance?: MemoryMonitor;
   private monitorInterval?: NodeJS.Timeout;
 
@@ -49,8 +50,11 @@ export class MemoryMonitor {
   private readonly GC_IDLE_THRESHOLD_MS = 60000; // 教学模式下，空闲 60 秒才触发 GC
   private lastGCTime = 0;
   private gcDelayedCount = 0;  // 记录延迟的 GC 次数
+  private lastMemoryState: 'normal' | 'warning' | 'critical' = 'normal'; // 记录上次内存状态
 
-  private constructor() {}
+  private constructor() {
+    super();
+  }
 
   static getInstance(): MemoryMonitor {
     if (!MemoryMonitor.instance) {
@@ -59,20 +63,22 @@ export class MemoryMonitor {
     return MemoryMonitor.instance;
   }
 
-  start(): void {
+  start(interval?: number): void {
     if (this.monitorInterval) {
       logger.warn('[MemoryMonitor] Already started');
       return;
     }
+
+    const checkInterval = interval || this.CHECK_INTERVAL_MS;
 
     // 立即执行一次检查
     this.checkMemory();
 
     this.monitorInterval = setInterval(() => {
       this.checkMemory();
-    }, this.CHECK_INTERVAL_MS);
+    }, checkInterval);
 
-    logger.info('[MemoryMonitor] Started monitoring (enhanced with RSS tracking and teaching mode support)');
+    logger.info(`[MemoryMonitor] Started monitoring (interval: ${checkInterval}ms, enhanced with RSS tracking and teaching mode support)`);
   }
 
   stop(): void {
@@ -219,8 +225,12 @@ export class MemoryMonitor {
       );
     }
 
+    // 确定当前内存状态
+    let currentState: 'normal' | 'warning' | 'critical' = 'normal';
+
     // 检查 RSS 临界阈值
     if (stats.rssMB > this.RSS_CRITICAL_MB) {
+      currentState = 'critical';
       logger.error(
         `[Memory] 🚨 CRITICAL: RSS ${stats.rssMB}MB exceeds ${this.RSS_CRITICAL_MB}MB! ` +
         `OOM risk detected. Off-heap: ${stats.offHeapMB}MB`
@@ -244,15 +254,18 @@ export class MemoryMonitor {
           }
         }
       }
-    } else if (stats.rssMB > this.RSS_THRESHOLD_MB) {
-      logger.warn(
-        `[Memory] ⚠️ High RSS: ${stats.rssMB}MB (threshold: ${this.RSS_THRESHOLD_MB}MB). ` +
-        `Off-heap: ${stats.offHeapMB}MB`
-      );
+    } else if (stats.rssMB > this.RSS_THRESHOLD_MB || stats.heapUsedMB > this.HEAP_THRESHOLD_MB) {
+      currentState = 'warning';
+      if (stats.rssMB > this.RSS_THRESHOLD_MB) {
+        logger.warn(
+          `[Memory] ⚠️ High RSS: ${stats.rssMB}MB (threshold: ${this.RSS_THRESHOLD_MB}MB). ` +
+          `Off-heap: ${stats.offHeapMB}MB`
+        );
+      }
     }
 
     // 检查堆内存阈值
-    if (stats.heapUsedMB > this.HEAP_THRESHOLD_MB) {
+    if (stats.heapUsedMB > this.HEAP_THRESHOLD_MB && currentState === 'warning') {
       logger.warn(`[Memory] High heap usage: ${stats.heapUsedMB}MB (threshold: ${this.HEAP_THRESHOLD_MB}MB)`);
 
       // 🎓 教学模式感知的 GC 触发
@@ -280,6 +293,21 @@ export class MemoryMonitor {
         `[Memory] 📈 Memory leak suspected! RSS grew ${growthMB}MB over last ${this.memoryTrend.length} samples. ` +
         `Current: ${stats.rssMB}MB, Off-heap: ${stats.offHeapMB}MB`
       );
+    }
+
+    // 触发内存状态事件 (仅当状态改变时)
+    if (currentState !== this.lastMemoryState) {
+      logger.info(`[Memory] State transition: ${this.lastMemoryState} → ${currentState}`);
+      this.lastMemoryState = currentState;
+
+      // 触发对应事件
+      if (currentState === 'critical') {
+        this.emit('critical', stats);
+      } else if (currentState === 'warning') {
+        this.emit('warning', stats);
+      } else {
+        this.emit('healthy', stats);
+      }
     }
   }
 

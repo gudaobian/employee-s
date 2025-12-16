@@ -5,6 +5,7 @@
 
 import { BaseService } from '../utils/base-service';
 import { IConfigService, IAuthService, AuthResult } from '../interfaces/service-interfaces';
+import { appConfig } from '../config/app-config-manager';
 
 interface AuthSession {
   deviceId: string;
@@ -62,8 +63,8 @@ export class AuthService extends BaseService implements IAuthService {
         };
       }
 
-      // 执行设备认证
-      const authResult = await this.performDeviceAuth(targetDeviceId, config.serverUrl);
+      // 执行设备认证（使用 AppConfigManager 获取基础 URL）
+      const authResult = await this.performDeviceAuth(targetDeviceId, appConfig.getBaseUrl());
 
       if (authResult.success && authResult.session) {
         this.session = authResult.session;
@@ -277,8 +278,7 @@ export class AuthService extends BaseService implements IAuthService {
     }
 
     try {
-      const config = this.configService.getConfig();
-      const refreshUrl = this.buildRefreshUrl(config.serverUrl);
+      const refreshUrl = this.buildRefreshUrl(appConfig.getBaseUrl());
       
       const refreshData = {
         deviceId: this.session.deviceId,
@@ -340,8 +340,7 @@ export class AuthService extends BaseService implements IAuthService {
     try {
       console.log('[AUTH] Revoking session...');
 
-      const config = this.configService.getConfig();
-      const revokeUrl = this.buildRevokeUrl(config.serverUrl);
+      const revokeUrl = this.buildRevokeUrl(appConfig.getBaseUrl());
 
       const revokeData = {
         deviceId: this.session.deviceId,

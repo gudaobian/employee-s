@@ -10,6 +10,7 @@ import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { IConfigService, Config, MonitoringConfig, SecurityConfig, LoggingConfig } from '../interfaces/service-interfaces';
 import { StableHardwareIdentifier } from '../utils/stable-hardware-identifier';
+import { appConfig } from './app-config-manager';
 
 export class ConfigServiceCLI extends EventEmitter implements IConfigService {
   private static instance: ConfigServiceCLI;
@@ -25,6 +26,9 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
     this.configPath = path.join(configDir, 'employee-monitor-config.json');
     this.hardwareIdentifier = StableHardwareIdentifier.getInstance();
     this.config = this.loadConfig();
+
+    // 监听 AppConfigManager 的配置变更事件
+    appConfig.on('config-updated', this.handleAppConfigUpdate.bind(this));
   }
 
   /**
@@ -40,9 +44,6 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
       case 'win32':
         // Windows: %APPDATA%\EmployeeMonitor
         return path.join(process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'), 'EmployeeMonitor');
-      case 'linux':
-        // Linux: ~/.config/EmployeeMonitor
-        return path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir, '.config'), 'EmployeeMonitor');
       default:
         // 其他平台使用 ~/.employee-monitor
         return path.join(homeDir, '.employee-monitor');
@@ -217,17 +218,16 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
   }
 
   private createDefaultConfig(): Config {
-    const envConfig = this.loadEnvironmentConfig();
+    // 从 AppConfigManager 读取 baseUrl（如果已配置）
+    const baseUrl = appConfig.getBaseUrl() || 'http://23.95.193.155:3000';
 
     return {
-      serverUrl: envConfig.API_BASE_URL || 'http://23.95.193.155:3000',
+      serverUrl: baseUrl,
       // 不再设置默认的 websocketUrl，让 WebSocket 服务从 serverUrl 自动构建
-      ...(envConfig.WEBSOCKET_URL && { websocketUrl: envConfig.WEBSOCKET_URL }),
       apiVersion: 'v1',
-      timeout: parseInt(envConfig.TIMEOUT || '30000'),
+      timeout: 30000,
       retryAttempts: 3,
       deviceId: '',  // 将在ensureStableDeviceId中设置
-      authToken: envConfig.AUTH_TOKEN,
       monitoring: {
         enableScreenshot: true,
         screenshotInterval: 60000,
@@ -248,7 +248,7 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
         restrictedApps: []
       },
       logging: {
-        level: envConfig.NODE_ENV === 'development' ? 'debug' : 'info',
+        level: 'info',
         enableFile: true,
         enableConsole: true,
         logFile: path.join(os.tmpdir(), 'employee-monitor.log'),
@@ -292,26 +292,6 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
     }
   }
 
-  private loadEnvironmentConfig(): Record<string, string> {
-    const envConfig: Record<string, string> = {};
-    
-    // 从环境变量加载配置
-    const envKeys = [
-      'API_BASE_URL',
-      'WEBSOCKET_URL', 
-      'AUTH_TOKEN',
-      'TIMEOUT',
-      'NODE_ENV'
-    ];
-
-    for (const key of envKeys) {
-      if (process.env[key]) {
-        envConfig[key] = process.env[key]!;
-      }
-    }
-
-    return envConfig;
-  }
 
   /**
    * @deprecated 使用 generateStableDeviceId() 替代
@@ -479,7 +459,7 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
   }> {
     try {
       const currentId = this.config.deviceId;
-      
+
       if (!currentId) {
         return {
           isValid: false,
@@ -489,7 +469,7 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
       }
 
       const isValid = await this.hardwareIdentifier.validateDeviceId(currentId);
-      
+
       if (isValid) {
         return {
           isValid: true,
@@ -513,6 +493,35 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
         reason: `Validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
         currentId: this.config.deviceId || ''
       };
+    }
+  }
+
+  /**
+   * 处理 AppConfigManager 的配置更新事件
+   * 实现配置热更新：baseUrl 变化时同步到 serverUrl
+   */
+  private async handleAppConfigUpdate(updates: any): Promise<void> {
+    try {
+      if (updates.baseUrl) {
+        const oldServerUrl = this.config.serverUrl;
+        const newServerUrl = updates.baseUrl;
+
+        if (oldServerUrl !== newServerUrl) {
+          console.log('[CONFIG] AppConfig baseUrl changed, syncing to ConfigServiceCLI', {
+            oldServerUrl,
+            newServerUrl
+          });
+
+          // 更新 serverUrl（不保存到文件，因为它是动态从 AppConfigManager 读取的）
+          this.config.serverUrl = newServerUrl;
+
+          // 触发配置更新事件，让 WebSocketService 等服务重连
+          this.emit('config-updated', this.config);
+          console.log('[CONFIG] ConfigServiceCLI serverUrl synced and event emitted');
+        }
+      }
+    } catch (error: any) {
+      console.error('[CONFIG] Failed to handle AppConfigManager update:', error);
     }
   }
 }

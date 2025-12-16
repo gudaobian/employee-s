@@ -381,11 +381,36 @@ jobs:
           Write-Host "🔨 Compiling TypeScript..."
           npm run compile
 
+          # Debug: 显示当前目录和编译输出
+          Write-Host ""
+          Write-Host "📁 Debug: Current working directory:"
+          Get-Location
+          Write-Host ""
+          Write-Host "📁 Debug: Checking if out/dist exists:"
+          if (Test-Path "out/dist") {
+            Write-Host "   ✅ out/dist exists"
+            Write-Host ""
+            Write-Host "📁 Debug: Contents of out/dist/platforms:"
+            if (Test-Path "out/dist/platforms") {
+              Get-ChildItem "out/dist/platforms" -Recurse -File | Select-Object FullName | Format-Table -AutoSize
+            } else {
+              Write-Host "   ❌ out/dist/platforms does NOT exist"
+            }
+          } else {
+            Write-Host "   ❌ out/dist does NOT exist"
+            Write-Host ""
+            Write-Host "📁 Debug: Contents of current directory:"
+            Get-ChildItem . -Directory | Select-Object Name
+          }
+          Write-Host ""
+
           # 6. 验证编译结果
           Write-Host "🔍 Verifying compilation..."
           $adapterPath = "out/dist/platforms/windows/windows-adapter.js"
           if (-not (Test-Path $adapterPath)) {
             Write-Host "❌ CRITICAL: WindowsAdapter not compiled!"
+            Write-Host "❌ Expected path: $adapterPath"
+            Write-Host "❌ Absolute path: $((Get-Location).Path)\$adapterPath"
             exit 1
           }
           Write-Host "   ✅ WindowsAdapter compiled successfully"

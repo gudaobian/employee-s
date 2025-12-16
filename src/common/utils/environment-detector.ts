@@ -129,8 +129,7 @@ export class EnvironmentDetector {
         return cgroupContent.includes('docker') || cgroupContent.includes('kubepods');
       }
 
-      // 检查环境变量
-      return !!(process.env.DOCKER_CONTAINER || process.env.KUBERNETES_SERVICE_HOST);
+      return false;
     } catch {
       return false;
     }
@@ -151,20 +150,36 @@ export class EnvironmentDetector {
 
   /**
    * 检测开发环境
+   *
+   * 判断依据:
+   * 1. Electron: 检查是否在 ASAR 归档外运行 (通过 __dirname 路径判断)
+   * 2. CLI: 检查是否从源码目录运行
    */
   private detectDevelopment(): boolean {
-    return process.env.NODE_ENV === 'development' ||
-           process.env.NODE_ENV === 'dev' ||
-           !process.env.NODE_ENV ||
-           !!process.env.DEBUG;
+    // 方法 1: 检查是否在 asar 归档中
+    if (__dirname.includes('app.asar')) {
+      return false; // 在 asar 中 = 生产环境
+    }
+
+    // 方法 2: 检查是否在源码目录中
+    if (__dirname.includes('/src/') || __dirname.includes('\\src\\')) {
+      return true; // 在 src 目录 = 开发环境
+    }
+
+    // 方法 3: 检查是否在 node_modules/electron 中运行
+    if (process.execPath.includes('node_modules')) {
+      return true; // 从 node_modules/electron 运行 = 开发环境
+    }
+
+    // 默认为生产环境
+    return false;
   }
 
   /**
    * 检测生产环境
    */
   private detectProduction(): boolean {
-    return process.env.NODE_ENV === 'production' ||
-           process.env.NODE_ENV === 'prod';
+    return !this.detectDevelopment();
   }
 
   /**

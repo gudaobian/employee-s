@@ -24,8 +24,6 @@ mac:
       to: installer-scripts/uninstall-macos.sh
     - from: scripts/installer/macos/auto-install-update-macos.sh
       to: installer-scripts/auto-install-update-macos.sh
-    - from: app-update.yml
-      to: app-update.yml
 
 dmg:
   title: "${productName} ${version}"
@@ -56,7 +54,6 @@ files:
   - electron/**/*
   - assets/**/*
   - package.json
-  - app-update.yml
   - node_modules/**/*
   - native/macos/**/*
   - native/windows/**/*

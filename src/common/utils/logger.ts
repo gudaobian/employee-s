@@ -66,7 +66,7 @@ export class Logger {
                        process.versions.electron;
 
     this.config = {
-      level: LogLevel.INFO,
+      level: LogLevel.WARN,    // 默认WARN级别，只输出WARN/ERROR/FATAL
       enableConsole: true,     // 启用console输出，让UnifiedLogManager统一捕获
       enableFile: true,
       maxFileSize: 10 * 1024 * 1024, // 10MB (原5MB)
@@ -104,15 +104,17 @@ export class Logger {
   }
 
   /**
-   * 清理所有历史日志文件（程序启动时调用）
-   * 同步执行，确保清理完成后才继续启动
+   * 清理过期的历史日志文件（基于时间）
+   * 默认保留最近3天的日志，用于问题排查
+   *
+   * @param retentionDays - 日志保留天数（默认3天）
    *
    * 会清理以下可能的日志目录：
    * - Windows: %APPDATA%/employee-monitor/logs 和 %APPDATA%/employee-safety-client/logs
    * - macOS: ~/Library/Logs/employee-monitor 和 ~/Library/Logs/employee-safety-client
    * - Linux: ~/.local/share/employee-monitor/logs 和 ~/.local/share/employee-safety-client/logs
    */
-  static cleanupAllLogs(): void {
+  static cleanupAllLogs(retentionDays: number = 3): void {
     try {
       // 获取可能的日志目录列表
       const possibleLogDirs: string[] = [];
@@ -133,9 +135,11 @@ export class Logger {
         // 忽略错误
       }
 
+      const now = Date.now();
+      const maxAge = retentionDays * 24 * 60 * 60 * 1000;
       let totalDeletedCount = 0;
 
-      // 清理所有可能的日志目录
+      // 清理所有可能的日志目录中的过期日志
       for (const logDir of possibleLogDirs) {
         if (!fs.existsSync(logDir)) {
           continue; // 目录不存在，跳过
@@ -146,20 +150,31 @@ export class Logger {
           let deletedCount = 0;
 
           for (const file of files) {
-            // 删除所有日志文件：.log, .log.*, .gz
-            if (file.endsWith('.log') || file.includes('.log.') || file.endsWith('.gz')) {
-              try {
-                fs.unlinkSync(path.join(logDir, file));
+            // 只处理日志文件：.log, .log.*, .gz
+            if (!file.endsWith('.log') && !file.includes('.log.') && !file.endsWith('.gz')) {
+              continue;
+            }
+
+            const filePath = path.join(logDir, file);
+
+            try {
+              const stats = fs.statSync(filePath);
+              const age = now - stats.mtimeMs;
+
+              // 只删除超过保留天数的日志
+              if (age > maxAge) {
+                fs.unlinkSync(filePath);
                 deletedCount++;
-              } catch (error) {
-                // 忽略删除失败的文件（可能被占用）
-                console.warn(`[Logger] Failed to delete log file: ${file}`, error);
+                console.info(`[Logger] Deleted old log file: ${file} (age: ${Math.round(age / 1000 / 60 / 60 / 24)} days)`);
               }
+            } catch (error) {
+              // 忽略删除失败的文件（可能被占用）
+              console.warn(`[Logger] Failed to delete log file: ${file}`, error);
             }
           }
 
           if (deletedCount > 0) {
-            console.info(`[Logger] Cleaned up ${deletedCount} log file(s) in ${logDir}`);
+            console.info(`[Logger] Cleaned up ${deletedCount} old log file(s) in ${logDir}`);
             totalDeletedCount += deletedCount;
           }
         } catch (error) {
@@ -168,10 +183,12 @@ export class Logger {
       }
 
       if (totalDeletedCount > 0) {
-        console.info(`[Logger] Total cleaned up ${totalDeletedCount} log file(s) on startup`);
+        console.info(`[Logger] Total cleaned up ${totalDeletedCount} old log file(s) (retention: ${retentionDays} days)`);
+      } else {
+        console.info(`[Logger] No old log files to clean up (retention: ${retentionDays} days)`);
       }
     } catch (error) {
-      console.warn('[Logger] Failed to cleanup logs on startup:', error);
+      console.warn('[Logger] Failed to cleanup old logs:', error);
     }
   }
 

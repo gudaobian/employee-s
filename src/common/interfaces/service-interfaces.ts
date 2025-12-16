@@ -52,7 +52,7 @@ export interface IWebSocketService {
 // 数据类型定义
 export interface Config {
   serverUrl: string;
-  websocketUrl: string;
+  websocketUrl?: string;  // 可选，可从 URLConfigManager 自动生成
   apiVersion: string;
   timeout: number;
   retryAttempts: number;

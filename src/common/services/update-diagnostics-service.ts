@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { updateLogger } from '@common/utils/update-logger';
 import { PermissionVerificationService } from './permission-verification-service';
+import { appConfig } from '@common/config/app-config-manager';
 
 export interface DiagnosticReport {
   timestamp: string;
@@ -174,7 +175,7 @@ export class UpdateDiagnosticsService {
 
     try {
       // Check update server
-      const updateServerUrl = process.env.UPDATE_SERVER_URL || '';
+      const updateServerUrl = appConfig.getUpdateServerUrl();
       if (updateServerUrl) {
         await axios.get(updateServerUrl, { timeout: 5000 });
         info.updateServerReachable = true;
@@ -217,7 +218,7 @@ export class UpdateDiagnosticsService {
       const statePath = path.join(app.getPath('userData'), 'update-state.json');
 
       const status: UpdateStatusInfo = {
-        currentChannel: process.env.UPDATE_CHANNEL || 'stable',
+        currentChannel: 'stable',
         pendingUpdate: false
       };
 

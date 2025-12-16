@@ -84,9 +84,6 @@ export class OfflineCacheService extends EventEmitter {
       case 'win32':
         // Windows: %LOCALAPPDATA%\EmployeeMonitor\Cache\offline
         return path.join(process.env.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local'), 'EmployeeMonitor', 'Cache', 'offline');
-      case 'linux':
-        // Linux: ~/.cache/EmployeeMonitor/offline
-        return path.join(process.env.XDG_CACHE_HOME || path.join(homeDir, '.cache'), 'EmployeeMonitor', 'offline');
       default:
         // 其他平台使用 ~/.employee-monitor/cache/offline
         return path.join(homeDir, '.employee-monitor', 'cache', 'offline');

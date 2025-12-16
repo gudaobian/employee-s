@@ -37,11 +37,11 @@ class UnifiedLogManager {
 
       // 清理策略
       enableAutoCleanup: true,             // 自动清理
-      cleanupOnStartup: true,              // 启动时清理
+      cleanupOnStartup: false,             // 启动时不清理历史日志（保留用于问题排查）
       cleanupInterval: 60 * 60 * 1000,    // 每小时清理
 
       // 日志级别
-      logLevel: process.env.NODE_ENV === 'production' ? 'INFO' : 'DEBUG',
+      logLevel: 'WARN',
 
       ...config
     };
