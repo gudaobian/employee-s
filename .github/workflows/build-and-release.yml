@@ -383,7 +383,7 @@ jobs:
 
           # 6. 验证编译结果
           Write-Host "🔍 Verifying compilation..."
-          $adapterPath = "out/out/dist/platforms/windows/windows-adapter.js"
+          $adapterPath = "out/dist/platforms/windows/windows-adapter.js"
           if (-not (Test-Path $adapterPath)) {
             Write-Host "❌ CRITICAL: WindowsAdapter not compiled!"
             exit 1
