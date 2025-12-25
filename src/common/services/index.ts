@@ -13,6 +13,12 @@ export { ActivityCollectorService } from './activity-collector-service';
 export { OfflineCacheService } from './offline-cache-service';
 export { PersistentCacheService } from './persistent-cache-service';
 
+// 队列服务（新架构：有界队列 + 磁盘持久化）
+export { QueueService, queueService } from './queue-service';
+export { DiskQueueManager } from './disk-queue-manager';
+export { BoundedQueue } from './bounded-queue';
+export { UploadManager } from './upload-manager';
+
 // 网络相关服务
 export { NetworkMonitor } from '../utils/network-monitor';
 export { ErrorRecoveryService } from '../utils/error-recovery';
@@ -34,6 +40,7 @@ import { OfflineCacheService } from './offline-cache-service';
 import { NetworkMonitor } from '../utils/network-monitor';
 import { ErrorRecoveryService } from '../utils/error-recovery';
 import { FSMServiceManager } from './fsm';
+import { queueService } from './queue-service';
 
 import { IPlatformAdapter } from '../interfaces/platform-interface';
 import { IConfigService } from '../interfaces/service-interfaces';
@@ -111,6 +118,14 @@ export class ServiceManager {
         'FSM service manager initialization'
       );
       console.log('[SERVICE_MANAGER] FSM service manager initialized');
+
+      // 初始化队列服务（有界队列 + 磁盘持久化）
+      await this.withTimeout(
+        queueService.initialize(this.webSocketService),
+        5000,
+        'Queue service initialization'
+      );
+      console.log('[SERVICE_MANAGER] Queue service initialized');
 
       // 设置服务间依赖关系
       this.setupServiceIntegrations();

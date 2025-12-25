@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hot Reload Test - Phase 4-5</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .header p {
+      opacity: 0.9;
+      font-size: 14px;
+    }
+
+    .content {
+      padding: 30px;
+    }
+
+    .section {
+      margin-bottom: 30px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border-left: 4px solid #667eea;
+    }
+
+    .section h2 {
+      font-size: 20px;
+      margin-bottom: 15px;
+      color: #667eea;
+    }
+
+    .state-display {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .state-card {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      border: 2px solid #e9ecef;
+    }
+
+    .state-card h3 {
+      font-size: 14px;
+      color: #666;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .state-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .state-value.success {
+      color: #28a745;
+    }
+
+    .state-value.error {
+      color: #dc3545;
+    }
+
+    .state-value.warning {
+      color: #ffc107;
+    }
+
+    .instructions {
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .instructions h3 {
+      color: #856404;
+      margin-bottom: 10px;
+    }
+
+    .instructions ol {
+      margin-left: 20px;
+      color: #856404;
+    }
+
+    .instructions li {
+      margin-bottom: 8px;
+      line-height: 1.6;
+    }
+
+    .test-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 15px;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background: #667eea;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #5568d3;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #218838;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+    }
+
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #c82333;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+    }
+
+    .log-display {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 15px;
+    }
+
+    .log-entry {
+      margin-bottom: 5px;
+      padding: 5px;
+      border-radius: 3px;
+    }
+
+    .log-entry.info {
+      color: #4fc3f7;
+    }
+
+    .log-entry.success {
+      color: #81c784;
+    }
+
+    .log-entry.error {
+      color: #e57373;
+    }
+
+    .log-entry.warning {
+      color: #ffb74d;
+    }
+
+    .reload-indicator {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #ffc107;
+      color: #000;
+      padding: 15px 25px;
+      border-radius: 8px;
+      font-weight: 700;
+      box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
+      display: none;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+    }
+
+    .reload-indicator.show {
+      display: block;
+    }
+
+    .timestamp {
+      font-size: 12px;
+      color: #999;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔥 Hot Reload Test - Phase 4-5 ✨</h1>
+      <p>渲染进程热更新服务测试 - 第二次测试</p>
+    </div>
+
+    <div class="content">
+      <!-- 说明 -->
+      <div class="instructions">
+        <h3>📝 测试说明</h3>
+        <ol>
+          <li>打开开发者工具查看控制台日志</li>
+          <li>修改这个 HTML 文件（比如修改标题颜色、文字等）</li>
+          <li>保存文件后，应用会在 500ms 后自动重载</li>
+          <li>重载后，观察状态是否正确恢复</li>
+          <li>检查重载计数器是否增加</li>
+        </ol>
+      </div>
+
+      <!-- 重载状态 -->
+      <div class="section">
+        <h2>🔄 重载状态</h2>
+        <div class="state-display">
+          <div class="state-card">
+            <h3>重载次数</h3>
+            <div class="state-value" id="reload-count">0</div>
+          </div>
+          <div class="state-card">
+            <h3>上次重载时间</h3>
+            <div class="state-value" id="last-reload" style="font-size: 16px;">从未重载</div>
+          </div>
+          <div class="state-card">
+            <h3>应用初始化时间</h3>
+            <div class="state-value" id="init-time" style="font-size: 16px;">加载中...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 服务状态 -->
+      <div class="section">
+        <h2>⚙️ 服务状态</h2>
+        <div class="state-display">
+          <div class="state-card">
+            <h3>FSM 状态</h3>
+            <div class="state-value" id="fsm-state">INIT</div>
+          </div>
+          <div class="state-card">
+            <h3>认证状态</h3>
+            <div class="state-value" id="auth-state">未认证</div>
+          </div>
+          <div class="state-card">
+            <h3>数据同步状态</h3>
+            <div class="state-value" id="sync-state">未同步</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 测试控制 -->
+      <div class="section">
+        <h2>🎮 测试控制</h2>
+        <div class="test-controls">
+          <button class="btn btn-primary" onclick="testStateChange()">更改 FSM 状态</button>
+          <button class="btn btn-success" onclick="testAuthChange()">切换认证状态</button>
+          <button class="btn btn-primary" onclick="testSyncChange()">触发数据同步</button>
+          <button class="btn btn-danger" onclick="manualReload()">手动触发重载</button>
+        </div>
+      </div>
+
+      <!-- 日志显示 -->
+      <div class="section">
+        <h2>📋 操作日志</h2>
+        <div class="log-display" id="log-display">
+          <div class="log-entry info">[INFO] 日志系统已就绪</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 重载指示器 -->
+  <div class="reload-indicator" id="reload-indicator">
+    🔄 准备重载中...
+  </div>
+
+  <script>
+    console.log('[TEST-HOT-RELOAD] Test page script loading...');
+
+    // 全局状态
+    let reloadCount = 0;
+    let lastReloadTime = null;
+    let initTime = new Date();
+    let mockFsmState = 'INIT';
+    let mockAuthState = false;
+    let mockSyncState = 'idle';
+
+    // 日志函数
+    function addLog(message, level = 'info') {
+      const logDisplay = document.getElementById('log-display');
+      const timestamp = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${level}`;
+      entry.textContent = `[${timestamp}] ${message}`;
+      logDisplay.appendChild(entry);
+      logDisplay.scrollTop = logDisplay.scrollHeight;
+      console.log(`[TEST-HOT-RELOAD] ${message}`);
+    }
+
+    // 更新显示
+    function updateDisplay() {
+      document.getElementById('reload-count').textContent = reloadCount;
+      document.getElementById('last-reload').textContent =
+        lastReloadTime ? lastReloadTime.toLocaleTimeString() : '从未重载';
+      document.getElementById('init-time').textContent = initTime.toLocaleTimeString();
+      document.getElementById('fsm-state').textContent = mockFsmState;
+      document.getElementById('auth-state').textContent = mockAuthState ? '已认证' : '未认证';
+      document.getElementById('sync-state').textContent = mockSyncState;
+    }
+
+    // 恢复状态
+    function restoreState() {
+      try {
+        const savedState = localStorage.getItem('app-state-backup');
+        if (savedState) {
+          const state = JSON.parse(savedState);
+
+          // 恢复重载计数
+          reloadCount = (state.reloadCount || 0) + 1;
+          lastReloadTime = new Date(state.timestamp);
+
+          // 恢复模拟状态
+          mockFsmState = state.mockFsmState || 'INIT';
+          mockAuthState = state.mockAuthState || false;
+          mockSyncState = state.mockSyncState || 'idle';
+
+          addLog(`✅ 状态已恢复 (重载 #${reloadCount})`, 'success');
+          addLog(`FSM: ${mockFsmState}, Auth: ${mockAuthState}, Sync: ${mockSyncState}`, 'info');
+        } else {
+          addLog('ℹ️ 首次加载，无状态需要恢复', 'info');
+        }
+      } catch (error) {
+        addLog(`❌ 状态恢复失败: ${error.message}`, 'error');
+      }
+    }
+
+    // 保存状态
+    function saveState() {
+      try {
+        const state = {
+          reloadCount: reloadCount,
+          timestamp: Date.now(),
+          mockFsmState: mockFsmState,
+          mockAuthState: mockAuthState,
+          mockSyncState: mockSyncState
+        };
+        localStorage.setItem('app-state-backup', JSON.stringify(state));
+        addLog('💾 状态已保存', 'success');
+      } catch (error) {
+        addLog(`❌ 状态保存失败: ${error.message}`, 'error');
+      }
+    }
+
+    // 测试函数
+    function testStateChange() {
+      const states = ['INIT', 'HEARTBEAT', 'REGISTER', 'RUNNING', 'PAUSED'];
+      const currentIndex = states.indexOf(mockFsmState);
+      mockFsmState = states[(currentIndex + 1) % states.length];
+      updateDisplay();
+      saveState();
+      addLog(`🔄 FSM 状态已更改为: ${mockFsmState}`, 'info');
+    }
+
+    function testAuthChange() {
+      mockAuthState = !mockAuthState;
+      updateDisplay();
+      saveState();
+      addLog(`🔐 认证状态已切换为: ${mockAuthState ? '已认证' : '未认证'}`, 'info');
+    }
+
+    function testSyncChange() {
+      const states = ['idle', 'syncing', 'success', 'error'];
+      const currentIndex = states.indexOf(mockSyncState);
+      mockSyncState = states[(currentIndex + 1) % states.length];
+      updateDisplay();
+      saveState();
+      addLog(`📡 数据同步状态: ${mockSyncState}`, 'info');
+    }
+
+    function manualReload() {
+      addLog('🔄 手动触发重载...', 'warning');
+      saveState();
+      setTimeout(() => {
+        location.reload();
+      }, 500);
+    }
+
+    // 监听热更新事件
+    if (window.electronAPI && window.electronAPI.on) {
+      addLog('✅ Electron API 已就绪', 'success');
+
+      // 监听重载通知
+      window.electronAPI.on('reload-renderer', () => {
+        addLog('🔥 收到热更新通知，准备重载...', 'warning');
+
+        // 显示重载指示器
+        const indicator = document.getElementById('reload-indicator');
+        indicator.classList.add('show');
+
+        // 保存状态
+        saveState();
+
+        // 注意：不需要手动 reload，主进程会在 100ms 后自动执行
+      });
+
+      // 监听日志
+      window.electronAPI.on('log:received', (data) => {
+        addLog(`[MAIN] ${data.message}`, 'info');
+      });
+    } else {
+      addLog('⚠️ Electron API 不可用，可能不在 Electron 环境中', 'warning');
+    }
+
+    // 页面加载完成
+    window.addEventListener('DOMContentLoaded', () => {
+      addLog('📄 DOM 加载完成', 'info');
+
+      // 恢复状态
+      restoreState();
+
+      // 更新显示
+      updateDisplay();
+
+      addLog('✅ 热更新测试页面已就绪', 'success');
+      addLog('ℹ️ 修改此 HTML 文件并保存，将触发自动重载', 'info');
+    });
+
+    // 页面卸载前保存状态
+    window.addEventListener('beforeunload', () => {
+      addLog('🚪 页面即将卸载，保存状态...', 'warning');
+      saveState();
+    });
+
+    console.log('[TEST-HOT-RELOAD] Test page script loaded');
+  </script>
+</body>
+</html>

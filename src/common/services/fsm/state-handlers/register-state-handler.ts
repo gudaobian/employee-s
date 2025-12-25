@@ -302,31 +302,39 @@ export class RegisterStateHandler extends BaseStateHandler {
 
   private async testNetworkConnectivity(serverUrl: string): Promise<boolean> {
     try {
+      // ⚠️ TEMPORARY FIX: 跳过健康检查，因为 API /api/health 端点响应太慢（76秒，返回503）
+      // TODO: 修复 API 服务器的健康检查端点后恢复此功能
+      logger.info('[REGISTER] 跳过网络连通性测试（API健康检查端点响应慢）');
+      logger.info('[REGISTER] ⚠️  假设网络连通，直接进行设备注册');
+      return true;
+
+      /* 原代码保留，待API修复后恢复
       logger.info('[REGISTER] 测试网络连通性...');
       const urlObj = new URL(serverUrl);
-      
+
       // 测试DNS解析和基本连接
       const testResult = await this.makeHttpRequest(`${urlObj.protocol}//${urlObj.host}/api/health`, {
         method: 'GET',
-        timeout: 5000,
+        timeout: 30000,  // 增加到30秒，适应网络慢或API服务器响应慢的情况
         headers: {
           'User-Agent': 'Employee-Monitor-Client/1.0'
         }
       });
-      
+
       logger.info('[REGISTER] 网络连通性测试结果:', {
         status: testResult.status,
         ok: testResult.ok
       });
-      
+
       // 任何HTTP响应都表明网络连通
       return testResult.status > 0;
+      */
     } catch (error: any) {
       logger.warn('[REGISTER] 网络连通性测试失败:', {
         message: error.message,
         code: error.code
       });
-      
+
       // 网络错误但不阻止注册尝试，可能是健康检查端点不存在
       if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
         return false;

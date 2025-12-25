@@ -1,15 +1,22 @@
 /**
  * WS_CHECK状态处理器 - 重构版本
  * 负责检查WebSocket连接状态
+ *
+ * 职责:
+ * 1. 检查WebSocket连接状态
+ * 2. WebSocket连接成功后触发启动上传
  */
 
 import { BaseStateHandler } from '../base-state-handler';
-import { 
-  DeviceState, 
-  FSMContext, 
-  StateHandlerResult 
+import {
+  DeviceState,
+  FSMContext,
+  StateHandlerResult
 } from '../../../interfaces/fsm-interfaces';
 import { IConfigService } from '../../../interfaces/service-interfaces';
+import { StartupUploadService } from '../../startup-upload-service';
+import * as path from 'path';
+import * as os from 'os';
 
 export class WSCheckStateHandler extends BaseStateHandler {
   private configService: IConfigService;
@@ -42,6 +49,10 @@ export class WSCheckStateHandler extends BaseStateHandler {
       const connectionResult = await this.testWebSocketConnection(websocketUrl, config.deviceId);
       if (connectionResult.success) {
         console.log('[WS_CHECK] WebSocket connection test successful');
+
+        // ✅ WebSocket连接成功，触发启动上传
+        await this.triggerStartupUpload(config, context);
+
         return {
           success: true,
           nextState: DeviceState.CONFIG_FETCH,
@@ -371,5 +382,59 @@ export class WSCheckStateHandler extends BaseStateHandler {
 
   protected async onExit(context: FSMContext): Promise<void> {
     console.log('[WS_CHECK] Exiting WebSocket check state');
+  }
+
+  /**
+   * 触发启动上传
+   * WebSocket连接成功后调用，非阻塞执行
+   */
+  private async triggerStartupUpload(config: any, context: FSMContext): Promise<void> {
+    try {
+      console.log('[WS_CHECK] 触发启动上传检查...');
+
+      // 获取队列缓存目录
+      const queueCacheDir = this.getQueueCacheDir();
+
+      // 创建上传服务
+      const uploadService = new StartupUploadService({
+        apiEndpoint: `${config.serverUrl}/api/startup-upload`,
+        deviceId: config.deviceId,
+        sessionId: (context.data?.sessionId as string) || `session_${Date.now()}`,
+        queueCacheDir
+      });
+
+      // 非阻塞执行上传（不等待结果）
+      uploadService.checkAndUpload().then(() => {
+        console.log('[WS_CHECK] 启动上传完成');
+      }).catch((error: any) => {
+        // 上传失败不影响主流程
+        console.error('[WS_CHECK] 启动上传失败', {
+          error: error.message,
+          stack: error.stack
+        });
+      });
+
+    } catch (error: any) {
+      // 启动上传失败不影响主流程
+      console.error('[WS_CHECK] 触发启动上传失败', {
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * 获取队列缓存目录
+   */
+  private getQueueCacheDir(): string {
+    try {
+      // 使用 userData 目录
+      const { app } = require('electron');
+      const userDataPath = app.getPath('userData');
+      return path.join(userDataPath, 'queue-cache');
+    } catch (error) {
+      // 如果 app.getPath 不可用（非 Electron 环境），使用临时目录
+      const tempDir = os.tmpdir();
+      return path.join(tempDir, 'employee-monitor-cache');
+    }
   }
 }

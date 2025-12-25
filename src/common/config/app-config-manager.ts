@@ -24,17 +24,27 @@ interface AppConfiguration {
   updateAutoDownload: boolean;
   updateAutoInstall: boolean;
 
+  // 热更新配置
+  hotUpdateEnabled: boolean;
+  hotUpdateFallbackTimeout: number;
+  hotUpdateRetryCount: number;
+
   // 日志配置
   logLevel: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 }
 
 const DEFAULT_CONFIG: AppConfiguration = {
-  // baseUrl 不在默认配置中，等待前端UI配置后写入
+  // 默认服务器地址（可通过前端UI修改）
+  baseUrl: 'http://23.95.207.162:3000',
   updateEnabled: true,
   updateCheckInterval: 2 * 60 * 1000, // 2分钟
   updateChannel: 'stable',
   updateAutoDownload: true,
   updateAutoInstall: true,
+  // 热更新配置
+  hotUpdateEnabled: true,
+  hotUpdateFallbackTimeout: 120000, // 2分钟
+  hotUpdateRetryCount: 2,
   logLevel: 'WARN'
 };
 
@@ -250,12 +260,13 @@ export class AppConfigManager extends EventEmitter {
    * 获取WebSocket连接地址
    * 自动转换：http → ws, https → wss
    * 未配置 baseUrl 时返回 undefined
+   * 设备客户端连接到 /client namespace（不需要JWT token，只需deviceId）
    */
   getWebSocketUrl(): string | undefined {
     const baseUrl = this.getBaseUrl();
     if (!baseUrl) return undefined;
     const wsUrl = baseUrl.replace(/^http/, 'ws');
-    return `${wsUrl}/socket`;
+    return `${wsUrl}/client`;  // 连接到客户端专用namespace
   }
 
   /**

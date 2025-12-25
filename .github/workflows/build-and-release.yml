@@ -30,8 +30,11 @@ env:
 jobs:
   # 构建Windows应用（使用代码库中预编译的原生模块）
   build-windows:
-    name: Build Windows Application
+    name: Build Windows Application (${{ matrix.arch }})
     runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64, ia32]
 
     steps:
       - name: Clean workspace before checkout
@@ -218,16 +221,18 @@ jobs:
           $electronVersion = $electronVersion -replace '\^', ''
           Write-Host "   Electron version: $electronVersion"
 
-          # 设置环境变量指向 Electron
+          # 设置环境变量指向 Electron（使用矩阵架构）
+          $targetArch = "${{ matrix.arch }}"
           $env:npm_config_target = $electronVersion
-          $env:npm_config_arch = "x64"
-          $env:npm_config_target_arch = "x64"
+          $env:npm_config_arch = $targetArch
+          $env:npm_config_target_arch = $targetArch
           $env:npm_config_disturl = "https://electronjs.org/headers"
           $env:npm_config_runtime = "electron"
           $env:npm_config_build_from_source = "true"
 
           Write-Host "   Environment variables set:"
           Write-Host "   - target: $env:npm_config_target"
+          Write-Host "   - arch: $targetArch"
           Write-Host "   - runtime: electron"
           Write-Host "   - disturl: https://electronjs.org/headers"
           Write-Host ""
@@ -557,7 +562,8 @@ jobs:
 
       - name: Create application bundle
         run: |
-          npm run pack:win
+          # 使用 electron-builder 直接构建指定架构
+          npx electron-builder --win nsis --${{ matrix.arch }}
         env:
           # 不设置GH_TOKEN，禁用electron-builder自动发布
           # Release由后续的create-release job统一处理
@@ -838,7 +844,7 @@ jobs:
       - name: Upload Windows build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
+          name: windows-installer-${{ matrix.arch }}
           path: |
             out/release/*.exe
             out/release/*.msi
@@ -875,10 +881,16 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Release version: $VERSION"
 
-      - name: Download Windows artifacts
+      - name: Download Windows x64 artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows-installer
+          name: windows-installer-x64
+          path: release-artifacts/windows/
+
+      - name: Download Windows ia32 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-ia32
           path: release-artifacts/windows/
 
       - name: Prepare release notes
@@ -892,8 +904,8 @@ jobs:
           ### 📦 安装包
 
           **Windows 用户：**
-          - `EmployeeSafety-Setup-${{ steps.version.outputs.version }}.exe` - Windows 安装程序（推荐）
-          - `EmployeeSafety-${{ steps.version.outputs.version }}-win.zip` - Windows 便携版
+          - `EmployeeSafety-win-x64-${{ steps.version.outputs.version }}.exe` - Windows 64位安装程序（推荐）
+          - `EmployeeSafety-win-ia32-${{ steps.version.outputs.version }}.exe` - Windows 32位安装程序
 
           **macOS 用户：**
           - macOS 安装包请本地构建：`npm run pack:mac`

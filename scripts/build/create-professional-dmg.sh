@@ -6,24 +6,30 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_DIR="$PROJECT_ROOT/release"
 ASSETS_DIR="$PROJECT_ROOT/assets"
 
 echo "💿 创建专业 macOS DMG 安装包..."
 echo "=================================="
 
+# 读取版本号
+VERSION=$(node -p "require('$PROJECT_ROOT/package.json').version")
+echo "📌 当前版本: $VERSION"
+
 # 创建专业 DMG 的函数
 create_professional_dmg() {
     local ARCH=$1
-    local APP_PATH="$RELEASE_DIR/EmployeeMonitor-darwin-$ARCH/EmployeeMonitor.app"
-    local DMG_NAME="EmployeeMonitor-darwin-$ARCH.dmg"
+    local APP_PATH="$RELEASE_DIR/EmployeeSafety-darwin-$ARCH/EmployeeSafety.app"
+
+    # 新命名格式: EmployeeSafety-macos-{arch}-{version}.dmg
+    local DMG_NAME="EmployeeSafety-macos-$ARCH-$VERSION.dmg"
     local DMG_PATH="$RELEASE_DIR/$DMG_NAME"
     local TEMP_DMG="$RELEASE_DIR/temp-$ARCH.dmg"
-    local VOLUME_NAME="EmployeeMonitor Installer"
+    local VOLUME_NAME="EmployeeSafety Installer"
 
     echo ""
-    echo "📦 创建 $ARCH 版本专业 DMG..."
+    echo "📦 创建 $ARCH 版本专业 DMG ($VERSION)..."
 
     # 检查应用是否存在
     if [ ! -d "$APP_PATH" ]; then
@@ -51,7 +57,7 @@ create_professional_dmg() {
     cat > "$TEMP_DIR/.安装说明.txt" << 'EOF'
 安装步骤:
 
-1. 将 EmployeeMonitor 拖拽到 Applications 文件夹
+1. 将 EmployeeSafety 拖拽到 Applications 文件夹
 2. 首次打开时，右键点击应用选择"打开"
 3. 授予辅助功能和屏幕录制权限
 
@@ -61,7 +67,7 @@ EOF
     # 创建 .DS_Store 文件设置图标位置和窗口样式
     cat > "$TEMP_DIR/.create-ds-store.applescript" << 'APPLESCRIPT'
 tell application "Finder"
-    tell disk "EmployeeMonitor Installer"
+    tell disk "EmployeeSafety Installer"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
@@ -73,7 +79,7 @@ tell application "Finder"
         set background color of viewOptions to {23593, 23593, 23593}
 
         -- 设置图标位置
-        set position of item "EmployeeMonitor.app" of container window to {140, 180}
+        set position of item "EmployeeSafety.app" of container window to {140, 180}
         set position of item "Applications" of container window to {380, 180}
 
         close

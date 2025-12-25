@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>渲染进程脚本加载测试</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .status { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>渲染进程脚本加载测试</h1>
+    <div id="results"></div>
+
+    <script>
+        const results = document.getElementById('results');
+
+        function addResult(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.textContent = message;
+            results.appendChild(div);
+            console.log(`[TEST] ${message}`);
+        }
+
+        // 测试 1: HTML 加载
+        addResult('✓ HTML 加载成功', 'success');
+
+        // 测试 2: electronAPI 可用性
+        if (window.electronAPI) {
+            addResult('✓ electronAPI 可用', 'success');
+            addResult(`  - send: ${typeof window.electronAPI.send}`, 'info');
+            addResult(`  - on: ${typeof window.electronAPI.on}`, 'info');
+            addResult(`  - invoke: ${typeof window.electronAPI.invoke}`, 'info');
+        } else {
+            addResult('✗ electronAPI 不可用（可能未使用 preload 脚本）', 'error');
+        }
+    </script>
+
+    <!-- 加载 EventEmitter -->
+    <script src="utils/event-emitter.js"></script>
+    <script>
+        if (typeof EventEmitter !== 'undefined') {
+            addResult('✓ EventEmitter 类加载成功', 'success');
+            try {
+                const testEmitter = new EventEmitter();
+                testEmitter.on('test', () => {});
+                addResult('✓ EventEmitter 实例创建成功', 'success');
+            } catch (error) {
+                addResult(`✗ EventEmitter 实例化失败: ${error.message}`, 'error');
+            }
+        } else {
+            addResult('✗ EventEmitter 类未加载', 'error');
+        }
+    </script>
+
+    <!-- 加载服务类 -->
+    <script src="services/fsm-service.js"></script>
+    <script src="services/auth-service.js"></script>
+    <script src="services/data-sync-service.js"></script>
+    <script>
+        if (typeof FSMService !== 'undefined') {
+            addResult('✓ FSMService 类加载成功', 'success');
+        } else {
+            addResult('✗ FSMService 类未加载', 'error');
+        }
+
+        if (typeof AuthService !== 'undefined') {
+            addResult('✓ AuthService 类加载成功', 'success');
+        } else {
+            addResult('✗ AuthService 类未加载', 'error');
+        }
+
+        if (typeof DataSyncService !== 'undefined') {
+            addResult('✓ DataSyncService 类加载成功', 'success');
+        } else {
+            addResult('✗ DataSyncService 类未加载', 'error');
+        }
+    </script>
+
+    <!-- 加载 RendererApp -->
+    <script src="renderer-app.js"></script>
+    <script>
+        if (typeof RendererApp !== 'undefined') {
+            addResult('✓ RendererApp 类加载成功', 'success');
+        } else {
+            addResult('✗ RendererApp 类未加载', 'error');
+        }
+
+        // 测试 RendererApp 初始化
+        if (typeof RendererApp !== 'undefined' && window.electronAPI) {
+            addResult('正在测试 RendererApp 初始化...', 'info');
+            // 注意：不执行实际初始化，因为可能会失败（缺少主进程的 IPC 处理器）
+            addResult('  提示：RendererApp 需要主进程 IPC 支持才能完全初始化', 'info');
+        }
+    </script>
+</body>
+</html>

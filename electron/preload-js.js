@@ -88,7 +88,61 @@ contextBridge.exposeInMainWorld('electronAPI', {
     });
   },
 
-  // 事件监听API
+  // 发送单向消息到主进程
+  send: (channel, data) => {
+    const validChannels = [
+      'state-update',
+      'log-message',
+      'screenshot-taken',
+      'data-synced',
+      'error-occurred',
+      'monitoring-paused',
+      'monitoring-resumed',
+      'hide-window',
+      'show-window'
+    ];
+
+    if (validChannels.includes(channel)) {
+      ipcRenderer.send(channel, data);
+    } else {
+      console.warn('[Preload] Attempted to send to invalid channel:', channel);
+    }
+  },
+
+  // 调用主进程方法并等待返回
+  invoke: async (channel, ...args) => {
+    const validChannels = [
+      'get-config',
+      'update-config',
+      'get-device-id',
+      'get-system-info',
+      'take-screenshot',
+      'get-screenshot-path',
+      'read-file',
+      'write-file',
+      'delete-file',
+      'fetch-api',
+      'show-open-dialog',
+      'show-save-dialog',
+      'get-app-version',
+      'get-platform',
+      'update-download-progress',
+      // 版本更新相关的IPC channels
+      'check-for-updates',
+      'install-update',
+      'get-update-status',
+      'set-update-channel'
+    ];
+
+    if (validChannels.includes(channel)) {
+      return await ipcRenderer.invoke(channel, ...args);
+    } else {
+      console.warn('[Preload] Attempted to invoke invalid channel:', channel);
+      throw new Error(`Invalid IPC channel: ${channel}`);
+    }
+  },
+
+  // 事件监听API（返回取消订阅函数）
   on: (channel, callback) => {
     const validChannels = [
       'app-status-changed',
@@ -100,11 +154,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'log-update',
       'install-progress-update',
       'init-progress',
-      'autostart-status-changed'
+      'autostart-status-changed',
+      'pause-monitoring',
+      'resume-monitoring',
+      'reload-renderer',
+      'config-updated',
+      'force-screenshot',
+      'sync-now',
+      'state-query',
+      'update-download-progress',
+      // 增强版热更新事件
+      'hot-reload:prepare',
+      'hot-reload:style-update',
+      'hot-reload:progress',
+      'hot-reload:complete',
+      'hot-reload:error'
     ];
 
     if (validChannels.includes(channel)) {
-      ipcRenderer.on(channel, callback);
+      const subscription = (event, ...args) => callback(...args);
+      ipcRenderer.on(channel, subscription);
+
+      // 返回取消订阅函数
+      return () => {
+        ipcRenderer.removeListener(channel, subscription);
+      };
+    } else {
+      console.warn('[Preload] Attempted to listen to invalid channel:', channel);
+      return () => {}; // 返回空函数
     }
   },
 
@@ -119,7 +196,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       'log-update',
       'install-progress-update',
       'init-progress',
-      'autostart-status-changed'
+      'autostart-status-changed',
+      'reload-renderer',
+      // 增强版热更新事件
+      'hot-reload:prepare',
+      'hot-reload:style-update',
+      'hot-reload:progress',
+      'hot-reload:complete',
+      'hot-reload:error'
     ];
 
     if (validChannels.includes(channel)) {

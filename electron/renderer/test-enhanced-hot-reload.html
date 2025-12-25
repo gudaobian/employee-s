@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enhanced Hot Reload Test</title>
+  <link rel="stylesheet" href="test-styles.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: #333;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 32px;
+      margin-bottom: 10px;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+    }
+
+    .header p {
+      opacity: 0.9;
+      font-size: 16px;
+    }
+
+    .content {
+      padding: 30px;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .feature-card {
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 20px;
+      border-left: 4px solid #667eea;
+    }
+
+    .feature-card h3 {
+      font-size: 18px;
+      color: #667eea;
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .feature-card ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .feature-card li {
+      padding: 8px 0;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    .feature-card li:last-child {
+      border-bottom: none;
+    }
+
+    .feature-card li::before {
+      content: "✓";
+      color: #28a745;
+      font-weight: bold;
+      margin-right: 8px;
+    }
+
+    .test-section {
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .test-section h2 {
+      font-size: 20px;
+      color: #667eea;
+      margin-bottom: 15px;
+    }
+
+    .test-buttons {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #218838;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+    }
+
+    .btn-warning {
+      background: #ffc107;
+      color: #000;
+    }
+
+    .btn-warning:hover {
+      background: #e0a800;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(255, 193, 7, 0.4);
+    }
+
+    .demo-area {
+      background: white;
+      border: 2px dashed #dee2e6;
+      border-radius: 8px;
+      padding: 30px;
+      text-align: center;
+      margin-top: 15px;
+    }
+
+    .demo-area h3 {
+      font-size: 24px;
+      color: #667eea;
+      margin-bottom: 10px;
+    }
+
+    .demo-area p {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .instructions {
+      background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
+      border: 2px solid #ffc107;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .instructions h3 {
+      color: #856404;
+      margin-bottom: 15px;
+      font-size: 18px;
+    }
+
+    .instructions ol {
+      margin-left: 20px;
+      color: #856404;
+    }
+
+    .instructions li {
+      margin-bottom: 10px;
+      line-height: 1.6;
+    }
+
+    .instructions code {
+      background: rgba(0, 0, 0, 0.1);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+    }
+
+    .pulse {
+      animation: pulse 2s infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🚀 Enhanced Hot Reload Test</h1>
+      <p>增强版热更新系统 - 智能重载 | 通知系统 | 性能统计</p>
+    </div>
+
+    <div class="content">
+      <!-- 使用说明 -->
+      <div class="instructions">
+        <h3>📝 增强功能说明</h3>
+        <ol>
+          <li><strong>智能重载</strong>: 修改 CSS 文件时，只刷新样式，不重载整个页面</li>
+          <li><strong>多文件类型</strong>: 支持 .js, .html, .css, .json, .scss, .ts 等文件类型</li>
+          <li><strong>实时通知</strong>: 右上角显示重载通知和进度条</li>
+          <li><strong>性能统计</strong>: 实时显示重载次数和平均时间</li>
+          <li><strong>测试方法</strong>: 修改本文件的 <code>body</code> 样式或 <code>demo-area</code> 样式，保存后观察效果</li>
+        </ol>
+      </div>
+
+      <!-- 功能特性 -->
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h3>🔥 智能重载</h3>
+          <ul>
+            <li>CSS 文件 → 只刷新样式</li>
+            <li>JS/HTML → 完整重载</li>
+            <li>防抖机制（500ms）</li>
+            <li>状态自动保存</li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <h3>📦 文件类型</h3>
+          <ul>
+            <li>.js / .jsx / .ts / .tsx</li>
+            <li>.html</li>
+            <li>.css / .scss / .less</li>
+            <li>.json</li>
+          </ul>
+        </div>
+
+        <div class="feature-card">
+          <h3>📊 性能统计</h3>
+          <ul>
+            <li>总重载次数</li>
+            <li>CSS 重载次数</li>
+            <li>完整重载次数</li>
+            <li>平均重载时间</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 测试区域 -->
+      <div class="test-section">
+        <h2>🎮 测试控制</h2>
+        <div class="test-buttons">
+          <button class="btn btn-primary" onclick="testCSSChange()">
+            🎨 测试 CSS 变化
+          </button>
+          <button class="btn btn-success" onclick="testHTMLChange()">
+            📝 测试 HTML 变化
+          </button>
+          <button class="btn btn-warning" onclick="testNotification()">
+            🔔 测试通知
+          </button>
+          <button class="btn btn-primary" onclick="showStats()">
+            📊 查看统计
+          </button>
+        </div>
+      </div>
+
+      <!-- 演示区域 -->
+      <div class="demo-area" id="demo-area">
+        <h3 class="pulse">这是演示区域</h3>
+        <p>修改此区域的样式，保存文件，观察样式自动更新</p>
+        <p style="margin-top: 10px; color: #667eea; font-weight: 600;">
+          当前时间: <span id="current-time"></span>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加载热更新 UI -->
+  <script src="hot-reload-ui.js"></script>
+
+  <script>
+    console.log('[ENHANCED-HOT-RELOAD] Test page loading...');
+
+    // 初始化热更新 UI
+    let hotReloadUI = null;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      console.log('[ENHANCED-HOT-RELOAD] DOM loaded');
+
+      // 创建热更新 UI
+      try {
+        hotReloadUI = new HotReloadUI({
+          position: 'top-right',
+          autoHide: true,
+          autoHideDelay: 3000,
+          showStats: true,
+          theme: 'dark'
+        });
+        console.log('[ENHANCED-HOT-RELOAD] Hot Reload UI initialized');
+      } catch (error) {
+        console.error('[ENHANCED-HOT-RELOAD] Failed to initialize Hot Reload UI:', error);
+      }
+
+      // 更新当前时间
+      updateTime();
+      setInterval(updateTime, 1000);
+
+      console.log('[ENHANCED-HOT-RELOAD] Test page ready');
+    });
+
+    // 更新时间
+    function updateTime() {
+      const now = new Date();
+      document.getElementById('current-time').textContent = now.toLocaleTimeString();
+    }
+
+    // 测试 CSS 变化
+    function testCSSChange() {
+      const demoArea = document.getElementById('demo-area');
+      const colors = ['#667eea', '#28a745', '#ffc107', '#e57373', '#4fc3f7'];
+      const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+      demoArea.style.borderColor = randomColor;
+      demoArea.querySelector('h3').style.color = randomColor;
+
+      if (hotReloadUI) {
+        hotReloadUI.showNotification(
+          '样式已更改',
+          `边框颜色: ${randomColor}`,
+          'css'
+        );
+      }
+    }
+
+    // 测试 HTML 变化
+    function testHTMLChange() {
+      const demoArea = document.getElementById('demo-area');
+      const p = demoArea.querySelector('p:first-of-type');
+      const messages = [
+        '修改此区域的样式，保存文件，观察样式自动更新',
+        'CSS 文件变化时，只会刷新样式，不会重载整个页面',
+        '其他文件（JS, HTML）变化时，会进行完整重载',
+        '重载时会保存应用状态，重载后自动恢复'
+      ];
+      const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+
+      p.textContent = randomMessage;
+
+      if (hotReloadUI) {
+        hotReloadUI.showNotification(
+          'HTML 已更改',
+          '内容已更新',
+          'success'
+        );
+      }
+    }
+
+    // 测试通知
+    function testNotification() {
+      if (hotReloadUI) {
+        hotReloadUI.showNotification(
+          '这是一条测试通知',
+          '通知将在 3 秒后自动消失',
+          'info'
+        );
+      }
+    }
+
+    // 显示统计
+    function showStats() {
+      const stats = JSON.parse(localStorage.getItem('hot-reload-stats') || '{}');
+      alert(`热更新统计:
+总重载次数: ${stats.totalReloads || 0}
+CSS 重载: ${stats.cssOnlyReloads || 0}
+完整重载: ${stats.fullReloads || 0}
+平均时间: ${stats.averageReloadTime || 0}ms
+上次重载: ${stats.lastReloadTime || '-'}ms`);
+    }
+
+    console.log('[ENHANCED-HOT-RELOAD] Test page script loaded');
+  </script>
+</body>
+</html>

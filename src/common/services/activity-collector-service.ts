@@ -9,6 +9,8 @@ import { IPlatformAdapter } from '../interfaces/platform-interface';
 import { BaseService } from '../utils/base-service';
 import { logger } from '../utils';
 import { URLCollectorService } from './url-collector-service';
+import { queueService } from './queue-service';
+import { ActivityQueueItem } from '../types/queue-types';
 
 export interface ActivityData {
   keystrokes: number;
@@ -620,30 +622,49 @@ export class ActivityCollectorService extends BaseService {
         });
       }
 
-      // 优先使用WebSocket上传，失败则使用HTTP
-      let uploadSuccess = false;
+      // 使用队列系统（支持离线持久化 + 有界队列 + 自动上传）
+      try {
+        logger.info('[ACTIVITY_COLLECTOR] 📦 Enqueuing activity data to queue service...');
 
-      if (this.websocketService && this.websocketService.isConnected()) {
-        try {
-          logger.info('[ACTIVITY_COLLECTOR] ⚡ Uploading via WebSocket (real-time)');
-          await this.websocketService.sendActivityData(inputActivityData);
-          uploadSuccess = true;
-          logger.info('[ACTIVITY_COLLECTOR] ✅ WebSocket upload successful');
-        } catch (wsError: any) {
-          logger.error('[ACTIVITY_COLLECTOR] ❌ WebSocket upload failed, falling back to HTTP:', {
-            message: wsError?.message,
-            code: wsError?.code
-          });
-        }
-      } else {
-        logger.info('[ACTIVITY_COLLECTOR] WebSocket not connected, using HTTP fallback');
-      }
+        // 获取deviceId
+        const config = this.configService.getConfig();
 
-      // HTTP fallback
-      if (!uploadSuccess) {
-        logger.info('[ACTIVITY_COLLECTOR] 🔄 Uploading via HTTP API (fallback)');
-        await this.dataSyncService.addActivityData(inputActivityData);
-        logger.info('[ACTIVITY_COLLECTOR] ✅ HTTP upload successful');
+        // inputActivityData.timestamp 是 ISO string，转换为毫秒时间戳
+        const timestampMs = new Date(inputActivityData.timestamp).getTime();
+
+        const activityItem: ActivityQueueItem = {
+          id: `activity_${timestampMs}`,
+          timestamp: timestampMs,
+          type: 'activity',
+          data: {
+            deviceId: config.deviceId,
+            timestamp: timestampMs,
+            keystrokes: inputActivityData.keystrokes,
+            mouseClicks: inputActivityData.mouseClicks,
+            idleTime: inputActivityData.idleTime,
+            // 使用[key: string]: any 允许的额外字段
+            isActive: inputActivityData.isActive,
+            mouseScrolls: inputActivityData.mouseScrolls,
+            activeWindow: inputActivityData.activeWindow || 'Unknown',
+            activeWindowProcess: inputActivityData.activeWindowProcess || 'Unknown',
+            url: inputActivityData.url || ''
+          }
+        };
+
+        await queueService.enqueueActivity(activityItem);
+
+        const queueStats = queueService.getQueues().activity;
+        logger.info('[ACTIVITY_COLLECTOR] ✅ Activity data enqueued successfully', {
+          itemId: activityItem.id,
+          memoryQueueSize: `${queueStats.size()}/5`,
+          note: 'Will overflow to disk if memory queue is full'
+        });
+      } catch (enqueueError: any) {
+        logger.error('[ACTIVITY_COLLECTOR] ❌ Failed to enqueue activity data:', {
+          message: enqueueError?.message,
+          code: enqueueError?.code
+        });
+        throw enqueueError; // 重新抛出异常，让外层处理
       }
 
       // 检查是否有待应用的配置（在上传完成后应用）

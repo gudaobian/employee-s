@@ -9,7 +9,8 @@ import * as path from 'path';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import * as si from 'systeminformation';
-import sharp from 'sharp';
+// ⚡ LAZY LOAD: Don't import sharp at top level to avoid V8 crash during startup
+// import sharp from 'sharp';
 
 import { PlatformAdapterBase } from '../interfaces/platform-interface';
 import { logger } from '../../common/utils';
@@ -642,12 +643,12 @@ export class MacOSAdapter extends PlatformAdapterBase {
 
   async getActiveWindow(): Promise<any> {
     this.ensureInitialized();
-    
+
     try {
-      // 动态导入 active-win 库
-      const { activeWindow } = require('../../active-win-compat');
+      // 优先使用 active-win-compat（更可靠）
+      const { activeWindow } = require('./active-win-compat');
       const activeWin = await activeWindow();
-      
+
       if (activeWin) {
         return {
           title: activeWin.title || '',
@@ -655,7 +656,7 @@ export class MacOSAdapter extends PlatformAdapterBase {
           pid: (activeWin.owner as any)?.pid || 0
         };
       }
-      
+
       return null;
     } catch (error) {
       // 备用方案：使用 AppleScript
@@ -673,10 +674,10 @@ export class MacOSAdapter extends PlatformAdapterBase {
             return appName & "|" & appPID & "|" & windowTitle
           end tell
         `;
-        
+
         const { stdout } = await execAsync(`osascript -e '${script.replace(/'/g, "\\'")}'`);
         const parts = stdout.trim().split('|');
-        
+
         if (parts.length >= 3) {
           return {
             application: parts[0],
@@ -687,7 +688,7 @@ export class MacOSAdapter extends PlatformAdapterBase {
       } catch (appleScriptError) {
         logger.error('Failed to get active window with AppleScript', appleScriptError);
       }
-      
+
       logger.error('Failed to get active window', error);
       return null;
     }
@@ -1025,53 +1026,47 @@ export class MacOSAdapter extends PlatformAdapterBase {
         };
       }
 
-      // 步骤2: 使用 sharp 进行分辨率缩放和压缩
-      // CRITICAL FIX: 显式管理 Sharp 实例生命周期，防止内存泄漏
+      // 步骤2: 使用 Electron nativeImage 进行分辨率缩放和压缩
+      // ⚡ FIX: Use Electron's built-in nativeImage instead of sharp to avoid native module crashes
       const tempJpgPath = `/tmp/screenshot-compressed-${timestamp}.${format}`;
 
       try {
-        // 获取原始图片尺寸 - 使用独立实例并立即销毁
-        const metadataInstance = sharp(tempPngPath);
-        const metadata = await metadataInstance.metadata();
-        // 显式销毁 metadata 实例，释放 libvips 资源
-        metadataInstance.destroy();
-        logger.info(`[DARWIN] Original screenshot size: ${metadata.width}x${metadata.height}`);
+        // ⚡ Use Electron's nativeImage API (no native modules needed!)
+        const { nativeImage } = require('electron');
 
-        // 创建 sharp 实例用于处理
-        const image = sharp(tempPngPath, {
-          // 限制 libvips 缓存，减少内存占用
-          limitInputPixels: 268402689, // 约 16384 x 16384
-          sequentialRead: true // 顺序读取，减少内存峰值
-        });
+        // 读取原始 PNG 文件
+        const pngBuffer = await fs.promises.readFile(tempPngPath);
+        let image = nativeImage.createFromBuffer(pngBuffer);
+
+        const originalSize = image.getSize();
+        logger.info(`[DARWIN] Original screenshot size: ${originalSize.width}x${originalSize.height}`);
 
         // 如果设置了分辨率控制，进行缩放
         const maxWidth = options.maxWidth || 1920;
         const maxHeight = options.maxHeight || 1080;
 
-        if (metadata.width && metadata.height && (metadata.width > maxWidth || metadata.height > maxHeight)) {
-          image.resize(maxWidth, maxHeight, {
-            fit: 'inside',              // 保持比例，不超过目标
-            withoutEnlargement: true    // 不放大小图
-          });
-          logger.info(`[DARWIN] Resizing screenshot to max ${maxWidth}x${maxHeight}`);
+        if (originalSize.width > maxWidth || originalSize.height > maxHeight) {
+          // 计算等比例缩放尺寸
+          const widthRatio = maxWidth / originalSize.width;
+          const heightRatio = maxHeight / originalSize.height;
+          const ratio = Math.min(widthRatio, heightRatio);
+
+          const newWidth = Math.round(originalSize.width * ratio);
+          const newHeight = Math.round(originalSize.height * ratio);
+
+          image = image.resize({ width: newWidth, height: newHeight, quality: 'best' });
+          logger.info(`[DARWIN] Resized screenshot to ${newWidth}x${newHeight}`);
         }
 
-        // 转换为 JPEG 并压缩
-        await image
-          .jpeg({
-            quality: quality,
-            mozjpeg: true              // 使用 mozjpeg 引擎获得更好的压缩
-          })
-          .toFile(tempJpgPath);
+        // 转换为 JPEG 并设置质量
+        const jpegBuffer = image.toJPEG(quality);
+        await fs.promises.writeFile(tempJpgPath, jpegBuffer);
 
-        // CRITICAL: 显式销毁 Sharp 实例，释放 libvips 内部缓存
-        image.destroy();
+        logger.info(`[DARWIN] Screenshot compressed with quality ${quality} using Electron nativeImage`);
 
-        logger.info(`[DARWIN] Screenshot compressed with quality ${quality}, mozjpeg enabled`);
-
-      } catch (sharpError: any) {
-        logger.error(`[DARWIN] sharp compression failed: ${sharpError.message}`);
-        // 如果 sharp 失败，直接使用原始 PNG
+      } catch (imageError: any) {
+        logger.error(`[DARWIN] Electron nativeImage processing failed: ${imageError.message}`);
+        // 如果处理失败，直接使用原始 PNG
         fs.copyFileSync(tempPngPath, tempJpgPath);
       }
 

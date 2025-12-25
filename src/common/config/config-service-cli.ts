@@ -206,9 +206,21 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
       if (fs.existsSync(this.configPath)) {
         const configData = fs.readFileSync(this.configPath, 'utf8');
         const loadedConfig = JSON.parse(configData);
-        
+
         // 合并默认配置以确保所有字段存在
-        return this.mergeWithDefaults(loadedConfig);
+        const mergedConfig = this.mergeWithDefaults(loadedConfig);
+
+        // ✅ FIX: 始终同步 AppConfigManager 的 baseUrl（优先级更高）
+        const appBaseUrl = appConfig.getBaseUrl();
+        if (appBaseUrl && appBaseUrl !== mergedConfig.serverUrl) {
+          console.log('[CONFIG] Syncing serverUrl from AppConfigManager:', {
+            oldServerUrl: mergedConfig.serverUrl,
+            newServerUrl: appBaseUrl
+          });
+          mergedConfig.serverUrl = appBaseUrl;
+        }
+
+        return mergedConfig;
       }
     } catch (error) {
       console.warn('[CONFIG] Failed to load existing config, using defaults:', error);
@@ -219,7 +231,7 @@ export class ConfigServiceCLI extends EventEmitter implements IConfigService {
 
   private createDefaultConfig(): Config {
     // 从 AppConfigManager 读取 baseUrl（如果已配置）
-    const baseUrl = appConfig.getBaseUrl() || 'http://23.95.193.155:3000';
+    const baseUrl = appConfig.getBaseUrl() || 'http://23.95.207.162:3000';
 
     return {
       serverUrl: baseUrl,

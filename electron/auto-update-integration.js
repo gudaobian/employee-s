@@ -20,6 +20,11 @@ log.transports.file.resolvePathFn = () => path.join(app.getPath('logs'), 'auto-u
 log.transports.file.level = 'info';
 log.transports.console.level = 'debug';
 
+// 跳过代码签名验证（开发环境和测试环境）
+// TODO: 生产环境应该使用正确签名的应用，并移除这个跳过逻辑
+process.env.ELECTRON_UPDATER_ALLOW_UNSIGNED = '1';
+log.info('[AUTO_UPDATE] Code signature validation DISABLED (testing mode - unconditional skip)');
+
 // Global error handlers to prevent crashes from update errors
 process.on('uncaughtException', (error) => {
   if (error.message && error.message.includes('download')) {
@@ -42,8 +47,7 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Will be dynamically loaded after TypeScript compilation
 let AutoUpdateService;
-let UpdateConfigService;
-let updateLogger;
+let AppConfigManager;
 let autoUpdateService = null;
 
 /**
@@ -59,26 +63,27 @@ async function initializeAutoUpdate() {
     // Dynamically load compiled TypeScript modules
     try {
       const appPath = app.getAppPath();
-      // In packaged app, dist is inside app directory
-      const distPath = path.join(appPath, 'dist');
+      // In packaged app, compiled files are in out/dist
+      const distPath = path.join(appPath, 'out', 'dist');
 
       log.info('[AUTO_UPDATE] Dist path:', distPath);
       log.info('[AUTO_UPDATE] Loading modules...');
 
+      log.info('[AUTO_UPDATE] Step 1: Loading AutoUpdateService...');
       const { AutoUpdateService: AUS } = require(
         path.join(distPath, 'common', 'services', 'auto-update-service')
       );
-      const { UpdateConfigService: UCS } = require(
-        path.join(distPath, 'common', 'config', 'update-config')
+      log.info('[AUTO_UPDATE] ✅ AutoUpdateService loaded');
+
+      log.info('[AUTO_UPDATE] Step 2: Loading AppConfigManager...');
+      const { AppConfigManager: ACM } = require(
+        path.join(distPath, 'common', 'config', 'app-config-manager')
       );
-      const { updateLogger: UL } = require(
-        path.join(distPath, 'common', 'utils', 'update-logger')
-      );
+      log.info('[AUTO_UPDATE] ✅ AppConfigManager loaded');
 
       AutoUpdateService = AUS;
-      UpdateConfigService = UCS;
-      updateLogger = UL;
-      log.info('[AUTO_UPDATE] Modules loaded successfully');
+      AppConfigManager = ACM;
+      log.info('[AUTO_UPDATE] ✅ All modules loaded successfully');
     } catch (loadError) {
       log.error('[AUTO_UPDATE] Failed to load update modules:', loadError.message);
       log.error('[AUTO_UPDATE] Error stack:', loadError.stack);
@@ -86,28 +91,34 @@ async function initializeAutoUpdate() {
       return false;
     }
 
-    // Load configuration
-    const updateConfig = new UpdateConfigService();
-    const config = updateConfig.getConfig();
+    // Load configuration from AppConfigManager
+    const appConfig = AppConfigManager.getInstance();
 
-    if (!config.enabled) {
+    if (!appConfig.get('updateEnabled')) {
       log.info('[AUTO_UPDATE] Auto-update is disabled in configuration');
       return false;
     }
 
+    const updateServerUrl = appConfig.getUpdateServerUrl();
+    if (!updateServerUrl) {
+      log.warn('[AUTO_UPDATE] No baseUrl configured, auto-update disabled');
+      log.warn('[AUTO_UPDATE] Please configure server address in settings');
+      return false;
+    }
+
     log.info('[AUTO_UPDATE] Configuration loaded:', {
-      channel: config.channel,
-      updateServerUrl: config.updateServerUrl,
-      autoDownload: config.autoDownload,
-      checkInterval: config.checkInterval
+      channel: appConfig.get('updateChannel'),
+      updateServerUrl: updateServerUrl,
+      autoDownload: appConfig.get('updateAutoDownload'),
+      checkInterval: appConfig.get('updateCheckInterval')
     });
 
     // Create AutoUpdateService instance
+    // Don't pass updateServerUrl - let it read from appConfig automatically
     autoUpdateService = new AutoUpdateService({
-      updateServerUrl: config.updateServerUrl,
-      channel: config.channel,
-      autoDownload: config.autoDownload,
-      autoInstallOnQuit: config.autoInstallOnQuit
+      channel: appConfig.get('updateChannel'),
+      autoDownload: appConfig.get('updateAutoDownload'),
+      autoInstallOnQuit: appConfig.get('updateAutoInstall')
     });
 
     // Set up event handlers
@@ -124,8 +135,9 @@ async function initializeAutoUpdate() {
 
     // Wrap periodic check in try-catch to prevent crashes
     try {
-      autoUpdateService.startPeriodicCheck(config.checkInterval);
-      log.info('[AUTO_UPDATE] Periodic checks started, interval:', config.checkInterval, 'ms');
+      const checkInterval = appConfig.get('updateCheckInterval');
+      autoUpdateService.startPeriodicCheck(checkInterval);
+      log.info('[AUTO_UPDATE] Periodic checks started, interval:', checkInterval, 'ms');
     } catch (checkError) {
       log.error('[AUTO_UPDATE] Failed to start periodic checks:', checkError);
       // Don't fail initialization even if periodic check fails
@@ -232,15 +244,90 @@ function setupUpdateIPCHandlers() {
   // Check for updates manually
   ipcMain.handle('check-for-updates', async () => {
     if (!autoUpdateService) {
-      return { success: false, error: 'Update service not available' };
+      return {
+        success: true,
+        updateAvailable: false,
+        reason: '更新服务不可用'
+      };
     }
 
-    try {
-      await autoUpdateService.checkForUpdates();
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    return new Promise((resolve) => {
+      let updateAvailableHandler;
+      let updateNotAvailableHandler;
+      let timeout;
+
+      // 清理监听器
+      const cleanup = () => {
+        if (updateAvailableHandler) {
+          autoUpdateService.removeListener('update-available', updateAvailableHandler);
+        }
+        if (updateNotAvailableHandler) {
+          autoUpdateService.removeListener('update-not-available', updateNotAvailableHandler);
+        }
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+      };
+
+      // 监听更新可用事件
+      updateAvailableHandler = (info) => {
+        cleanup();
+        resolve({
+          success: true,
+          updateAvailable: true,
+          version: info.version,
+          releaseNotes: info.releaseNotes
+        });
+      };
+
+      // 监听无更新事件
+      updateNotAvailableHandler = (info) => {
+        cleanup();
+        resolve({
+          success: true,
+          updateAvailable: false,
+          currentVersion: info.version,
+          reason: '已是最新版本'
+        });
+      };
+
+      autoUpdateService.once('update-available', updateAvailableHandler);
+      autoUpdateService.once('update-not-available', updateNotAvailableHandler);
+
+      // 15秒超时
+      timeout = setTimeout(() => {
+        cleanup();
+        resolve({
+          success: true,
+          updateAvailable: false,
+          reason: '检查超时或无可用版本'
+        });
+      }, 15000);
+
+      // 开始检查
+      autoUpdateService.checkForUpdates().catch((error) => {
+        cleanup();
+
+        // 404错误表示没有可用版本，这不是失败
+        if (error.message && (
+          error.message.includes('404') ||
+          error.message.includes('No published version') ||
+          error.message.includes('Cannot find channel')
+        )) {
+          resolve({
+            success: true,
+            updateAvailable: false,
+            reason: '暂无可用版本'
+          });
+        } else {
+          // 其他错误才是真正的检查失败
+          resolve({
+            success: false,
+            error: error.message || '检查更新失败'
+          });
+        }
+      });
+    });
   });
 
   // Install update and restart
@@ -306,8 +393,8 @@ function showUpdateAvailableNotification(info) {
 
     // Use macOS native notification - won't interfere with main window
     const notification = new Notification({
-      title: 'Update Available',
-      body: `Version ${info.version} is now available.\nDownloading in the background...`,
+      title: '发现新版本',
+      body: `版本 ${info.version} 现已可用。\n正在后台下载...`,
       silent: false,
       timeoutType: 'default'
     });
@@ -326,7 +413,7 @@ function showUpdateAvailableNotification(info) {
  */
 function checkLocalUpdateCache(targetVersion) {
   try {
-    const cacheDir = path.join(app.getPath('userData'), '..', 'Caches', 'employee-safety-client', 'pending');
+    const cacheDir = path.join(app.getPath('cache'), 'employee-safety-client', 'pending');
     const updateZip = path.join(cacheDir, 'EmployeeSafety.zip');
 
     if (!fs.existsSync(updateZip)) {
@@ -378,7 +465,7 @@ async function executeAutoInstall() {
 
   try {
     // Find the downloaded update zip
-    const cacheDir = path.join(app.getPath('userData'), '..', 'Caches', 'employee-safety-client', 'pending');
+    const cacheDir = path.join(app.getPath('cache'), 'employee-safety-client', 'pending');
     const updateZip = path.join(cacheDir, 'EmployeeSafety.zip');
 
     if (!fs.existsSync(updateZip)) {
@@ -391,13 +478,22 @@ async function executeAutoInstall() {
     // Get install script path (in Resources if packaged, in project if dev)
     let scriptPath;
     if (app.isPackaged) {
-      scriptPath = path.join(process.resourcesPath, 'installer-scripts', 'auto-install-update-macos.sh');
+      // ✅ 优先尝试 Resources 根目录（extraResource 默认位置）
+      scriptPath = path.join(process.resourcesPath, 'auto-install-update-macos.sh');
+
+      // 如果不存在，尝试 installer-scripts 子目录（向后兼容）
+      if (!fs.existsSync(scriptPath)) {
+        scriptPath = path.join(process.resourcesPath, 'installer-scripts', 'auto-install-update-macos.sh');
+      }
     } else {
       scriptPath = path.join(__dirname, '..', 'installer-scripts', 'auto-install-update-macos.sh');
     }
 
     if (!fs.existsSync(scriptPath)) {
       log.error('[AUTO_UPDATE] Install script not found:', scriptPath);
+      log.error('[AUTO_UPDATE] Searched locations:');
+      log.error('[AUTO_UPDATE]   1. ', path.join(process.resourcesPath, 'auto-install-update-macos.sh'));
+      log.error('[AUTO_UPDATE]   2. ', path.join(process.resourcesPath, 'installer-scripts', 'auto-install-update-macos.sh'));
       return false;
     }
 
@@ -466,19 +562,47 @@ function showUpdateReadyNotification(info) {
   dialog
     .showMessageBox({
       type: 'question',
-      title: 'Update Ready',
-      message: `Version ${info.version} has been downloaded`,
+      title: '更新已就绪',
+      message: `版本 ${info.version} 已下载完成`,
       detail:
-        'The update is ready to install. The application will restart to complete the installation.\n\n' +
-        'Do you want to restart now?',
-      buttons: ['Restart Now', 'Later'],
+        '更新已准备就绪，应用将重启以完成安装。\n\n' +
+        '您要现在重启吗？',
+      buttons: ['立即重启', '稍后'],
       defaultId: 0,
       cancelId: 1
     })
     .then((response) => {
-      if (response.response === 0 && autoUpdateService) {
-        // User chose to restart now
-        autoUpdateService.quitAndInstall();
+      if (response.response === 0) {
+        log.info('[AUTO_UPDATE] 用户选择立即重启');
+
+        if (!autoUpdateService) {
+          log.error('[AUTO_UPDATE] autoUpdateService 不可用，无法重启');
+          dialog.showMessageBox({
+            type: 'error',
+            title: '重启失败',
+            message: '更新服务不可用',
+            detail: '请手动重启应用以完成更新',
+            buttons: ['确定']
+          });
+          return;
+        }
+
+        try {
+          log.info('[AUTO_UPDATE] 正在调用 quitAndInstall()...');
+          autoUpdateService.quitAndInstall();
+          log.info('[AUTO_UPDATE] quitAndInstall() 调用成功');
+        } catch (error) {
+          log.error('[AUTO_UPDATE] quitAndInstall() 失败:', error);
+          dialog.showMessageBox({
+            type: 'error',
+            title: '重启失败',
+            message: '无法自动重启应用',
+            detail: `错误信息: ${error.message}\n\n请手动重启应用以完成更新`,
+            buttons: ['确定']
+          });
+        }
+      } else {
+        log.info('[AUTO_UPDATE] 用户选择稍后重启');
       }
     })
     .catch((err) => log.error('[AUTO_UPDATE] Failed to show notification:', err));
@@ -491,10 +615,10 @@ function showUpdateSuccessNotification() {
   dialog
     .showMessageBox({
       type: 'info',
-      title: 'Update Complete',
-      message: `Successfully updated to version ${app.getVersion()}`,
-      detail: 'The application has been updated successfully.',
-      buttons: ['OK'],
+      title: '更新完成',
+      message: `已成功更新至版本 ${app.getVersion()}`,
+      detail: '应用程序已成功更新。',
+      buttons: ['确定'],
       defaultId: 0
     })
     .catch((err) => log.error('[AUTO_UPDATE] Failed to show notification:', err));
@@ -634,7 +758,7 @@ function setupUpdateEventHandlers() {
 
     // Save cache info for future use
     try {
-      const cacheDir = path.join(app.getPath('userData'), '..', 'Caches', 'employee-safety-client', 'pending');
+      const cacheDir = path.join(app.getPath('cache'), 'employee-safety-client', 'pending');
       const cacheInfoPath = path.join(cacheDir, 'cache-info.json');
       const cacheInfo = {
         version: info.version,

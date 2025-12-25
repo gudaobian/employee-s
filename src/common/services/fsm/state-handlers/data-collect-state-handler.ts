@@ -19,6 +19,8 @@ import { ErrorRecoveryService } from '../../../utils/error-recovery';
 import { MemoryMonitor } from '../../../utils/memory-monitor';
 import { logger } from '../../../utils';
 import { EventEmitter } from 'events';
+import { queueService } from '../../queue-service';
+import { ScreenshotQueueItem, ActivityQueueItem, ProcessQueueItem } from '../../../types/queue-types';
 
 // 网络子状态枚举
 export enum NetworkSubState {
@@ -1458,69 +1460,70 @@ export class DataCollectStateHandler extends BaseStateHandler {
       }
       const screenshotResult = await this.collectScreenshotData(screenshotConfig);
       if (screenshotResult && screenshotResult.data) {
-        logger.info('[DATA_COLLECT] ✅ 截图采集成功，开始上传...');
+        logger.info('[DATA_COLLECT] ✅ 截图采集成功，开始入队...');
         this.emitEvent('screenshot-collected', screenshotResult);
 
-        // 使用WebSocket服务上传截图数据
-        if (this.websocketService && this.websocketService.isConnected()) {
-          // CRITICAL FIX: 优化内存使用，避免同时持有 Buffer 和 Base64 字符串
-          let bufferBase64: string | null = null;
-          let dataSize = 0;
+        // 使用队列服务入队（支持在线/离线，有界队列 + 磁盘持久化）
+        // CRITICAL FIX: 优化内存使用，避免同时持有 Buffer 和 Base64 字符串
+        let bufferBase64: string | null = null;
+        let dataSize = 0;
 
-          try {
-            // 使用WebSocket服务的sendScreenshotData方法
-            // 注意: 服务器期望字段名为 buffer 和 timestamp
-            // deviceId 不需要发送，服务器从 socket session 中自动获取
+        try {
+          // 🔧 关键修复: 将 Buffer 转换为 Base64 字符串
+          // Socket.IO 不能直接传输 Buffer，需要转换为字符串
+          const originalBuffer = screenshotResult.data;
+          dataSize = originalBuffer.length;
 
-            // 🔧 关键修复: 将 Buffer 转换为 Base64 字符串
-            // Socket.IO 不能直接传输 Buffer，需要转换为字符串
-            const originalBuffer = screenshotResult.data;
-            dataSize = originalBuffer.length;
+          // 检查原始图片格式 (magic bytes) - 在转换前检查
+          const magicBytes = originalBuffer.slice(0, 4);
+          const isPNG = magicBytes[0] === 0x89 && magicBytes[1] === 0x50;
+          const isJPEG = magicBytes[0] === 0xFF && magicBytes[1] === 0xD8;
+          const isWebP = magicBytes.toString('ascii', 0, 4) === 'RIFF';
+          logger.info(`[DATA_COLLECT] 图片格式: ${isPNG ? 'PNG' : isJPEG ? 'JPEG' : isWebP ? 'WebP' : 'Unknown'}`);
 
-            // 检查原始图片格式 (magic bytes) - 在转换前检查
-            const magicBytes = originalBuffer.slice(0, 4);
-            const isPNG = magicBytes[0] === 0x89 && magicBytes[1] === 0x50;
-            const isJPEG = magicBytes[0] === 0xFF && magicBytes[1] === 0xD8;
-            const isWebP = magicBytes.toString('ascii', 0, 4) === 'RIFF';
-            logger.info(`[DATA_COLLECT] 图片格式: ${isPNG ? 'PNG' : isJPEG ? 'JPEG' : isWebP ? 'WebP' : 'Unknown'}`);
+          // CRITICAL: 先释放原始 Buffer 引用，再进行 Base64 转换
+          // 这样可以避免同时持有两份数据
+          bufferBase64 = originalBuffer instanceof Buffer
+            ? originalBuffer.toString('base64')
+            : originalBuffer;
 
-            // CRITICAL: 先释放原始 Buffer 引用，再进行 Base64 转换
-            // 这样可以避免同时持有两份数据
-            bufferBase64 = originalBuffer instanceof Buffer
-              ? originalBuffer.toString('base64')
-              : originalBuffer;
+          // 立即释放原始 Buffer 引用
+          screenshotResult.data = null;
+          (screenshotResult as any).buffer = null;
 
-            // 立即释放原始 Buffer 引用
-            screenshotResult.data = null;
-            (screenshotResult as any).buffer = null;
+          const base64Size = bufferBase64.length;
+          logger.info(`[DATA_COLLECT] 截图数据转换: Buffer(${dataSize} bytes) → Base64(${base64Size} chars)`);
 
-            const base64Size = bufferBase64.length;
-            logger.info(`[DATA_COLLECT] 截图数据转换: Buffer(${dataSize} bytes) → Base64(${base64Size} chars)`);
+          // 简化验证日志，减少内存操作
+          logger.info(`[DATA_COLLECT] Base64预览: ${bufferBase64.substring(0, 30)}...`);
 
-            // 简化验证日志，减少内存操作
-            logger.info(`[DATA_COLLECT] Base64预览: ${bufferBase64.substring(0, 30)}...`);
+          // 使用队列服务入队（有界队列 + 磁盘持久化）
+          const screenshotItem: ScreenshotQueueItem = {
+            id: `screenshot_${screenshotResult.timestamp}`,
+            timestamp: screenshotResult.timestamp,
+            type: 'screenshot',
+            buffer: bufferBase64,
+            fileSize: dataSize,
+            format: 'jpg',
+            quality: screenshotConfig.quality || 10,
+            resolution: {
+              width: screenshotConfig.maxWidth || 1280,
+              height: screenshotConfig.maxHeight || 720
+            }
+          };
 
-            await this.websocketService.sendScreenshotData({
-              buffer: bufferBase64,  // Base64 编码的字符串
-              timestamp: screenshotResult.timestamp,
-              fileSize: dataSize  // 原始 Buffer 字节大小（不是 Base64 长度）
-            });
-            logger.info('[DATA_COLLECT] ✅ 截图数据已通过WebSocket服务上传');
+          await queueService.enqueueScreenshot(screenshotItem);
+          logger.info(`[DATA_COLLECT] ✅ 截图数据已入队（内存队列 ${queueService.getQueues().screenshot.size()}/5，溢出将持久化到磁盘）`);
 
-            this.emitEvent('screenshot-uploaded', { timestamp: screenshotResult.timestamp });
-          } catch (error: any) {
-            logger.warn('[DATA_COLLECT] ⚠️ 截图数据上传失败: ' + error.message);
-            this.emitEvent('screenshot-upload-failed', { error: error.message });
-          } finally {
-            // CRITICAL: 确保在任何情况下都释放内存引用
-            bufferBase64 = null;
-            screenshotResult.data = null;
-            (screenshotResult as any).buffer = null;
-          }
-        } else {
-          logger.warn('[DATA_COLLECT] ⚠️ WebSocket服务未连接，截图数据未上传');
-          // TODO: 实现离线缓存功能
-          logger.info('[DATA_COLLECT] 📦 截图数据将在连接恢复后重试');
+          this.emitEvent('screenshot-enqueued', { timestamp: screenshotResult.timestamp });
+        } catch (error: any) {
+          logger.warn('[DATA_COLLECT] ⚠️ 截图数据入队失败: ' + error.message);
+          this.emitEvent('screenshot-enqueue-failed', { error: error.message });
+        } finally {
+          // CRITICAL: 确保在任何情况下都释放内存引用
+          bufferBase64 = null;
+          screenshotResult.data = null;
+          (screenshotResult as any).buffer = null;
         }
       } else {
         logger.warn('[DATA_COLLECT] ⚠️ 截图采集失败');
@@ -1579,38 +1582,38 @@ export class DataCollectStateHandler extends BaseStateHandler {
         logger.info('[DATA_COLLECT] ActivityCollectorService不可用，使用传统活动采集...');
         const activityResult = await this.collectActivityData(config.monitoring || {});
         if (activityResult && !activityResult.error) {
-          logger.info('[DATA_COLLECT] ✅ 活动数据采集成功，开始上传...');
+          logger.info('[DATA_COLLECT] ✅ 活动数据采集成功，开始入队...');
           this.emitEvent('activity-collected', activityResult);
 
-          // 使用WebSocket服务上传活动数据
-          if (this.websocketService && this.websocketService.isConnected()) {
-            try {
-              // 使用WebSocket服务的sendActivityData方法
-              await this.websocketService.sendActivityData({
+          // 使用队列服务入队（支持在线/离线，有界队列 + 磁盘持久化）
+          try {
+            const activityItem: ActivityQueueItem = {
+              id: `activity_${activityResult.timestamp}`,
+              timestamp: activityResult.timestamp,
+              type: 'activity',
+              data: {
                 deviceId: config.deviceId,
                 ...activityResult
-              });
-              logger.info('[DATA_COLLECT] ✅ 活动数据已通过WebSocket服务上传');
-              this.emitEvent('activity-uploaded', activityResult);
-
-              // 通知平台适配器数据上传成功，重置活动计数器
-              if (typeof (this.platformAdapter as any).onDataUploadSuccess === 'function') {
-                try {
-                  logger.info('[DATA_COLLECT] 🔄 调用平台适配器的计数器重置方法...');
-                  (this.platformAdapter as any).onDataUploadSuccess();
-                  logger.info('[DATA_COLLECT] ✅ 平台适配器计数器重置方法调用完成');
-                } catch (error) {
-                  logger.error('[DATA_COLLECT] ❌ 重置活动计数器失败:', error);
-                }
               }
-            } catch (error: any) {
-              logger.warn('[DATA_COLLECT] ⚠️ 活动数据上传失败: ' + error.message);
-              this.emitEvent('activity-upload-failed', { error: error.message });
+            };
+
+            await queueService.enqueueActivity(activityItem);
+            logger.info(`[DATA_COLLECT] ✅ 活动数据已入队（内存队列 ${queueService.getQueues().activity.size()}/5，溢出将持久化到磁盘）`);
+            this.emitEvent('activity-enqueued', activityResult);
+
+            // 通知平台适配器数据入队成功，重置活动计数器
+            if (typeof (this.platformAdapter as any).onDataUploadSuccess === 'function') {
+              try {
+                logger.info('[DATA_COLLECT] 🔄 调用平台适配器的计数器重置方法...');
+                (this.platformAdapter as any).onDataUploadSuccess();
+                logger.info('[DATA_COLLECT] ✅ 平台适配器计数器重置方法调用完成');
+              } catch (error) {
+                logger.error('[DATA_COLLECT] ❌ 重置活动计数器失败:', error);
+              }
             }
-          } else {
-            logger.warn('[DATA_COLLECT] ⚠️ WebSocket服务未连接，活动数据未上传');
-            // TODO: 实现离线缓存功能
-            logger.info('[DATA_COLLECT] 📦 活动数据将在连接恢复后重试');
+          } catch (error: any) {
+            logger.warn('[DATA_COLLECT] ⚠️ 活动数据入队失败: ' + error.message);
+            this.emitEvent('activity-enqueue-failed', { error: error.message });
           }
         } else {
           logger.warn('[DATA_COLLECT] ⚠️ 活动数据采集失败: ' + (activityResult?.error || 'Unknown error'));
@@ -1647,27 +1650,29 @@ export class DataCollectStateHandler extends BaseStateHandler {
       // 执行进程数据采集 - 使用原有的进程采集逻辑
       const processResult = await this.collectProcessData();
       if (processResult.success) {
-        logger.info('[DATA_COLLECT] ✅ 进程数据采集成功，开始上传...');
+        logger.info('[DATA_COLLECT] ✅ 进程数据采集成功，开始入队...');
         this.emitEvent('process-collected', processResult);
 
-        // 使用WebSocket服务上传进程数据
-        if (this.websocketService && this.websocketService.isConnected()) {
-          try {
-            const systemData = {
+        // 使用队列服务入队（支持在线/离线，有界队列 + 磁盘持久化）
+        try {
+          const processItem: ProcessQueueItem = {
+            id: `process_${processResult.timestamp}`,
+            timestamp: processResult.timestamp,
+            type: 'process',
+            data: {
               deviceId: config.deviceId,
               timestamp: processResult.timestamp,
               processes: processResult.processes,
               processCount: processResult.processCount
-            };
-            await this.websocketService.sendSystemData(systemData);
-            logger.info('[DATA_COLLECT] ✅ 进程数据已通过WebSocket服务上传');
-            this.emitEvent('process-uploaded', processResult);
-          } catch (error: any) {
-            logger.warn('[DATA_COLLECT] ⚠️ 进程数据上传失败: ' + error.message);
-            this.emitEvent('process-upload-failed', { error: error.message });
-          }
-        } else {
-          logger.warn('[DATA_COLLECT] ⚠️ WebSocket服务未连接，进程数据未上传');
+            }
+          };
+
+          await queueService.enqueueProcess(processItem);
+          logger.info(`[DATA_COLLECT] ✅ 进程数据已入队（内存队列 ${queueService.getQueues().process.size()}/5，溢出将持久化到磁盘）`);
+          this.emitEvent('process-enqueued', processResult);
+        } catch (error: any) {
+          logger.warn('[DATA_COLLECT] ⚠️ 进程数据入队失败: ' + error.message);
+          this.emitEvent('process-enqueue-failed', { error: error.message });
         }
       } else {
         logger.warn('[DATA_COLLECT] ⚠️ 进程数据采集失败: ' + processResult.error);

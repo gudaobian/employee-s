@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# EmployeeMonitor DMG 创建脚本
+# EmployeeSafety DMG 创建脚本
 # 使用 macOS 原生 hdiutil 工具创建专业的安装镜像
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_DIR="$PROJECT_ROOT/release"
 
 echo "💿 创建 macOS DMG 安装镜像..."
@@ -23,17 +23,23 @@ if [ ! -d "$RELEASE_DIR/EmployeeSafety-darwin-x64/EmployeeSafety.app" ]; then
     exit 1
 fi
 
+# 读取版本号
+VERSION=$(node -p "require('$PROJECT_ROOT/package.json').version")
+echo "📌 当前版本: $VERSION"
+
 # 创建 DMG 的函数
 create_dmg() {
     local ARCH=$1
     local APP_PATH="$RELEASE_DIR/EmployeeSafety-darwin-$ARCH/EmployeeSafety.app"
-    local DMG_NAME="EmployeeSafety-darwin-$ARCH.dmg"
+
+    # 新命名格式: EmployeeSafety-macos-{arch}-{version}.dmg
+    local DMG_NAME="EmployeeSafety-macos-$ARCH-$VERSION.dmg"
     local DMG_PATH="$RELEASE_DIR/$DMG_NAME"
     local TEMP_DMG="$RELEASE_DIR/temp-$ARCH.dmg"
     local VOLUME_NAME="EmployeeSafety"
 
     echo ""
-    echo "📦 创建 $ARCH 版本 DMG..."
+    echo "📦 创建 $ARCH 版本 DMG ($VERSION)..."
 
     # 删除旧的 DMG
     rm -f "$DMG_PATH" "$TEMP_DMG"
@@ -98,13 +104,42 @@ INSTALL_README
     # 等待挂载完成
     sleep 2
 
-    # 卸载 DMG
-    hdiutil detach "$MOUNT_DIR" -quiet
+    # 卸载 DMG（强制卸载，确保资源释放）
+    echo "   🔄 卸载临时 DMG..."
+    hdiutil detach "$MOUNT_DIR" -force -quiet
 
-    # 转换为只读压缩格式
-    hdiutil convert "$TEMP_DMG" \
-                    -format UDZO \
-                    -o "$DMG_PATH"
+    # ⏰ 关键：等待系统完全释放资源
+    # macOS 需要时间刷新磁盘缓存和释放文件锁
+    echo "   ⏳ 等待系统释放资源..."
+    sleep 3
+
+    # 验证临时 DMG 文件可访问（确保没有被占用）
+    if [ ! -f "$TEMP_DMG" ]; then
+        echo "   ❌ 临时 DMG 文件丢失"
+        exit 1
+    fi
+
+    # 转换为只读压缩格式（添加重试机制）
+    echo "   🔄 转换为压缩格式..."
+    local retry_count=0
+    local max_retries=3
+
+    while [ $retry_count -lt $max_retries ]; do
+        if hdiutil convert "$TEMP_DMG" \
+                        -format UDZO \
+                        -o "$DMG_PATH" 2>/dev/null; then
+            break
+        else
+            retry_count=$((retry_count + 1))
+            if [ $retry_count -lt $max_retries ]; then
+                echo "   ⚠️  转换失败，重试 $retry_count/$max_retries..."
+                sleep 2
+            else
+                echo "   ❌ 转换失败，已重试 $max_retries 次"
+                exit 1
+            fi
+        fi
+    done
 
     # 清理临时文件
     rm -f "$TEMP_DMG"

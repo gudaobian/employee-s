@@ -3,11 +3,290 @@
  * 280x320px 小窗口，只包含7个核心功能
  */
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, clipboard, dialog } = require('electron');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
+const originalFs = require('original-fs'); // ⚡ 未被 ASAR 劫持的原始 fs 模块
+
+// ========================================
+// 🔧 FIX: Configure sharp to find native libraries in ASAR unpacked directory
+// ========================================
+if (app.isPackaged) {
+    const unpackedPath = path.join(process.resourcesPath, 'app.asar.unpacked');
+    process.env.SHARP_LIBVIPS_LOCAL_PREBUILDS = path.join(unpackedPath, 'node_modules/@img');
+    console.log('[SHARP] Configured SHARP_LIBVIPS_LOCAL_PREBUILDS:', process.env.SHARP_LIBVIPS_LOCAL_PREBUILDS);
+}
+
+// ========================================
+// 热更新：启动时检测并替换 .new 文件（包括 unpacked 目录）
+// ========================================
+(function applyPendingUpdate() {
+  if (!app.isPackaged) return; // 开发环境跳过
+
+  try {
+    const asarPath = path.join(process.resourcesPath, 'app.asar');
+    const newAsarPath = `${asarPath}.new`;
+    const backupPath = `${asarPath}.backup`;
+
+    const unpackedPath = `${asarPath}.unpacked`;
+    const newUnpackedPath = `${asarPath}.new.unpacked`;
+    const backupUnpackedPath = `${asarPath}.unpacked.backup`;
+
+    // 检查是否有待安装的更新
+    if (originalFs.existsSync(newAsarPath)) {
+      console.log('[HOT_UPDATE] 检测到待安装更新:', newAsarPath);
+
+      // 1. 备份当前版本 ASAR（如果还没有备份）
+      if (!originalFs.existsSync(backupPath)) {
+        console.log('[HOT_UPDATE] 备份当前 ASAR...');
+        originalFs.copyFileSync(asarPath, backupPath);
+      }
+
+      // 2. 备份当前版本 unpacked（如果存在且还没有备份）
+      if (originalFs.existsSync(unpackedPath) && !originalFs.existsSync(backupUnpackedPath)) {
+        console.log('[HOT_UPDATE] 备份当前 unpacked 目录...');
+        copyDirSync(unpackedPath, backupUnpackedPath);
+      }
+
+      // 3. 替换 ASAR 为新版本
+      console.log('[HOT_UPDATE] 安装新版本 ASAR...');
+      originalFs.renameSync(newAsarPath, asarPath);
+
+      // 4. 替换 unpacked 目录（如果存在）
+      if (originalFs.existsSync(newUnpackedPath)) {
+        console.log('[HOT_UPDATE] 安装新版本 unpacked 目录...');
+
+        // 删除旧的 unpacked 目录
+        if (originalFs.existsSync(unpackedPath)) {
+          console.log('[HOT_UPDATE] 删除旧 unpacked 目录...');
+          removeDirSync(unpackedPath);
+        }
+
+        // 重命名新的 unpacked 目录
+        originalFs.renameSync(newUnpackedPath, unpackedPath);
+        console.log('[HOT_UPDATE] ✅ unpacked 目录替换成功');
+
+        // 🆕 4.5. 同步Sharp库到Frameworks目录
+        syncSharpLibrariesToFrameworks(unpackedPath);
+      }
+
+      // 5. 删除备份（替换成功后）
+      if (originalFs.existsSync(backupPath)) {
+        originalFs.unlinkSync(backupPath);
+      }
+      if (originalFs.existsSync(backupUnpackedPath)) {
+        removeDirSync(backupUnpackedPath);
+      }
+
+      console.log('[HOT_UPDATE] ✅ 热更新安装成功（ASAR + unpacked）');
+
+      // 6. 重新启动应用以加载新代码
+      console.log('[HOT_UPDATE] 重新启动应用...');
+      app.relaunch({ args: process.argv.slice(1).concat(["--start-minimized"]) });
+      app.exit(0);
+    }
+  } catch (error) {
+    console.error('[HOT_UPDATE] ❌ 安装失败:', error.message);
+    console.error('[HOT_UPDATE] 错误堆栈:', error.stack);
+
+    // 尝试回滚
+    try {
+      const asarPath = path.join(process.resourcesPath, 'app.asar');
+      const backupPath = `${asarPath}.backup`;
+      const unpackedPath = `${asarPath}.unpacked`;
+      const backupUnpackedPath = `${asarPath}.unpacked.backup`;
+
+      console.log('[HOT_UPDATE] 开始回滚...');
+
+      // 回滚 ASAR
+      if (originalFs.existsSync(backupPath)) {
+        console.log('[HOT_UPDATE] 回滚 ASAR...');
+        originalFs.copyFileSync(backupPath, asarPath);
+        originalFs.unlinkSync(backupPath);
+      }
+
+      // 回滚 unpacked
+      if (originalFs.existsSync(backupUnpackedPath)) {
+        console.log('[HOT_UPDATE] 回滚 unpacked 目录...');
+        if (originalFs.existsSync(unpackedPath)) {
+          removeDirSync(unpackedPath);
+        }
+        copyDirSync(backupUnpackedPath, unpackedPath);
+        removeDirSync(backupUnpackedPath);
+      }
+
+      console.log('[HOT_UPDATE] ✅ 回滚成功');
+    } catch (rollbackError) {
+      console.error('[HOT_UPDATE] ❌ 回滚失败:', rollbackError.message);
+    }
+  }
+
+  // 辅助函数：递归复制目录
+  function copyDirSync(src, dest) {
+    if (!originalFs.existsSync(dest)) {
+      originalFs.mkdirSync(dest, { recursive: true });
+    }
+    const entries = originalFs.readdirSync(src, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(src, entry.name);
+      const destPath = path.join(dest, entry.name);
+      if (entry.isDirectory()) {
+        copyDirSync(srcPath, destPath);
+      } else {
+        originalFs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+
+  // 辅助函数：递归删除目录
+  function removeDirSync(dirPath) {
+    if (originalFs.existsSync(dirPath)) {
+      const entries = originalFs.readdirSync(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          removeDirSync(fullPath);
+        } else {
+          originalFs.unlinkSync(fullPath);
+        }
+      }
+      originalFs.rmdirSync(dirPath);
+    }
+  }
+
+  // 🆕 辅助函数：同步Sharp库到Frameworks目录
+  function syncSharpLibrariesToFrameworks(unpackedPath) {
+    try {
+      const frameworksPath = path.join(process.resourcesPath, '..', 'Frameworks');
+      const sharpLibSource = path.join(unpackedPath, 'node_modules/@img/sharp-libvips-darwin-arm64/lib');
+
+      // 检查Sharp库源目录是否存在
+      if (!originalFs.existsSync(sharpLibSource)) {
+        console.log('[HOT_UPDATE] ℹ️  Sharp库源目录不存在，跳过Frameworks同步');
+        return;
+      }
+
+      // 确保Frameworks目录存在
+      if (!originalFs.existsSync(frameworksPath)) {
+        console.log('[HOT_UPDATE] ⚠️  Frameworks目录不存在，创建中...');
+        originalFs.mkdirSync(frameworksPath, { recursive: true });
+      }
+
+      console.log('[HOT_UPDATE] 🔍 检测Sharp库更新，同步到Frameworks...');
+      console.log('[HOT_UPDATE]   源目录:', sharpLibSource);
+      console.log('[HOT_UPDATE]   目标目录:', frameworksPath);
+
+      // 读取所有.dylib文件
+      const allFiles = originalFs.readdirSync(sharpLibSource);
+      const dylibFiles = allFiles.filter(file => file.endsWith('.dylib'));
+
+      if (dylibFiles.length === 0) {
+        console.log('[HOT_UPDATE] ⚠️  未找到.dylib文件');
+        return;
+      }
+
+      console.log(`[HOT_UPDATE] 找到 ${dylibFiles.length} 个.dylib文件:`, dylibFiles);
+
+      let syncCount = 0;
+      let skipCount = 0;
+
+      for (const dylibFile of dylibFiles) {
+        const sourcePath = path.join(sharpLibSource, dylibFile);
+        const targetPath = path.join(frameworksPath, dylibFile);
+
+        // 检查是否需要同步
+        let needsSync = false;
+        let reason = '';
+
+        if (!originalFs.existsSync(targetPath)) {
+          needsSync = true;
+          reason = '新增文件';
+        } else {
+          // 对比文件大小判断版本是否不同
+          const sourceStats = originalFs.statSync(sourcePath);
+          const targetStats = originalFs.statSync(targetPath);
+
+          if (sourceStats.size !== targetStats.size) {
+            needsSync = true;
+            reason = `版本变化 (${(targetStats.size / 1024 / 1024).toFixed(2)}MB -> ${(sourceStats.size / 1024 / 1024).toFixed(2)}MB)`;
+          } else {
+            // 大小相同，假设版本一致
+            skipCount++;
+            console.log(`[HOT_UPDATE]   - ${dylibFile}: 跳过（版本未变化）`);
+            continue;
+          }
+        }
+
+        if (needsSync) {
+          console.log(`[HOT_UPDATE]   - ${dylibFile}: ${reason}`);
+
+          try {
+            // 备份旧版本（如果存在）
+            if (originalFs.existsSync(targetPath)) {
+              const backupTargetPath = `${targetPath}.backup`;
+              if (originalFs.existsSync(backupTargetPath)) {
+                originalFs.unlinkSync(backupTargetPath);
+              }
+              originalFs.renameSync(targetPath, backupTargetPath);
+              console.log(`[HOT_UPDATE]     已备份旧版本: ${dylibFile}.backup`);
+            }
+
+            // 复制新版本
+            originalFs.copyFileSync(sourcePath, targetPath);
+            syncCount++;
+            console.log(`[HOT_UPDATE]     ✅ ${dylibFile} 同步成功`);
+
+          } catch (fileError) {
+            console.error(`[HOT_UPDATE]     ❌ ${dylibFile} 同步失败:`, fileError.message);
+
+            // 尝试恢复备份
+            const backupTargetPath = `${targetPath}.backup`;
+            if (originalFs.existsSync(backupTargetPath)) {
+              try {
+                originalFs.renameSync(backupTargetPath, targetPath);
+                console.log(`[HOT_UPDATE]     已恢复备份版本`);
+              } catch (restoreError) {
+                console.error(`[HOT_UPDATE]     恢复备份失败:`, restoreError.message);
+              }
+            }
+          }
+        }
+      }
+
+      // 清理备份文件（同步成功后）
+      try {
+        const frameworkFiles = originalFs.readdirSync(frameworksPath);
+        const backupFiles = frameworkFiles.filter(f => f.endsWith('.dylib.backup'));
+
+        for (const backupFile of backupFiles) {
+          const backupPath = path.join(frameworksPath, backupFile);
+          originalFs.unlinkSync(backupPath);
+          console.log(`[HOT_UPDATE]   已清理备份: ${backupFile}`);
+        }
+      } catch (cleanupError) {
+        console.error('[HOT_UPDATE] 清理备份文件失败:', cleanupError.message);
+      }
+
+      // 总结
+      if (syncCount > 0) {
+        console.log(`[HOT_UPDATE] ✅ 已同步 ${syncCount} 个Sharp库到Frameworks`);
+      } else if (skipCount > 0) {
+        console.log(`[HOT_UPDATE] ℹ️  Sharp库版本未变化，无需同步 (检查了${skipCount}个文件)`);
+      }
+
+    } catch (error) {
+      console.error('[HOT_UPDATE] ⚠️  Sharp库同步失败（不影响其他更新）:', error.message);
+      console.error('[HOT_UPDATE] 错误堆栈:', error.stack);
+      // 不抛出错误，允许热更新继续完成
+    }
+  }
+})();
+// ========================================
 const { WindowsNativeInstaller } = require('./windows-native-installer');
 const UnifiedLogManager = require('./unified-log-manager');
+const { initializeAutoUpdate, setupUpdateIPCHandlers } = require('./auto-update-integration');
+const EnhancedHotReloadManager = require('./enhanced-hot-reload-manager');
 
 // 全局变量
 let mainWindow = null;
@@ -20,17 +299,18 @@ let currentState = 'INIT';
 let manuallyPaused = false; // 添加手动暂停标志，初始为false允许启动
 let windowsNativeInstaller = null;
 let logManager = null; // 日志管理器
+let hotReloadManager = null; // 增强版热更新管理器
 
 // 检查启动参数
 const isStartMinimized = process.argv.includes('--start-minimized');
 console.log(`[STARTUP] Start minimized: ${isStartMinimized}`);
 console.log(`[STARTUP] Command line args:`, process.argv);
 
-// 应用配置 - 增加高度扩大日志区域
+// 应用配置
 const APP_CONFIG = {
     name: 'Employee Safety',
     width: 340,
-    height: 750, // Windows标题栏需要更高，确保自启动按钮不被遮挡
+    height: 265, // 紧凑布局，无底部padding
     resizable: false
 };
 
@@ -48,40 +328,210 @@ if (!gotTheLock) {
     });
 }
 
-// 在macOS上保持Dock图标显示，提升用户体验
+// 注意：macOS Dock 显示/隐藏由 Info.plist 中的 LSUIElement 控制
+// LSUIElement=false: 显示窗口和菜单栏
+// LSUIElement=true: 后台代理模式（无窗口）
 if (process.platform === 'darwin') {
-    // 保持在Dock中显示，避免用户误以为应用已退出
-    app.dock.show();
-    console.log('macOS detected - keeping Dock icon visible for better UX');
+    console.log('macOS detected - UI mode controlled by Info.plist LSUIElement setting');
+}
+
+/**
+ * ASAR完整性检查
+ * 启动时验证ASAR文件完整性，损坏时自动从备份恢复
+ */
+function checkAsarIntegrity() {
+    // 开发模式跳过检查
+    if (!app.isPackaged) {
+        console.log('[Startup] Development mode - skipping ASAR integrity check');
+        return true;
+    }
+
+    const asarPath = path.join(process.resourcesPath, 'app.asar');
+    const backupPath = `${asarPath}.backup`;
+
+    // ⚡ FIX: Check if using directory packaging (--no-asar)
+    if (!fs.existsSync(asarPath)) {
+        // Using directory packaging instead of ASAR
+        const appDirPath = path.join(process.resourcesPath, 'app');
+        if (fs.existsSync(appDirPath)) {
+            console.log('[Startup] ✅ Using directory packaging (no ASAR) - skipping integrity check');
+            return true;
+        }
+        console.error('[Startup] ❌ Neither app.asar nor app directory found');
+        return false;
+    }
+
+    // ⚡ FIX: 使用 original-fs 避免 ASAR 虚拟文件系统重定向
+    try {
+        // 使用未被劫持的原始 fs 模块读取 ASAR 文件
+        // 这样可以直接访问物理文件，不经过 Electron 的 ASAR 重定向
+        const fd = originalFs.openSync(asarPath, 'r');
+        const buffer = Buffer.allocUnsafe(16);
+        const bytesRead = originalFs.readSync(fd, buffer, 0, 16, 0);
+        originalFs.closeSync(fd);
+
+        // 验证读取成功
+        if (bytesRead < 16) {
+            throw new Error(`ASAR文件损坏：只能读取 ${bytesRead} 字节`);
+        }
+
+        // 验证 ASAR 文件头部（不会全为 0）
+        const isAllZeros = buffer.slice(0, 16).every(b => b === 0);
+        if (isAllZeros) {
+            throw new Error('ASAR文件损坏：文件内容异常');
+        }
+
+        console.log(`[Startup] ✅ ASAR完整性检查通过 - 文件格式正常`);
+        return true;
+
+    } catch (error) {
+        console.error('[Startup] ❌ ASAR文件检查失败:', error.message);
+
+        // 尝试从备份恢复
+        if (fs.existsSync(backupPath)) {
+            console.log('[Startup] 发现备份文件,尝试恢复...');
+            try {
+                fs.copyFileSync(backupPath, asarPath);
+                console.log('[Startup] ✅ ASAR已从备份恢复,应用将重启');
+
+                dialog.showMessageBoxSync({
+                    type: 'warning',
+                    title: '应用已恢复',
+                    message: '检测到应用文件损坏，已自动从备份恢复。\n应用将重新启动。',
+                    buttons: ['确定']
+                });
+
+                app.relaunch({ args: process.argv.slice(1).concat(["--start-minimized"]) });
+                app.exit(0);
+                return false;
+
+            } catch (restoreError) {
+                console.error('[Startup] ❌ 从备份恢复失败:', restoreError.message);
+
+                dialog.showErrorBox(
+                    '应用启动失败',
+                    '应用文件已损坏且无法恢复。\n请重新安装应用。'
+                );
+                return false;
+            }
+        } else {
+            console.error('[Startup] ❌ 未找到备份文件');
+
+            dialog.showErrorBox(
+                '应用启动失败',
+                '应用文件已损坏且未找到备份。\n请重新安装应用。'
+            );
+            return false;
+        }
+    }
+}
+
+// 启动前检查ASAR完整性
+if (!checkAsarIntegrity()) {
+    // 如果检查失败且没有触发重启,直接退出
+    app.quit();
 }
 
 // 应用就绪
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+    console.log('[MAIN] ========== APP READY CALLBACK START ==========');
+    console.log('[MAIN] Timestamp:', new Date().toISOString());
     console.log('企业安全 (精简版) 启动中...');
     console.log('[MAIN] Environment check - isPackaged:', app.isPackaged, 'appPath:', app.getAppPath());
     console.log('[MAIN] __dirname:', __dirname, 'process.cwd():', process.cwd());
-    
+
     // 隐藏默认菜单栏（Windows/Linux）
     if (process.platform !== 'darwin') {
         Menu.setApplicationMenu(null);
     }
-    
+
     // 初始化日志管理器
-    logManager = new UnifiedLogManager({
-        logLevel: 'WARN'
-    });
-    console.log('[LOG_MANAGER] 统一日志管理器已启动');
-    
+    try {
+        logManager = new UnifiedLogManager({
+            logLevel: 'WARN'
+        });
+        console.log('[LOG_MANAGER] 统一日志管理器已启动');
+    } catch (logError) {
+        console.error('[LOG_MANAGER] 初始化失败:', logError);
+    }
+
     // 初始化Windows原生模块安装器
     if (process.platform === 'win32') {
         windowsNativeInstaller = new WindowsNativeInstaller();
         sendLogToRenderer('Windows原生模块安装器已初始化');
     }
-    
-    createMainWindow();
-    createTray();
-    setupIPCHandlers();
-    
+
+    try {
+        createMainWindow();
+        console.log('[MAIN] 主窗口创建成功');
+    } catch (winError) {
+        console.error('[MAIN] 创建主窗口失败:', winError);
+    }
+
+    try {
+        createTray();
+        console.log('[MAIN] 系统托盘创建成功');
+    } catch (trayError) {
+        console.error('[MAIN] 创建系统托盘失败:', trayError);
+    }
+
+    try {
+        setupIPCHandlers();
+        console.log('[MAIN] IPC处理器注册成功');
+    } catch (ipcError) {
+        console.error('[MAIN] 注册IPC处理器失败:', ipcError);
+    }
+
+    // 初始化自动更新系统
+    console.log('[MAIN] ===== STEP 4: Initializing Auto-Update System =====');
+    try {
+        initializeAutoUpdate(mainWindow).catch(e => console.error("[MAIN] Auto-update error:", e));
+        console.log('[MAIN] ✅ 自动更新系统已初始化');
+    } catch (updateError) {
+        console.error('[MAIN] ❌ 自动更新系统初始化失败:', updateError);
+    }
+    console.log('[MAIN] ===== STEP 4: Auto-Update Initialized =====');
+
+    // 注册更新相关的IPC处理器（即使更新服务初始化失败也需要注册）
+    console.log('[MAIN] ===== STEP 5: Setting up Update IPC Handlers =====');
+    try {
+        setupUpdateIPCHandlers();
+        console.log('[MAIN] ✅ 更新IPC处理器已注册');
+    } catch (ipcError) {
+        console.error('[MAIN] ❌ 注册更新IPC处理器失败:', ipcError);
+    }
+    console.log('[MAIN] ===== STEP 5: Update IPC Handlers Registered =====');
+
+    // 初始化增强版热更新系统（仅开发环境）
+    console.log('[MAIN] 🔍 Checking if should initialize hot reload... isPackaged:', app.isPackaged);
+    if (!app.isPackaged) {
+        console.log('[MAIN] 🔍 Entering hot reload initialization block...');
+        try {
+            console.log('[MAIN] 🔍 Creating EnhancedHotReloadManager instance...');
+            hotReloadManager = new EnhancedHotReloadManager(mainWindow, {
+                watchPath: path.join(__dirname, 'renderer'),
+                fileTypes: ['.js', '.html', '.css', '.json', '.scss', '.ts', '.jsx', '.tsx', '.less'],
+                ignorePaths: ['node_modules', '.git', 'dist', '.DS_Store'],
+                debounceDelay: 500,
+                reloadDelay: 100,
+                smartReload: true,
+                showNotifications: true,
+                showProgress: true,
+                debug: false,
+                enableStats: true
+            });
+
+            hotReloadManager.start();
+            console.log('[MAIN] ✅ 增强版热更新系统已启用 (开发模式)');
+            console.log('[MAIN] 监听目录:', path.join(__dirname, 'renderer'));
+            console.log('[MAIN] 智能重载: CSS 文件只刷新样式');
+        } catch (hotReloadError) {
+            console.error('[MAIN] 热更新系统初始化失败:', hotReloadError);
+        }
+    } else {
+        console.log('[MAIN] ⚠️ 热更新系统已禁用 (生产模式)');
+    }
+
     // 初始化托盘菜单状态和验证托盘
     setTimeout(() => {
         if (tray && !tray.isDestroyed()) {
@@ -115,7 +565,23 @@ app.whenReady().then(() => {
             }
         }, 3000); // 等待3秒确保所有组件初始化完成
     }
-    
+
+    // ✅ 检测热更新后自动启动标志
+    console.log('[MAIN] 🔍 Before checkAndAutoStartAfterUpdate() call');
+    console.log('[MAIN] 🔍 checkAndAutoStartAfterUpdate type:', typeof checkAndAutoStartAfterUpdate);
+    try {
+        checkAndAutoStartAfterUpdate().catch(err => {
+            console.error('[MAIN] ❌ checkAndAutoStartAfterUpdate error:', err);
+        });
+        console.log('[MAIN] ✅ After checkAndAutoStartAfterUpdate() call');
+    } catch (syncError) {
+        console.error('[MAIN] ❌ Synchronous error calling checkAndAutoStartAfterUpdate:', syncError);
+    }
+    console.log('[MAIN] 🔍 Continuing to STEP 6...');
+
+    console.log('[MAIN] ===== STEP 6: Loading Main Application Module =====');
+    console.log('[MAIN] Timestamp:', new Date().toISOString());
+
     // 尝试导入主应用
     try {
         sendLogToRenderer('[INIT] 正在尝试加载主应用模块...');
@@ -132,20 +598,18 @@ app.whenReady().then(() => {
         sendLogToRenderer(`[INIT] 环境检测 - 打包状态: ${app.isPackaged}, 基础路径: ${basePath}`);
         console.log('[INIT] Base detection - isPackaged:', app.isPackaged, 'basePath:', basePath, 'appPath:', app.getAppPath());
         
-        const possiblePaths = [
-            // 开发环境路径
-            path.join(__dirname, '..', 'dist', 'main', 'app'),
-            
-            // electron-packager 结构路径
-            path.join(basePath, 'dist', 'main', 'app'),
-            path.join(app.getAppPath(), 'dist', 'main', 'app'),
-            
-            // electron-builder 结构路径  
-            path.join(process.resourcesPath, 'app', 'dist', 'main', 'app'),
-            
-            // 备用路径
-            path.join(__dirname, 'dist', 'main', 'app'),
-            path.join(process.cwd(), 'dist', 'main', 'app'),
+        // 🔧 FIX: 优化路径顺序，打包环境优先使用ASAR内路径，移除不可靠的process.cwd()
+        const possiblePaths = app.isPackaged ? [
+            // 打包环境：优先使用ASAR内路径
+            path.join(app.getAppPath(), 'out', 'dist', 'main', 'app'),
+            path.join(__dirname, 'out', 'dist', 'main', 'app'),
+            path.join(basePath, 'out', 'dist', 'main', 'app'),
+            // electron-builder 结构
+            path.join(process.resourcesPath, 'app', 'out', 'dist', 'main', 'app'),
+        ] : [
+            // 开发环境：使用开发目录路径
+            path.join(__dirname, '..', 'out', 'dist', 'main', 'app'),
+            path.join(__dirname, 'out', 'dist', 'main', 'app'),
         ];
         
         let loadError;
@@ -159,8 +623,22 @@ app.whenReady().then(() => {
                 if (fileExists) {
                     sendLogToRenderer(`[INIT] 尝试从以下路径加载: ${appPath}`);
                     console.log('[INIT] Trying to load from:', appPath);
-                    const result = require(appPath);
-                    EmployeeMonitorApp = result.EmployeeMonitorApp;
+                    try {
+                        const result = require(appPath);
+                        console.log("[INIT] Module required successfully");
+                        console.log("[INIT] Result type:", typeof result);
+                        console.log("[INIT] Result keys:", Object.keys(result || {}).join(", "));
+                        EmployeeMonitorApp = result.EmployeeMonitorApp;
+                        console.log("[INIT] EmployeeMonitorApp type:", typeof EmployeeMonitorApp);
+                        if (!EmployeeMonitorApp) {
+                            throw new Error("EmployeeMonitorApp is undefined in module exports");
+                        }
+                    } catch (requireError) {
+                        console.error("[INIT] Require error:", requireError.message);
+                        console.error("[INIT] Require error stack:", requireError.stack);
+                        throw requireError;
+                    }
+                    console.log("[INIT] Has EmployeeMonitorApp:", "EmployeeMonitorApp" in result);
                     sendLogToRenderer(`[INIT] ✅ 成功从路径加载: ${appPath}`);
                     console.log('[INIT] Import successful from:', appPath);
                     break;
@@ -220,11 +698,14 @@ app.whenReady().then(() => {
         
         sendLogToRenderer('[INIT] ✅ 主应用加载完成，系统就绪');
         console.log('[INIT] Main application loaded and ready');
-        
+        console.log('[MAIN] ===== STEP 6: Main Application Module Loaded Successfully =====');
+        console.log('[MAIN] ========== APP READY CALLBACK COMPLETED ==========');
+
         // 不再自动启动，等待用户手动启动或配置
         sendLogToRenderer('应用已就绪，请先配置服务器地址然后手动启动');
-        
+
     } catch (error) {
+        console.log('[MAIN] ===== STEP 6: Main Application Module Load FAILED =====');
         console.error('[INIT] Failed to load main application:', error.message);
         console.error('[INIT] Error stack:', error.stack);
 
@@ -236,12 +717,12 @@ app.whenReady().then(() => {
 
         // 重新定义 possiblePaths（在 catch 块中需要重新定义）
         const diagnosticPaths = [
-            path.join(__dirname, '..', 'dist', 'main', 'app'),
-            path.join(basePath, 'dist', 'main', 'app'),
-            path.join(app.getAppPath(), 'dist', 'main', 'app'),
-            path.join(process.resourcesPath || '', 'app', 'dist', 'main', 'app'),
-            path.join(__dirname, 'dist', 'main', 'app'),
-            path.join(process.cwd(), 'dist', 'main', 'app'),
+            path.join(__dirname, '..', 'out', 'dist', 'main', 'app'),
+            path.join(basePath, 'out', 'dist', 'main', 'app'),
+            path.join(app.getAppPath(), 'out', 'dist', 'main', 'app'),
+            path.join(process.resourcesPath || '', 'app', 'out', 'dist', 'main', 'app'),
+            path.join(__dirname, 'out', 'dist', 'main', 'app'),
+            path.join(process.cwd(), 'out', 'dist', 'main', 'app'),
         ];
 
         const diagnosticInfo = {
@@ -361,7 +842,12 @@ app.whenReady().then(() => {
 });
 
 function createMainWindow() {
+    console.log('[WINDOW_CREATE] 🪟 Function called - starting window creation...');
+    console.log('[WINDOW_CREATE] Platform:', process.platform);
+    console.log('[WINDOW_CREATE] APP_CONFIG:', JSON.stringify(APP_CONFIG));
+
     // macOS 和 Windows 使用原有逻辑
+    console.log('[WINDOW_CREATE] Creating BrowserWindow instance...');
     mainWindow = new BrowserWindow({
             width: APP_CONFIG.width,
             height: APP_CONFIG.height,
@@ -380,15 +866,19 @@ function createMainWindow() {
             maximizable: false,
             closable: true,
             // 隐藏菜单栏（所有平台）
-            autoHideMenuBar: true
+            autoHideMenuBar: true,
+            // macOS: 不在任务栏显示（配合 LSUIElement=true）
+            skipTaskbar: process.platform === 'darwin'
         });
+
+    console.log('[WINDOW_CREATE] ✅ BrowserWindow instance created successfully');
+    console.log('[WINDOW_CREATE] Window ID:', mainWindow.id);
 
         // 隐藏菜单栏（Windows）
         if (process.platform === 'win32') {
             mainWindow.setMenuBarVisibility(false);
             mainWindow.setAutoHideMenuBar(true);
         }
-    }
 
     // 加载精简界面
     const htmlPath = path.join(__dirname, 'renderer', 'minimal-index.html');
@@ -471,8 +961,11 @@ function createMainWindow() {
             // 首次尝试延迟3秒（等待App初始化）
             setTimeout(() => pushAutoStartStatus(), 3000);
 
-            // 根据启动参数决定是否显示窗口
-            if (!isStartMinimized) {
+            // 检查是否是热更新重启（优先级最高）
+            const isHotUpdateRestart = hasAutoStartFlag();
+
+            // 根据启动参数和热更新标志决定是否显示窗口
+            if (!isStartMinimized && !isHotUpdateRestart) {
                 // 确保窗口在所有工作区可见并置于最前
                 mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
                 mainWindow.show();
@@ -482,6 +975,10 @@ function createMainWindow() {
                     mainWindow.setVisibleOnAllWorkspaces(false);
                 }, 500);
                 console.log('[STARTUP] 窗口已显示（正常启动）');
+            } else if (isHotUpdateRestart) {
+                // ✅ 热更新重启：强制隐藏窗口，后台运行
+                mainWindow.hide();
+                console.log('[STARTUP] 热更新重启检测到，窗口强制隐藏，后台运行');
             } else {
                 console.log('[STARTUP] 后台启动，窗口保持隐藏');
                 // 后台启动时自动启动监控服务
@@ -608,12 +1105,9 @@ function createTray() {
         tray.setToolTip(APP_CONFIG.name);
         console.log(`Tray tooltip set to: ${APP_CONFIG.name}`);
 
-        // macOS: 保留Dock图标，提供更好的用户体验
-        // 用户可以通过Dock和菜单栏两种方式访问应用
+        // macOS: 隐藏Dock图标，只保留菜单栏托盘
         if (process.platform === 'darwin') {
-            console.log('macOS tray created - keeping Dock icon for better UX');
-            // 不隐藏Dock图标，让用户更容易找到应用
-            // app.dock?.hide(); // 已禁用
+            console.log('macOS tray created - Dock icon hidden, menu bar only');
         }
     } else {
         console.error('Failed to create tray');
@@ -719,6 +1213,63 @@ function showPermissionFallback(permissions) {
 function createDefaultIcon() {
     const platform = process.platform;
     console.log(`[TRAY_ICON] Creating default tray icon for platform: ${platform}`);
+
+    // ========================================
+    // 优先尝试从文件加载托盘图标
+    // ========================================
+
+    // macOS: 使用 Template Image (黑白图标)
+    if (platform === 'darwin') {
+        try {
+            // 尝试加载 trayTemplate.png (支持 @2x retina)
+            const trayIconPath = app.isPackaged
+                ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'icons', 'trayTemplate.png')
+                : path.join(__dirname, '..', 'assets', 'icons', 'trayTemplate.png');
+
+            console.log('[MACOS_TRAY] 尝试加载托盘图标文件:', trayIconPath);
+
+            if (fs.existsSync(trayIconPath)) {
+                const icon = nativeImage.createFromPath(trayIconPath);
+                if (!icon.isEmpty()) {
+                    icon.setTemplateImage(true); // macOS Template Image 模式
+                    console.log('[MACOS_TRAY] ✅ 托盘图标加载成功 (Template Image)');
+                    return icon;
+                }
+            } else {
+                console.log('[MACOS_TRAY] 托盘图标文件不存在，尝试备选方案');
+            }
+        } catch (error) {
+            console.log('[MACOS_TRAY] 加载托盘图标失败:', error.message);
+        }
+    }
+
+    // Windows: 使用彩色图标
+    if (platform === 'win32') {
+        try {
+            const trayIconPath = app.isPackaged
+                ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'icons', 'tray-icon.png')
+                : path.join(__dirname, '..', 'assets', 'icons', 'tray-icon.png');
+
+            console.log('[WINDOWS_TRAY] 尝试加载托盘图标文件:', trayIconPath);
+
+            if (fs.existsSync(trayIconPath)) {
+                const icon = nativeImage.createFromPath(trayIconPath);
+                if (!icon.isEmpty()) {
+                    console.log('[WINDOWS_TRAY] ✅ 托盘图标加载成功');
+                    return icon;
+                }
+            } else {
+                console.log('[WINDOWS_TRAY] 托盘图标文件不存在，尝试备选方案');
+            }
+        } catch (error) {
+            console.log('[WINDOWS_TRAY] 加载托盘图标失败:', error.message);
+        }
+    }
+
+    // ========================================
+    // 备选方案：动态生成图标
+    // ========================================
+    console.log('[TRAY_ICON] 使用动态生成的备选图标');
 
     // Linux平台：创建彩色PNG图标（Linux托盘图标通常需要彩色）
     if (platform === 'linux') {
@@ -1031,15 +1582,22 @@ function createFallbackHtml() {
 
 // IPC处理器 - 只保留核心功能
 function setupIPCHandlers() {
+    console.log('[IPC_SETUP] 🔧 Starting IPC handler registration...');
+
     // 应用控制
+    console.log('[IPC_SETUP] Registering app:start handler...');
     ipcMain.handle('app:start', async () => {
         return await startAppService(true); // true = manual user start
     });
+    console.log('[IPC_SETUP] ✅ app:start registered');
 
+    console.log('[IPC_SETUP] Registering app:stop handler...');
     ipcMain.handle('app:stop', async () => {
         return await stopAppService();
     });
+    console.log('[IPC_SETUP] ✅ app:stop registered');
 
+    console.log('[IPC_SETUP] Registering app:getStatus handler...');
     ipcMain.handle('app:getStatus', async () => {
         if (app_instance) {
             try {
@@ -1060,15 +1618,23 @@ function setupIPCHandlers() {
                 }
                 
                 // 基于FSM状态判断应用是否运行中 - 修复状态判断逻辑
-                const runningStates = ['DATA_COLLECT', 'CONFIG_FETCH', 'WS_CHECK', 'HEARTBEAT'];
-                const errorStates = ['ERROR', 'DISCONNECT', 'UNBOUND'];
-                
-                // 关键修复：同时检查 FSM 的 isServiceRunning 状态
+                const runningStates = ['DATA_COLLECT', 'CONFIG_FETCH', 'WS_CHECK', 'HEARTBEAT', 'BIND_CHECK', 'REGISTER'];
+                const errorStates = ['ERROR', 'DISCONNECT'];
+
+                // ✅ 关键修复：改进状态判断逻辑
+                // 运行中的条件：在运行状态 OR (FSM服务已启动 AND 不在错误状态)
                 let fsmIsRunning = false;
                 if (stateMachine && typeof stateMachine.isServiceRunning === 'function') {
                     const serviceRunning = stateMachine.isServiceRunning();
-                    fsmIsRunning = serviceRunning && runningStates.includes(deviceState);
-                    console.log(`[STATUS] FSM state: ${deviceState}, Service running: ${serviceRunning}, Final running: ${fsmIsRunning}`);
+                    const inRunningState = runningStates.includes(deviceState);
+                    const inErrorState = errorStates.includes(deviceState);
+
+                    // 只要满足以下任一条件就认为是运行中：
+                    // 1. 在运行状态列表中（DATA_COLLECT, REGISTER, BIND_CHECK等）
+                    // 2. FSM服务已启动且不在错误状态（包括INIT, UNBOUND等）
+                    fsmIsRunning = inRunningState || (serviceRunning && !inErrorState);
+
+                    console.log(`[STATUS] FSM state: ${deviceState}, Service running: ${serviceRunning}, In running state: ${inRunningState}, In error state: ${inErrorState}, Final running: ${fsmIsRunning}`);
                 } else {
                     // 降级到旧逻辑
                     fsmIsRunning = runningStates.includes(deviceState);
@@ -1444,9 +2010,129 @@ function setupIPCHandlers() {
             return { success: false, error: error.message };
         }
     });
+
+    console.log('[IPC_SETUP] ✅ All IPC handlers registered successfully');
 }
 
+// ========================================
+// 热更新后自动启动检测
+// ========================================
+
+/**
+ * 同步检查是否存在热更新标志文件
+ * 用于在窗口显示前判断是否应该隐藏窗口
+ */
+function hasAutoStartFlag() {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const flagPath = path.join(app.getPath('userData'), 'auto-start-after-update.flag');
+
+        if (fs.existsSync(flagPath)) {
+            // 验证时间戳
+            try {
+                const flagContent = fs.readFileSync(flagPath, 'utf-8');
+                const flagData = JSON.parse(flagContent);
+                const age = Date.now() - flagData.timestamp;
+                const maxAge = 5 * 60 * 1000; // 5分钟
+
+                if (age > maxAge) {
+                    // 标志已过期，删除
+                    fs.unlinkSync(flagPath);
+                    return false;
+                }
+
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        return false;
+    } catch (error) {
+        return false;
+    }
+}
+
+/**
+ * 检查热更新后自动启动标志
+ * 如果检测到标志文件，说明刚完成热更新重启，需要自动启动服务
+ */
+async function checkAndAutoStartAfterUpdate() {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const flagPath = path.join(app.getPath('userData'), 'auto-start-after-update.flag');
+
+        console.log('[AUTO_START] Checking for update flag:', flagPath);
+
+        if (fs.existsSync(flagPath)) {
+            console.log('[AUTO_START] ✅ Update flag detected!');
+
+            // 读取标志文件内容
+            let flagData = null;
+            try {
+                const flagContent = fs.readFileSync(flagPath, 'utf-8');
+                flagData = JSON.parse(flagContent);
+                console.log('[AUTO_START] Flag data:', flagData);
+            } catch (parseError) {
+                console.warn('[AUTO_START] Failed to parse flag data:', parseError.message);
+            }
+
+            // ⏰ 时间戳验证（5分钟内有效，防止标志文件残留）
+            if (flagData && flagData.timestamp) {
+                const age = Date.now() - flagData.timestamp;
+                const maxAge = 5 * 60 * 1000; // 5分钟
+
+                if (age > maxAge) {
+                    console.log('[AUTO_START] ⚠️ Flag expired (age:', age, 'ms), ignoring');
+                    fs.unlinkSync(flagPath);
+                    console.log('[AUTO_START] Expired flag file deleted');
+                    return;
+                }
+
+                console.log('[AUTO_START] Flag is valid (age:', age, 'ms)');
+            }
+
+            // 立即删除标志文件（避免下次启动重复触发）
+            fs.unlinkSync(flagPath);
+            console.log('[AUTO_START] ✅ Flag file deleted');
+
+            // ⏰ 延迟启动（等待应用完全初始化）
+            setTimeout(async () => {
+                console.log('[AUTO_START] ⏰ Triggering auto-start after hot update...');
+                sendLogToRenderer('[自动启动] 检测到热更新完成，正在自动启动服务...');
+
+                try {
+                    // 🎯 调用启动服务逻辑（与点击启动按钮完全相同）
+                    const result = await startAppService(false); // false = 自动启动模式
+
+                    if (result && result.success) {
+                        console.log('[AUTO_START] ✅ Service auto-started successfully after update');
+                        console.log('[AUTO_START] 🔽 App running in background mode with tray icon (window never shown)');
+                        sendLogToRenderer('[自动启动] 服务已自动启动成功，应用在后台运行');
+                    } else {
+                        console.error('[AUTO_START] ❌ Auto-start failed:', result?.message);
+                        sendLogToRenderer('[自动启动] 服务自动启动失败: ' + (result?.message || '未知错误'), 'error');
+                    }
+                } catch (error) {
+                    console.error('[AUTO_START] ❌ Auto-start exception:', error.message);
+                    sendLogToRenderer('[自动启动] 服务自动启动异常: ' + error.message, 'error');
+                }
+            }, 3000); // 延迟3秒，确保FSM、网络检查等都完成
+
+        } else {
+            console.log('[AUTO_START] No update flag detected, normal startup');
+        }
+    } catch (error) {
+        console.error('[AUTO_START] ❌ Error checking update flag:', error.message);
+    }
+}
+
+// ========================================
 // 辅助函数
+// ========================================
+
 async function startAppService(isManualStart = false) {
     // 发送日志到渲染进程
     sendLogToRenderer('正在启动服务...');
@@ -1470,16 +2156,48 @@ async function startAppService(isManualStart = false) {
         try {
             // 监听应用事件并转发日志
             setupAppLogging();
-            
+
+            // ✅ 检查监控状态，防止重复启动
+            let monitoringState = null;
+            if (typeof app_instance.getMonitoringState === 'function') {
+                monitoringState = app_instance.getMonitoringState();
+                console.log('[START] Current monitoring state:', monitoringState);
+            }
+
+            // 🔒 关键修复：检查所有非stopped状态，防止并发启动导致Promise挂起
+            // 活跃状态包括：running（运行中）、starting（启动中）、connecting（连接中）、
+            // registering（注册中）、heartbeat（心跳中）等所有工作状态
+            const activeStates = ['running', 'starting', 'connecting', 'registering', 'heartbeat',
+                                  'bind_check', 'ws_check', 'config_fetch', 'data_collect'];
+
+            // 安全转换 monitoringState 为字符串
+            const stateStr = monitoringState ? String(monitoringState).toLowerCase() : null;
+
+            if (stateStr && activeStates.includes(stateStr)) {
+                console.log('[START] Monitoring already active (state:', monitoringState, '), skipping duplicate start');
+                sendLogToRenderer(`监控服务已激活 (${monitoringState})`);
+                updateTrayIcon(true);
+                updateTrayMenu();
+
+                // 立即广播状态
+                broadcastStatusUpdate();
+
+                return { success: true, message: `Service already active: ${monitoringState}`, alreadyRunning: true };
+            }
+
+            // 只有在明确的stopped状态或null（未初始化）时才允许启动
+            console.log('[START] Monitoring state is:', monitoringState || 'null', '- proceeding with start');
+
             // 如果应用未初始化，先启动应用本身
             if (app_instance.getState?.() === 'stopped') {
                 console.log('[START] Starting app instance first...');
                 await app_instance.start();
                 console.log('[START] App instance started, now starting monitoring...');
             }
-            
+
             // 启动监控（FSM）
             if (typeof app_instance.startMonitoring === 'function') {
+                console.log('[START] Calling startMonitoring()...');
                 await app_instance.startMonitoring();
                 updateTrayIcon(true);
                 updateTrayMenu(); // 更新托盘菜单
@@ -1487,19 +2205,20 @@ async function startAppService(isManualStart = false) {
                 console.log('[START] Monitoring started successfully, state:', app_instance.getMonitoringState?.());
             } else {
                 // 兼容旧版本
+                console.log('[START] Using legacy start()...');
                 await app_instance.start();
                 updateTrayIcon(true);
                 updateTrayMenu();
                 sendLogToRenderer('服务启动成功');
                 console.log('[START] Service started (legacy mode), state:', app_instance.getState?.());
             }
-            
+
             // 立即同步状态到UI
             setTimeout(() => {
                 console.log('[START] Broadcasting status after start, app state:', app_instance.getState?.());
                 broadcastStatusUpdate();
             }, 1000); // 给FSM一点时间来启动
-            
+
             // 设置定期状态广播（每5秒）
             if (global.statusBroadcastInterval) {
                 clearInterval(global.statusBroadcastInterval);
@@ -1507,11 +2226,13 @@ async function startAppService(isManualStart = false) {
             global.statusBroadcastInterval = setInterval(() => {
                 broadcastStatusUpdate();
             }, 5000);
-            
+
             return { success: true, message: 'Service started' };
         } catch (error) {
+            console.error('[START] Error starting service:', error);
+            console.error('[START] Error stack:', error.stack);
             sendLogToRenderer('启动失败: ' + error.message, 'error');
-            return { success: false, message: error.message };
+            return { success: false, message: error.message, error: error.stack };
         }
     }
     
@@ -1580,17 +2301,25 @@ async function broadcastStatusUpdate() {
                     }
                     
                     // 基于FSM状态判断应用是否运行中 - 修复状态判断逻辑
-                    const runningStates = ['DATA_COLLECT', 'CONFIG_FETCH', 'WS_CHECK', 'HEARTBEAT'];
-                    const errorStates = ['ERROR', 'DISCONNECT', 'UNBOUND'];
-                    
-                    // 关键修复：同时检查 FSM 的 isServiceRunning 状态
+                    const runningStates = ['DATA_COLLECT', 'CONFIG_FETCH', 'WS_CHECK', 'HEARTBEAT', 'BIND_CHECK', 'REGISTER'];
+                    const errorStates = ['ERROR', 'DISCONNECT'];  // ✅ UNBOUND 不是错误，是正常的等待绑定状态
+
+                    // ✅ 关键修复：改进状态判断逻辑（与 IPC 处理器保持一致）
+                    // 运行中的条件：在运行状态 OR (FSM服务已启动 AND 不在错误状态)
                     let fsmIsRunning = false;
                     if (app_instance.getStateMachine && typeof app_instance.getStateMachine === 'function') {
                         const stateMachine = app_instance.getStateMachine();
                         if (stateMachine && typeof stateMachine.isServiceRunning === 'function') {
                             const serviceRunning = stateMachine.isServiceRunning();
-                            fsmIsRunning = serviceRunning && runningStates.includes(deviceState);
-                            console.log(`[GET_STATUS] FSM state: ${deviceState}, Service running: ${serviceRunning}, Final running: ${fsmIsRunning}`);
+                            const inRunningState = runningStates.includes(deviceState);
+                            const inErrorState = errorStates.includes(deviceState);
+
+                            // 只要满足以下任一条件就认为是运行中：
+                            // 1. 在运行状态列表中（DATA_COLLECT, REGISTER, BIND_CHECK等）
+                            // 2. FSM服务已启动且不在错误状态（包括INIT, UNBOUND等）
+                            fsmIsRunning = inRunningState || (serviceRunning && !inErrorState);
+
+                            console.log(`[BROADCAST] FSM state: ${deviceState}, Service running: ${serviceRunning}, In running state: ${inRunningState}, In error state: ${inErrorState}, Final running: ${fsmIsRunning}`);
                         } else {
                             // 降级到旧逻辑
                             fsmIsRunning = runningStates.includes(deviceState);
@@ -1608,42 +2337,31 @@ async function broadcastStatusUpdate() {
                         appGetStateResult = app_instance.getState();
                     }
                     
-                    // 修复状态优先级逻辑：
-                    // 1. 基于app的getState()结果判断是否运行中
-                    if (appGetStateResult === 'running') {
-                        isRunning = true;
-                    } else if (appGetStateResult === 'stopped') {
-                        isRunning = false;
-                    } else {
-                        // 如果没有明确状态，基于FSM状态判断
-                        isRunning = fsmIsRunning;
-                    }
-                    
-                    // 2. 基于实际运行状态和FSM状态决定最终状态
-                    if (!isRunning) {
-                        // 如果应用实际没有运行，强制设置为停止状态
-                        appState = 'STOPPED';
-                        deviceState = 'INIT';  // 重置设备状态
-                    } else if (fsmIsInError) {
+                    // ✅ 修复状态优先级逻辑：优先使用 FSM 状态，而不是 app.getState()
+                    // FSM 才是真正在工作的部分，app.getState() 只是一个抽象状态
+                    if (fsmIsInError) {
                         // 如果FSM处于错误状态，强制设置为停止
                         isRunning = false;
                         appState = 'STOPPED';
                         deviceState = 'ERROR';
                     } else if (fsmIsRunning) {
-                        // 如果FSM在运行状态，则应用运行中
+                        // ✅ 如果FSM在运行状态，则应用运行中（不管 app.getState() 返回什么）
+                        isRunning = true;
                         appState = 'RUNNING';
                         // deviceState保持FSM的状态
-                    } else if (appGetStateResult) {
-                        appState = appGetStateResult;
-                        if (appState !== 'RUNNING') {
-                            isRunning = false;
-                            deviceState = 'INIT';
-                        }
                     } else {
-                        // 最后的兜底逻辑
-                        appState = deviceState === 'INIT' ? 'STARTING' : 'STOPPED';
-                        if (appState === 'STOPPED') {
+                        // FSM 既不在运行也不在错误状态，使用 app.getState() 作为fallback
+                        if (appGetStateResult === 'running') {
+                            isRunning = true;
+                            appState = 'RUNNING';
+                        } else if (appGetStateResult === 'stopped') {
                             isRunning = false;
+                            appState = 'STOPPED';
+                            deviceState = 'INIT';
+                        } else {
+                            // 最后的兜底逻辑
+                            isRunning = false;
+                            appState = deviceState === 'INIT' ? 'STARTING' : 'STOPPED';
                             deviceState = 'INIT';
                         }
                     }
@@ -2247,77 +2965,55 @@ function getConfigDirectory() {
     }
 }
 
-// 配置管理函数
+// 配置管理函数 - 使用 AppConfigManager
 async function getAppConfig() {
-    const fs = require('fs');
-    // 使用与主应用相同的配置目录，确保配置共享
-    const configPath = path.join(getConfigDirectory(), 'employee-monitor-config.json');
-    
     try {
-        if (fs.existsSync(configPath)) {
-            const configData = fs.readFileSync(configPath, 'utf8');
-            const config = JSON.parse(configData);
-            return {
-                success: true,
-                serverUrl: config.serverUrl || 'http://23.95.193.155:3000',
-                deviceId: config.deviceId,
-                ...config
-            };
-        }
+        const { appConfig } = require(path.join(__dirname, '..', 'out', 'dist', 'common', 'config', 'app-config-manager'));
+        const baseUrl = appConfig.getBaseUrl();
+
+        return {
+            success: true,
+            serverUrl: baseUrl || 'http://23.95.193.155:3000'
+        };
     } catch (error) {
-        console.error('Failed to read config:', error);
+        console.error('[CONFIG] Failed to load app-config:', error);
+        // 返回默认配置
+        return {
+            success: true,
+            serverUrl: 'http://23.95.193.155:3000'
+        };
     }
-    
-    // 返回默认配置
-    return {
-        success: true,
-        serverUrl: 'http://23.95.193.155:3000'
-    };
 }
 
 async function updateAppConfig(newConfig) {
-    const fs = require('fs');
-    // 使用与主应用相同的配置目录，确保配置共享
-    const configPath = path.join(getConfigDirectory(), 'employee-monitor-config.json');
-    
     try {
-        let config = {};
-        
-        // 确保配置目录存在
-        const configDir = getConfigDirectory();
-        if (!fs.existsSync(configDir)) {
-            fs.mkdirSync(configDir, { recursive: true });
-        }
-        
-        // 读取现有配置
-        if (fs.existsSync(configPath)) {
-            const configData = fs.readFileSync(configPath, 'utf8');
-            config = JSON.parse(configData);
-        }
-        
-        // 更新配置
-        config = { ...config, ...newConfig };
-        
-        // 特殊处理：如果更新了 serverUrl，清除 websocketUrl 让其自动从 serverUrl 构建
+        // 使用 AppConfigManager 更新配置
+        const { appConfig } = require(path.join(__dirname, '..', 'out', 'dist', 'common', 'config', 'app-config-manager'));
+
+        // 更新 serverUrl (baseUrl)
         if (newConfig.serverUrl) {
-            console.log('[CONFIG] serverUrl updated, clearing websocketUrl to auto-build from serverUrl');
-            delete config.websocketUrl;
+            console.log('[CONFIG] Updating baseUrl:', newConfig.serverUrl);
+            appConfig.setBaseUrl(newConfig.serverUrl); // 这会触发 config-updated 事件
         }
-        
-        // 保存配置
-        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-        
+
+        // 更新其他配置项
+        Object.entries(newConfig).forEach(([key, value]) => {
+            if (key !== 'serverUrl') {
+                appConfig.set(key, value);
+            }
+        });
+
         // 如果主应用存在，更新其配置
         if (app_instance && typeof app_instance.updateConfig === 'function') {
             app_instance.updateConfig(newConfig);
         }
-        
-        console.log('Config updated:', newConfig);
+
+        console.log('[CONFIG] Config updated:', newConfig);
         sendLogToRenderer(`配置已更新: ${JSON.stringify(newConfig)}`);
         return { success: true, message: '配置已保存' };
-        
+
     } catch (error) {
-        console.error('Failed to update config:', error);
+        console.error('[CONFIG] Failed to update config:', error);
         return { success: false, message: '保存配置失败: ' + error.message };
     }
 }
@@ -2360,7 +3056,22 @@ app.on('before-quit', async (event) => {
             await app_instance.stop();
             sendLogToRenderer('监控服务已停止');
         }
-        
+
+        // 停止热更新系统
+        if (hotReloadManager) {
+            console.log('Stopping hot reload manager...');
+            try {
+                const stats = hotReloadManager.getStats();
+                if (stats) {
+                    console.log('[HOT-RELOAD] Final statistics:', stats);
+                }
+                hotReloadManager.stop();
+                console.log('[HOT-RELOAD] Hot reload manager stopped');
+            } catch (error) {
+                console.error('[HOT-RELOAD] Error stopping hot reload manager:', error);
+            }
+        }
+
         // 清理资源
         await cleanup();
         

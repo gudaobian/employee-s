@@ -7,6 +7,7 @@ import { EventEmitter } from 'events';
 import { io, Socket } from 'socket.io-client';
 import { IConfigService, IWebSocketService } from '../interfaces/service-interfaces';
 import { appConfig } from '../config/app-config-manager';
+import { queueService } from './queue-service';
 
 interface WebSocketMessage {
   type: string;
@@ -279,6 +280,12 @@ export class WebSocketService extends EventEmitter implements IWebSocketService 
 
       // 启动业务心跳
       this.startHeartbeat();
+
+      // 启动队列上传循环（有界队列 + 磁盘持久化）
+      console.log('[WEBSOCKET] 🚀 WebSocket连接恢复，启动队列上传循环...');
+      queueService.startUpload().catch((error: any) => {
+        console.error('[WEBSOCKET] ❌ 队列上传启动失败:', error);
+      });
 
       this.emit('connected');
     });

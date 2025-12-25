@@ -1,24 +1,28 @@
 #!/bin/bash
 
-# EmployeeMonitor PKG 安装包创建脚本
+# EmployeeSafety PKG 安装包创建脚本
 # PKG 格式会自动覆盖旧版本，解决多版本共存问题
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_DIR="$PROJECT_ROOT/release"
 
 echo "📦 创建 macOS PKG 安装包..."
 echo "=================================="
 
+# 读取版本号
+VERSION=$(node -p "require('$PROJECT_ROOT/package.json').version")
+echo "📌 当前版本: $VERSION"
+
 # 确保应用已构建
-if [ ! -d "$RELEASE_DIR/EmployeeMonitor-darwin-arm64/EmployeeMonitor.app" ]; then
+if [ ! -d "$RELEASE_DIR/EmployeeSafety-darwin-arm64/EmployeeSafety.app" ]; then
     echo "❌ 错误: 找不到 arm64 版本，请先运行 npm run pack:mac"
     exit 1
 fi
 
-if [ ! -d "$RELEASE_DIR/EmployeeMonitor-darwin-x64/EmployeeMonitor.app" ]; then
+if [ ! -d "$RELEASE_DIR/EmployeeSafety-darwin-x64/EmployeeSafety.app" ]; then
     echo "❌ 错误: 找不到 x64 版本，请先运行 npm run pack:mac"
     exit 1
 fi
@@ -26,17 +30,19 @@ fi
 # 创建 PKG 的函数
 create_pkg() {
     local ARCH=$1
-    local APP_PATH="$RELEASE_DIR/EmployeeMonitor-darwin-$ARCH/EmployeeMonitor.app"
-    local PKG_NAME="EmployeeMonitor-darwin-$ARCH.pkg"
+    local APP_PATH="$RELEASE_DIR/EmployeeSafety-darwin-$ARCH/EmployeeSafety.app"
+
+    # 新命名格式: EmployeeSafety-macos-{arch}-{version}.pkg
+    local PKG_NAME="EmployeeSafety-macos-$ARCH-$VERSION.pkg"
     local PKG_PATH="$RELEASE_DIR/$PKG_NAME"
 
-    # 获取版本号
-    local VERSION=$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "1.0.0")
+    # 从 Info.plist 获取 Bundle ID（版本号已从 package.json 读取）
+    local BUNDLE_VERSION=$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "$VERSION")
     local BUNDLE_ID=$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || echo "com.company.employee-monitor")
 
     echo ""
-    echo "📦 创建 $ARCH 版本 PKG..."
-    echo "   版本: $VERSION"
+    echo "📦 创建 $ARCH 版本 PKG ($VERSION)..."
+    echo "   版本: $BUNDLE_VERSION"
     echo "   Bundle ID: $BUNDLE_ID"
 
     # 删除旧的 PKG
@@ -58,7 +64,7 @@ create_pkg() {
     cat > "$SCRIPTS_DIR/preinstall" << 'EOF'
 #!/bin/bash
 
-APP_NAME="EmployeeMonitor.app"
+APP_NAME="EmployeeSafety.app"
 TARGET_PATH="/Applications/$APP_NAME"
 
 echo "检查并关闭正在运行的应用..."
@@ -66,7 +72,7 @@ echo "检查并关闭正在运行的应用..."
 # 检查应用是否正在运行
 if pgrep -f "$APP_NAME" > /dev/null; then
     echo "关闭正在运行的应用..."
-    osascript -e "tell application \"EmployeeMonitor\" to quit" 2>/dev/null || true
+    osascript -e "tell application \"EmployeeSafety\" to quit" 2>/dev/null || true
     sleep 2
     pkill -f "$APP_NAME" 2>/dev/null || true
     sleep 1
@@ -85,7 +91,7 @@ EOF
     cat > "$SCRIPTS_DIR/postinstall" << 'EOF'
 #!/bin/bash
 
-APP_NAME="EmployeeMonitor.app"
+APP_NAME="EmployeeSafety.app"
 TARGET_PATH="/Applications/$APP_NAME"
 
 echo "设置应用权限..."
@@ -109,7 +115,7 @@ EOF
     pkgbuild --root "$PAYLOAD_DIR" \
              --scripts "$SCRIPTS_DIR" \
              --identifier "$BUNDLE_ID" \
-             --version "$VERSION" \
+             --version "$BUNDLE_VERSION" \
              --install-location "/" \
              "$PKG_PATH"
 

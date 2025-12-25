@@ -12,11 +12,18 @@ mac:
       arch:
         - x64
         - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
   icon: assets/icons/icon.icns
   entitlements: null
   entitlementsInherit: null
   hardenedRuntime: false
   gatekeeperAssess: false
+  # 允许显示 Dock 图标（首次启动时可见，后续可选择隐藏）
+  extendInfo:
+    LSUIElement: false
   extraResources:
     - from: scripts/installer/macos/cleanup-macos.sh
       to: installer-scripts/cleanup-macos.sh
@@ -24,6 +31,7 @@ mac:
       to: installer-scripts/uninstall-macos.sh
     - from: scripts/installer/macos/auto-install-update-macos.sh
       to: installer-scripts/auto-install-update-macos.sh
+  artifactName: "EmployeeSafety-macos-${arch}-${version}.${ext}"
 
 dmg:
   title: "${productName} ${version}"
@@ -42,6 +50,7 @@ dmg:
     height: 380
   iconSize: 100
   format: UDZO
+  artifactName: "EmployeeSafety-macos-${arch}-${version}.${ext}"
 
 files:
   - "!**/*.ts"
@@ -83,7 +92,9 @@ win:
     - target: nsis
       arch:
         - x64
+        - ia32
   # icon: assets/icons/icon.ico  # Temporarily disabled - icon must be 256x256
+  artifactName: "EmployeeSafety-win-${arch}-${version}.${ext}"
 
 nsis:
   oneClick: false
@@ -101,7 +112,7 @@ nsis:
   displayLanguageSelector: false
   runAfterFinish: true
   allowElevation: true
-  artifactName: "${productName}-Setup-${version}.${ext}"
+  artifactName: "EmployeeSafety-win-${arch}-${version}.${ext}"
 
 extraResources:
   - from: scripts/installer/windows/cleanup.ps1

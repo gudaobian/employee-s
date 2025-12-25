@@ -17,7 +17,7 @@
             background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
             color: #333;
             width: 340px;
-            height: 750px; /* Windows标题栏需要更高 */
+            height: auto; /* 自适应内容高度 */
             overflow: hidden;
             margin: 0;
             padding: 0;
@@ -25,7 +25,7 @@
 
         .container {
             width: 340px;
-            height: 750px; /* Windows标题栏需要更高 */
+            height: auto; /* 自适应内容高度 */
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border-radius: 12px;
@@ -81,13 +81,11 @@
         }
 
         .content {
-            padding: 14px;
-            flex: 1;
+            padding: 14px 14px 4px 14px; /* 进一步减少底部padding */
             display: flex;
             flex-direction: column;
             gap: 10px;
-            /* 确保内容不会溢出 */
-            min-height: 0;
+            /* 移除flex: 1，让内容自适应高度 */
             overflow: hidden;
         }
 
@@ -336,21 +334,21 @@
         }
 
         .btn-permission {
-            background: linear-gradient(135deg, #8e8e93 0%, #6d6d70 100%);
+            background: linear-gradient(135deg, #FFB340 0%, #FF9500 100%);
             color: white;
         }
 
         .btn-permission:hover {
-            background: linear-gradient(135deg, #6d6d70 0%, #48484a 100%);
+            background: linear-gradient(135deg, #FF9500 0%, #E67E00 100%);
         }
 
         .btn-background {
-            background: linear-gradient(135deg, #8e8e93 0%, #6d6d70 100%);
+            background: linear-gradient(135deg, #a18fb2 0%, #151516 100%);
             color: white;
         }
 
         .btn-background:hover {
-            background: linear-gradient(135deg, #6d6d70 0%, #48484a 100%);
+            background: linear-gradient(135deg, #7e22ce 0%, #6b21a8 100%);
         }
 
         .btn:hover {
@@ -368,7 +366,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 0; /* 移除底部边距 */
             background: rgba(248, 249, 250, 0.8);
             padding: 8px 10px;
             border-radius: 8px;
@@ -406,140 +404,6 @@
         .perm-dot.denied {
             background: #ff3b30;
             box-shadow: 0 0 4px rgba(255, 59, 48, 0.5);
-        }
-
-        /* 日志控制 */
-        .log-controls {
-            margin-bottom: 6px;
-        }
-
-        .log-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 11px;
-            font-weight: 600;
-            color: #495057;
-            margin-bottom: 4px;
-        }
-
-        .log-actions {
-            display: flex;
-            gap: 4px;
-        }
-
-        .log-filters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            padding: 6px;
-            background: rgba(248, 249, 250, 0.8);
-            border-radius: 6px;
-            font-size: 10px;
-        }
-
-        .log-filters label {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-            cursor: pointer;
-            padding: 2px 4px;
-            border-radius: 3px;
-            transition: background 0.2s;
-        }
-
-        .log-filters label:hover {
-            background: rgba(255, 255, 255, 0.5);
-        }
-
-        .log-filters input[type="checkbox"] {
-            margin: 0;
-            width: 12px;
-            height: 12px;
-        }
-
-        /* 日志区域 */
-        .logs {
-            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
-            color: #e2e8f0;
-            font-family: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
-            font-size: 10px;
-            padding: 8px;
-            border-radius: 8px;
-            height: 380px; /* Windows需要更高的日志区域 */
-            min-height: 380px;
-            max-height: 380px;
-            overflow-y: auto;
-            overflow-x: hidden;
-            line-height: 1.4;
-            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            /* 确保日志区域不会影响布局 */
-            flex-shrink: 0;
-            margin-bottom: 2px;
-        }
-
-        .logs::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .logs::-webkit-scrollbar-track {
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 2px;
-        }
-
-        .logs::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 2px;
-        }
-
-        .log-entry {
-            margin-bottom: 1px;
-        }
-
-        .log-time {
-            color: #81c784;
-        }
-
-        .log-error {
-            color: #ef5350;
-            font-weight: bold;
-        }
-        
-        .log-warning {
-            color: #ffb74d;
-        }
-        
-        .log-success {
-            color: #81c784;
-            font-weight: 500;
-        }
-        
-        .log-info {
-            color: #64b5f6;
-        }
-
-        .log-data {
-            color: #bb86fc;
-        }
-
-        .log-upload {
-            color: #03dac6;
-        }
-
-        /* 底部控制 */
-        .footer {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            padding: 12px 14px 16px 14px;
-            background: rgba(248, 249, 250, 0.9);
-            backdrop-filter: blur(10px);
-            border-top: 1px solid rgba(229, 231, 235, 0.5);
-            border-radius: 0 0 12px 12px;
-            /* 确保底部有足够间距 */
-            margin-bottom: 0;
-            flex-shrink: 0;
         }
 
         .auto-start {
@@ -792,37 +656,6 @@
                 </div>
             </div>
 
-            <!-- 日志控制 -->
-            <div class="log-controls">
-                <div class="log-header">
-                    <span>运行日志</span>
-                    <div class="log-actions">
-                        <button class="btn-mini" onclick="clearLogs()">清空</button>
-                        <button class="btn-mini" onclick="toggleLogLevels()">过滤</button>
-                        <button class="btn-mini" onclick="showLogStats()">统计</button>
-                        <button class="btn-mini" onclick="cleanupOldLogs()">清理</button>
-                    </div>
-                </div>
-                <div class="log-filters" id="logFilters" style="display: none;">
-                    <label><input type="checkbox" id="filterData" checked> 数据</label>
-                    <label><input type="checkbox" id="filterUpload" checked> 上传</label>
-                    <label><input type="checkbox" id="filterSuccess" checked> 成功</label>
-                    <label><input type="checkbox" id="filterInfo" checked> 信息</label>
-                    <label><input type="checkbox" id="filterWarning" checked> 警告</label>
-                    <label><input type="checkbox" id="filterError" checked> 错误</label>
-                </div>
-            </div>
-
-            <!-- 日志区域 -->
-            <div class="logs" id="logs">
-                <div class="log-entry">
-                    <span class="log-time">[启动]</span> 应用程序已就绪
-                </div>
-            </div>
-        </div>
-
-        <!-- 底部控制 -->
-        <div class="footer">
         </div>
     </div>
 
@@ -843,6 +676,21 @@
         </div>
     </div>
 
+    <!-- ==================== 渲染进程应用脚本 ==================== -->
+    <!-- 注意：加载顺序很重要 -->
+
+    <!-- 1. EventEmitter 基础类（无依赖） -->
+    <script src="utils/event-emitter.js"></script>
+
+    <!-- 2. 服务类（依赖 EventEmitter） -->
+    <script src="services/fsm-service.js"></script>
+    <script src="services/auth-service.js"></script>
+    <script src="services/data-sync-service.js"></script>
+
+    <!-- 3. 渲染进程应用主类（依赖 EventEmitter 和服务类） -->
+    <script src="renderer-app.js"></script>
+
+    <!-- 4. UI 交互脚本（与渲染进程应用并行运行） -->
     <script>
         let isRunning = false;
         let autoStartEnabled = false;
@@ -864,28 +712,7 @@
             updateToggleButton(); // 初始化按钮状态
             loadConfig();
             loadAutoStartStatus(); // 加载自启动状态
-            addLog('界面已加载');
-            
-            // 监听来自主进程的日志
-            if (window.electronAPI && window.electronAPI.onLogReceived) {
-                window.electronAPI.onLogReceived((logData) => {
-                    addLog(logData.message, logData.type);
-                });
-            }
-            
-            // 监听来自 LogManager 的日志更新
-            if (window.electronAPI && window.electronAPI.on) {
-                window.electronAPI.on('log-update', (event, logUpdate) => {
-                    if (logUpdate.type === 'new-log' && logUpdate.log) {
-                        const log = logUpdate.log;
-                        addLog(log.message, log.level);
-                    }
-                });
-            }
-            
-            // 加载历史日志
-            loadHistoryLogs();
-            
+
             // 监听来自托盘的权限设置请求
             if (window.electronAPI && window.electronAPI.onMessage) {
                 window.electronAPI.onMessage('show-permission-modal', () => {
@@ -1004,7 +831,6 @@
                 
                 window.electronAPI.on('device-status-changed', (event, statusData) => {
                     console.log('收到设备状态变化:', statusData);
-                    addLog(`设备状态变化: ${statusData.from} → ${statusData.to}`, 'info');
                 });
 
                 // 监听自启动状态变化事件
@@ -1024,13 +850,11 @@
                         console.log('[用户操作] 应用状态推送');
                         autoStartEnabled = data.enabled;
                         updateAutoStartToggle(autoStartEnabled);
-                        addLog(`🔄 自启动状态已更新: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
                     } else if (data.source === 'initial-sync' || !data.source) {
                         // 初始同步推送或未标记来源，谨慎应用
                         console.log('[初始同步] 应用状态推送');
                         autoStartEnabled = data.enabled;
                         updateAutoStartToggle(autoStartEnabled);
-                        addLog(`🔄 自启动状态已同步: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
                     }
                 });
             }
@@ -1046,71 +870,94 @@
         });
 
         // 切换服务状态
+        let isOperating = false; // 操作进行中标志
+        let operationTimeout = null; // 超时定时器
+
         async function toggleService() {
             const toggleBtn = document.getElementById('toggleButton');
-            
-            if (isRunning) {
-                // 当前运行中，需要停止
-                toggleBtn.disabled = true;
-                toggleBtn.textContent = '停止中...';
-                updateStatus('停止中...', false);
-                addLog('正在停止服务...');
-                
-                try {
-                    if (window.electronAPI) {
-                        const result = await window.electronAPI.app.stop();
-                        if (result && result.success !== false) {
+
+            // 🔒 防止重复点击
+            if (isOperating) {
+                console.log('操作进行中，忽略重复点击');
+                return;
+            }
+
+            // 设置操作中状态
+            isOperating = true;
+            toggleBtn.disabled = true;
+
+            // ⏱️ 设置超时保护（10秒）
+            operationTimeout = setTimeout(() => {
+                console.warn('操作超时，自动解锁按钮');
+                isOperating = false;
+                updateToggleButton();
+                updateStatus('操作超时', false);
+            }, 10000);
+
+            try {
+                if (isRunning) {
+                    // 当前运行中，需要停止
+                    toggleBtn.textContent = '停止中...';
+                    updateStatus('停止中...', false);
+
+                    try {
+                        if (window.electronAPI) {
+                            const result = await window.electronAPI.app.stop();
+                            console.log('停止结果:', result);
+
+                            if (result && result.success !== false) {
+                                isRunning = false;
+                                updateStatus('已停止', false);
+                            } else {
+                                // 停止失败，保持运行状态
+                                console.error('停止失败:', result?.message);
+                                updateStatus('停止失败', true);
+                            }
+                        } else {
                             isRunning = false;
                             updateStatus('已停止', false);
-                            addLog('服务已停止', 'warning');
-                        } else {
-                            addLog('停止失败: ' + (result.message || '未知错误'), 'error');
                         }
-                    } else {
-                        isRunning = false;
-                        updateStatus('已停止', false);
-                        addLog('服务已停止 (模拟模式)', 'warning');
+                    } catch (error) {
+                        console.error('停止异常:', error);
+                        updateStatus('停止异常', true);
+                        // 发生异常，保持原状态
                     }
-                } catch (error) {
-                    addLog('停止错误: ' + error.message, 'error');
-                }
-            } else {
-                // 当前停止，需要启动
-                toggleBtn.disabled = true;
-                toggleBtn.textContent = '启动中...';
-                updateStatus('启动中...', false);
-                addLog('正在启动服务...');
-                
-                try {
-                    if (window.electronAPI) {
-                        const result = await window.electronAPI.app.start();
-                        console.log('启动结果:', result);
-                        
-                        // 修复判断逻辑：只要result存在且success不是明确的false，就认为成功
-                        if (result && result.success !== false) {
+                } else {
+                    // 当前停止，需要启动
+                    toggleBtn.textContent = '启动中...';
+                    updateStatus('启动中...', false);
+
+                    try {
+                        if (window.electronAPI) {
+                            const result = await window.electronAPI.app.start();
+                            console.log('启动结果:', result);
+
+                            // ✅ 判断启动成功：success === true 或 alreadyRunning === true
+                            if (result && (result.success === true || result.alreadyRunning === true)) {
+                                isRunning = true;
+                                updateStatus('运行中', true);
+                            } else {
+                                // 启动失败
+                                isRunning = false;
+                                updateStatus('启动失败', false);
+                                console.error('启动失败详情:', result);
+                            }
+                        } else {
                             isRunning = true;
                             updateStatus('运行中', true);
-                            addLog('服务启动成功', 'success');
-                        } else {
-                            isRunning = false;
-                            updateStatus('启动失败', false);
-                            addLog('启动失败: ' + (result?.message || result?.error || '未知错误'), 'error');
                         }
-                    } else {
-                        isRunning = true;
-                        updateStatus('运行中', true);
-                        addLog('服务启动成功 (模拟模式)', 'success');
+                    } catch (error) {
+                        console.error('启动异常:', error);
+                        isRunning = false;
+                        updateStatus('启动失败', false);
                     }
-                } catch (error) {
-                    console.error('启动异常:', error);
-                    isRunning = false;
-                    updateStatus('启动失败', false);
-                    addLog('启动错误: ' + error.message, 'error');
                 }
+            } finally {
+                // 🔓 确保总是解锁按钮
+                clearTimeout(operationTimeout);
+                isOperating = false;
+                updateToggleButton();
             }
-            
-            // 更新按钮状态
-            updateToggleButton();
         }
 
         // 更新切换按钮状态
@@ -1139,22 +986,18 @@
                         // 根据状态和错误信息更新显示
                         if (status.error) {
                             updateStatus('启动失败', false);
-                            addLog('状态检查发现错误: ' + status.error, 'error');
                         } else if (isRunning) {
                             updateStatus('运行中', true);
                             if (!wasRunning) {
-                                addLog('服务状态已变为运行中', 'success');
                             }
                         } else {
                             updateStatus('已停止', false);
                             if (wasRunning) {
-                                addLog('服务状态已变为停止', 'warning');
                             }
                         }
                         
                         // 显示FSM状态信息（如果可用）
                         if (status.deviceState) {
-                            addLog(`设备状态: ${status.deviceState}`, 'info');
                         }
                         
                         // 更新切换按钮状态
@@ -1162,12 +1005,10 @@
                     }
                 } else {
                     updateStatus(isRunning ? '运行中' : '已停止', isRunning);
-                    addLog('状态检查完成: ' + (isRunning ? '运行中' : '已停止'));
                     updateToggleButton();
                 }
             } catch (error) {
                 updateStatus('状态未知', false);
-                addLog('状态检查错误: ' + error.message, 'error');
                 updateToggleButton();
             }
         }
@@ -1198,7 +1039,6 @@
                 
                 displayPermissionModal(permissions);
             } catch (error) {
-                addLog('权限检查错误: ' + error.message, 'error');
                 // 显示错误状态
                 displayPermissionModal({});
             }
@@ -1207,12 +1047,10 @@
         // 后台运行功能
         async function enterBackgroundMode() {
             try {
-                addLog('正在切换到后台运行模式...');
                 
                 // 调用主进程的后台模式功能
                 if (window.electronAPI && window.electronAPI.window) {
                     await window.electronAPI.window.minimize();
-                    addLog('已切换到后台运行，应用将在系统托盘中运行', 'success');
                 } else {
                     // 降级方案：隐藏窗口
                     if (window.close) {
@@ -1220,7 +1058,6 @@
                     }
                 }
             } catch (error) {
-                addLog('切换后台模式失败: ' + error.message, 'error');
             }
         }
 
@@ -1266,39 +1103,39 @@
                 if (window.electronAPI && window.electronAPI.autostart) {
                     if (autoStartEnabled) {
                         // 当前是开启状态，需要关闭
-                        addLog('⏳ 正在关闭自启动...');
                         const result = await window.electronAPI.autostart.disable();
                         if (result && result.success) {
-                            addLog('✅ 自启动已关闭', 'warning');
-                            // 移除延迟验证逻辑，信任主进程推送
+                            // ✅ 立即更新UI状态（不等待主进程推送）
+                            autoStartEnabled = false;
+                            updateAutoStartToggle(autoStartEnabled);
+                            console.log('[AUTO_START_UI] ✅ 自启动已关闭，UI已更新');
                         } else {
-                            addLog('❌ 关闭自启动失败: ' + (result.error || '未知错误'), 'error');
                             // 失败时恢复UI状态
                             autoStartEnabled = true;
                             updateAutoStartToggle(autoStartEnabled);
+                            console.error('[AUTO_START_UI] ❌ 关闭自启动失败:', result?.error);
                         }
                     } else {
                         // 当前是关闭状态，需要开启
-                        addLog('⏳ 正在开启自启动...');
                         const result = await window.electronAPI.autostart.enable();
                         if (result && result.success) {
-                            addLog('✅ 自启动已开启', 'success');
-                            // 移除延迟验证逻辑，信任主进程推送
+                            // ✅ 立即更新UI状态（不等待主进程推送）
+                            autoStartEnabled = true;
+                            updateAutoStartToggle(autoStartEnabled);
+                            console.log('[AUTO_START_UI] ✅ 自启动已开启，UI已更新');
                         } else {
-                            addLog('❌ 开启自启动失败: ' + (result.error || '未知错误'), 'error');
                             // 失败时恢复UI状态
                             autoStartEnabled = false;
                             updateAutoStartToggle(autoStartEnabled);
+                            console.error('[AUTO_START_UI] ❌ 开启自启动失败:', result?.error);
                         }
                     }
                 } else {
                     // 降级到模拟模式
                     autoStartEnabled = !autoStartEnabled;
                     updateAutoStartToggle(autoStartEnabled);
-                    addLog(`⚠️ 自启动 (模拟): ${autoStartEnabled ? '已开启' : '已关闭'}`, 'warning');
                 }
             } catch (error) {
-                addLog('❌ 自启动切换错误: ' + error.message, 'error');
             } finally {
                 // 解锁UI（延迟1秒确保操作完成）
                 setTimeout(() => {
@@ -1327,9 +1164,7 @@
 
                         // 给用户警告提示，而非静默覆盖
                         if (actualStatus === false && expectedStatus === true) {
-                            addLog('⚠️ 系统自启动设置未生效，可能需要手动检查系统偏好设置', 'warning');
                         } else if (actualStatus === true && expectedStatus === false) {
-                            addLog('⚠️ 检测到系统自启动已开启，但UI显示关闭', 'warning');
                         }
 
                         autoStartEnabled = actualStatus;
@@ -1353,7 +1188,6 @@
                     if (result && result.success) {
                         autoStartEnabled = result.enabled || false;
                         updateAutoStartToggle(autoStartEnabled);
-                        addLog(`✅ 自启动状态: ${autoStartEnabled ? '已开启' : '已关闭'}`, 'info');
                         console.log('[AUTO_START_UI] 状态加载成功:', { enabled: autoStartEnabled, retryCount });
                     } else {
                         // 如果平台适配器不可用或获取失败,延迟重试
@@ -1367,7 +1201,6 @@
                         } else {
                             // 达到最大重试次数,不设置默认值,等待事件推送
                             console.warn('[AUTO_START_UI] 达到最大重试次数,等待主进程推送状态事件');
-                            addLog('⏳ 等待自启动状态同步...', 'info');
                         }
                     }
                 } else {
@@ -1381,7 +1214,6 @@
                     } else {
                         // API不可用但不强制设置为false,等待事件
                         console.warn('[AUTO_START_UI] API不可用,等待状态推送');
-                        addLog('⏳ 等待自启动状态同步...', 'info');
                     }
                 }
             } catch (error) {
@@ -1394,92 +1226,7 @@
                 } else {
                     // 错误情况也不强制设置为false,等待事件
                     console.warn('[AUTO_START_UI] 加载失败,等待状态推送');
-                    addLog('⏳ 等待自启动状态同步...', 'info');
                 }
-            }
-        }
-
-        // 加载历史日志
-        async function loadHistoryLogs() {
-            try {
-                if (window.electronAPI && window.electronAPI.log) {
-                    const result = await window.electronAPI.log.getUILogs();
-                    if (result && result.success && result.data && Array.isArray(result.data)) {
-                        // 清除初始日志
-                        const logs = document.getElementById('logs');
-                        logs.innerHTML = '';
-                        
-                        // 添加历史日志
-                        result.data.forEach(logEntry => {
-                            addLogFromManager(logEntry);
-                        });
-                        
-                        addLog('历史日志已加载 (' + result.data.length + ' 条)', 'info');
-                    }
-                }
-            } catch (error) {
-                console.error('加载历史日志失败:', error);
-                addLog('加载历史日志失败: ' + error.message, 'error');
-            }
-        }
-        
-        // 从 LogManager 添加日志条目
-        function addLogFromManager(logEntry) {
-            if (!logEntry || !logEntry.message) return;
-            
-            const logs = document.getElementById('logs');
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.dataset.type = logEntry.level || 'info';
-            
-            // 检查是否应该显示此类型的日志
-            if (!shouldShowLog(logEntry.level || 'info')) {
-                entry.style.display = 'none';
-            }
-            
-            // 使用 LogManager 的时间格式
-            const timeStr = logEntry.timeStr || new Date(logEntry.timestamp).toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 8);
-            
-            // 根据日志级别设置样式
-            let className = 'log-time';
-            let icon = 'ℹ️';
-            
-            switch (logEntry.level) {
-                case 'error':
-                    className = 'log-error';
-                    icon = '❌';
-                    break;
-                case 'warning':
-                    className = 'log-warning';
-                    icon = '⚠️';
-                    break;
-                case 'success':
-                    className = 'log-success';
-                    icon = '✅';
-                    break;
-                case 'data':
-                    className = 'log-data';
-                    icon = '📊';
-                    break;
-                case 'upload':
-                    className = 'log-upload';
-                    icon = '📤';
-                    break;
-                case 'debug':
-                    className = 'log-info';
-                    icon = '🔍';
-                    break;
-                default:
-                    className = 'log-info';
-                    icon = 'ℹ️';
-            }
-            
-            entry.innerHTML = `<span class="${className}">[${timeStr}]</span> ${icon} ${logEntry.message}`;
-            logs.appendChild(entry);
-            
-            // 限制日志数量
-            if (logs.children.length > 150) {
-                logs.removeChild(logs.firstChild);
             }
         }
 
@@ -1496,14 +1243,12 @@
                     const config = await window.electronAPI.config.get();
                     if (config && config.serverUrl) {
                         document.getElementById('serverUrl').value = config.serverUrl;
-                        addLog('配置已加载');
                     }
                 } else {
                     // 默认配置
                     document.getElementById('serverUrl').value = 'http://23.95.193.155:3000';
                 }
             } catch (error) {
-                addLog('加载配置错误: ' + error.message, 'error');
             }
         }
 
@@ -1512,7 +1257,6 @@
                 const serverUrl = document.getElementById('serverUrl').value.trim();
                 
                 if (!serverUrl) {
-                    addLog('服务器地址不能为空', 'error');
                     return;
                 }
 
@@ -1520,30 +1264,24 @@
                 try {
                     new URL(serverUrl);
                 } catch {
-                    addLog('服务器地址格式不正确', 'error');
                     return;
                 }
 
                 if (window.electronAPI && window.electronAPI.config) {
                     const result = await window.electronAPI.config.update({ serverUrl });
                     if (result && result.success !== false) {
-                        addLog('配置已保存: ' + serverUrl);
                         toggleConfig(); // 关闭配置面板
                     } else {
-                        addLog('保存配置失败: ' + (result.message || '未知错误'), 'error');
                     }
                 } else {
-                    addLog('配置已更新: ' + serverUrl);
                     toggleConfig();
                 }
             } catch (error) {
-                addLog('保存配置错误: ' + error.message, 'error');
             }
         }
 
         function resetConfig() {
             document.getElementById('serverUrl').value = 'http://23.95.193.155:3000';
-            addLog('配置已重置为默认值');
         }
 
         // 显示权限弹窗内容
@@ -1606,12 +1344,10 @@
                     requestBtn.textContent = '请求中...';
                 }
                 
-                addLog('开始请求系统权限...');
                 
                 if (window.electronAPI && window.electronAPI.permission) {
                     const result = await window.electronAPI.permission.requestAll();
                     if (result.success) {
-                        addLog('权限请求已发送，请按照提示完成授权', 'success');
                         
                         // 3秒后重新检查权限状态
                         setTimeout(async () => {
@@ -1619,10 +1355,8 @@
                             await showPermissionModal(); // 刷新权限弹窗显示
                         }, 3000);
                     } else {
-                        addLog('权限请求失败: ' + (result.error || '未知错误'), 'error');
                     }
                 } else {
-                    addLog('权限请求功能暂不可用', 'warning');
                 }
                 
                 if (requestBtn) {
@@ -1630,7 +1364,6 @@
                     requestBtn.textContent = '请求权限';
                 }
             } catch (error) {
-                addLog('权限请求错误: ' + error.message, 'error');
                 const requestBtn = document.getElementById('requestPermissionsBtn');
                 if (requestBtn) {
                     requestBtn.disabled = false;
@@ -1666,175 +1399,6 @@
             toggle.className = enabled ? 'toggle active' : 'toggle';
         }
 
-        // 清空日志
-        function clearLogs() {
-            const logs = document.getElementById('logs');
-            logs.innerHTML = '';
-            addLog('日志已清空', 'info');
-        }
-
-        // 切换日志过滤器显示
-        function toggleLogLevels() {
-            const filters = document.getElementById('logFilters');
-            filters.style.display = filters.style.display === 'none' ? 'flex' : 'none';
-        }
-
-        // 检查日志是否应该显示
-        function shouldShowLog(type) {
-            const filterCheckboxes = {
-                'data': document.getElementById('filterData'),
-                'upload': document.getElementById('filterUpload'),
-                'success': document.getElementById('filterSuccess'),
-                'info': document.getElementById('filterInfo'),
-                'warning': document.getElementById('filterWarning'),
-                'error': document.getElementById('filterError')
-            };
-            
-            const checkbox = filterCheckboxes[type];
-            return checkbox ? checkbox.checked : true;
-        }
-
-        function addLog(message, type = 'info') {
-            // 检查是否应该显示此类型的日志
-            if (!shouldShowLog(type)) {
-                return;
-            }
-
-            const logs = document.getElementById('logs');
-            const time = new Date().toLocaleTimeString('zh-CN', { hour12: false }).slice(0, 8);
-            const logEntry = document.createElement('div');
-            logEntry.className = 'log-entry';
-            logEntry.dataset.type = type; // 保存类型用于过滤
-            
-            // 根据日志类型设置不同的样式
-            let className = 'log-time';
-            if (type === 'error') {
-                className = 'log-error';
-            } else if (type === 'warning') {
-                className = 'log-warning';
-            } else if (type === 'success') {
-                className = 'log-success';
-            } else if (type === 'data') {
-                className = 'log-data';
-            } else if (type === 'upload') {
-                className = 'log-upload';
-            } else {
-                className = 'log-info';
-            }
-            
-            // 为数据采集和上传相关的消息添加特殊标记
-            if (message.includes('采集') || message.includes('数据') || message.includes('活动')) {
-                className = 'log-data';
-                logEntry.dataset.type = 'data';
-            } else if (message.includes('上传') || message.includes('传输') || message.includes('WebSocket')) {
-                className = 'log-upload';
-                logEntry.dataset.type = 'upload';
-            }
-            
-            // 增强消息格式，添加更多视觉提示
-            let icon = '';
-            switch (type) {
-                case 'success': icon = '✅'; break;
-                case 'error': icon = '❌'; break;
-                case 'warning': icon = '⚠️'; break;
-                case 'data': icon = '📊'; break;
-                case 'upload': icon = '📤'; break;
-                default: icon = 'ℹ️'; break;
-            }
-            
-            logEntry.innerHTML = `<span class="${className}">[${time}]</span> ${icon} ${message}`;
-            
-            logs.appendChild(logEntry);
-            
-            // 限制日志数量，保持性能
-            if (logs.children.length > 150) { // 增加日志数量限制
-                logs.removeChild(logs.firstChild);
-            }
-            
-            // 确保滚动到底部，使用setTimeout确保DOM更新完成
-            setTimeout(() => {
-                logs.scrollTop = logs.scrollHeight;
-            }, 10);
-        }
-
-        // 重新过滤日志显示
-        function refilterLogs() {
-            const logs = document.getElementById('logs');
-            const entries = logs.querySelectorAll('.log-entry');
-            
-            entries.forEach(entry => {
-                const type = entry.dataset.type;
-                if (type && !shouldShowLog(type)) {
-                    entry.style.display = 'none';
-                } else {
-                    entry.style.display = 'block';
-                }
-            });
-        }
-
-        // 为过滤器复选框添加事件监听
-        document.addEventListener('DOMContentLoaded', () => {
-            const filterCheckboxes = ['filterData', 'filterUpload', 'filterSuccess', 'filterInfo', 'filterWarning', 'filterError'];
-            filterCheckboxes.forEach(id => {
-                const checkbox = document.getElementById(id);
-                if (checkbox) {
-                    checkbox.addEventListener('change', refilterLogs);
-                }
-            });
-        });
-        
-        // 显示日志统计信息
-        async function showLogStats() {
-            try {
-                if (window.electronAPI && window.electronAPI.log) {
-                    const result = await window.electronAPI.log.getStats();
-                    if (result && result.success && result.data) {
-                        const stats = result.data;
-                        const statsText = `日志统计:
-` +
-                            `- UI日志: ${stats.uiLogCount}/${stats.maxUILogs}
-` +
-                            `- 当前文件: ${stats.currentFileLines || 0}/${stats.maxFileLines}
-` +
-                            `- 文件数量: ${stats.logFileCount || 0}
-` +
-                            `- 日志目录: ${stats.logsDir || '未设置'}`;
-                        
-                        alert(statsText);
-                        addLog('日志统计信息已显示', 'info');
-                    } else {
-                        addLog('获取日志统计失败', 'error');
-                    }
-                } else {
-                    addLog('日志统计功能不可用', 'warning');
-                }
-            } catch (error) {
-                addLog('日志统计错误: ' + error.message, 'error');
-            }
-        }
-        
-        // 清理旧日志文件
-        async function cleanupOldLogs() {
-            try {
-                if (window.electronAPI && window.electronAPI.log) {
-                    const maxDays = prompt('输入保留天数（默认30天）:', '30');
-                    if (maxDays === null) return; // 用户取消
-                    
-                    const days = parseInt(maxDays) || 30;
-                    const result = await window.electronAPI.log.cleanup(days);
-                    
-                    if (result && result.success) {
-                        addLog(`旧日志清理完成（${days}天前）`, 'success');
-                    } else {
-                        addLog('旧日志清理失败: ' + (result.error || '未知错误'), 'error');
-                    }
-                } else {
-                    addLog('日志清理功能不可用', 'warning');
-                }
-            } catch (error) {
-                addLog('日志清理错误: ' + error.message, 'error');
-            }
-        }
     </script>
 </body>
 </html>

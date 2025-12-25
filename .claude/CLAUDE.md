@@ -375,3 +375,425 @@ Get-Content "$env:APPDATA\employee-monitor\logs\url-collection.log" -Tail 20 -Wa
 - [ ] Real-time metrics dashboard
 - [ ] Automated permission request flows
 - [ ] Support for additional browsers (Brave, Opera, Vivaldi)
+
+---
+
+## Native Module Hot Update Support
+
+### Overview
+
+Recent enhancements (2025-12-23) added full support for hot-updating native modules (`.node`, `.dylib`, `.dll`, `.so`) via the ASAR unpacked directory mechanism.
+
+### Architecture
+
+**ASAR Structure**:
+```
+EmployeeSafety.app/Contents/Resources/
+├── app.asar              ← Compressed application code
+└── app.asar.unpacked/    ← Native modules (uncompressed)
+    └── node_modules/
+        ├── @img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node
+        └── @img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.17.2.dylib
+```
+
+**Hot Update Process**:
+1. Extract both `app.asar` and `app.asar.unpacked` directories
+2. Apply differential updates to both packed (JS) and unpacked (native) files
+3. Repack `app.asar` and replace `app.asar.unpacked` directory
+4. Restart application to load updated native modules
+
+### Key Components
+
+#### 1. AsarManager Extensions
+
+**File**: `src/common/services/hot-update/AsarManager.ts`
+
+**New Methods**:
+- `extractWithUnpacked(targetDir)` - Extract ASAR + unpacked to `targetDir/asar/` and `targetDir/unpacked/`
+- `packWithUnpacked(sourceDir, targetPath)` - Pack ASAR + unpacked from source directory
+- `createFullBackup()` - Backup both ASAR and unpacked directories
+- `restoreFromFullBackup()` - Restore both from backup
+- `removeFullBackup()` - Clean up both backups
+
+```typescript
+// Example usage
+const asarManager = new AsarManager();
+
+// Extract with native modules
+await asarManager.extractWithUnpacked('/tmp/extract');
+// Creates:
+//   /tmp/extract/asar/       ← Extracted ASAR contents
+//   /tmp/extract/unpacked/   ← Copy of app.asar.unpacked
+
+// Pack with native modules
+await asarManager.packWithUnpacked('/tmp/extract', '/tmp/app.asar.new');
+// Creates:
+//   /tmp/app.asar.new          ← Packed ASAR
+//   /tmp/app.asar.new.unpacked ← Native modules directory
+```
+
+#### 2. DiffApplier Extensions
+
+**File**: `src/common/services/hot-update/DiffApplier.ts`
+
+**New Methods**:
+- `applyDiffWithUnpacked(extractDir, diffDir, manifest)` - Apply differential updates to both packed and unpacked files
+- `applyUnpackedDiff(unpackedExtractDir, unpackedDiffDir)` - Apply unpacked file updates (complete replacement strategy)
+
+**Unpacked File Strategy**:
+- **Complete Replacement**: Native modules are replaced entirely, not incrementally
+- **Reason**: Binary files don't support incremental patching; ABI compatibility requires exact versions
+
+```typescript
+// Diff package structure for native module updates
+diff-package.tar.gz
+├── manifest.json         ← Metadata (version, changed files, etc.)
+├── changed/             ← Changed ASAR files (incremental)
+│   ├── electron/
+│   ├── out/dist/
+│   └── package.json
+└── unpacked/            ← Native modules (complete replacement)
+    └── node_modules/
+        └── @img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node
+```
+
+#### 3. HotUpdateService Integration
+
+**File**: `src/common/services/hot-update/HotUpdateService.ts`
+
+**Updated Flow**:
+```typescript
+async applyDiffPackage() {
+  // 1. Extract current app (ASAR + unpacked)
+  await asarManager.extractWithUnpacked(tempExtractDir);
+
+  // 2. Extract diff package
+  await diffApplier.extractDiffPackage(diffPath, tempDiffDir);
+
+  // 3. Apply diff (handles both packed and unpacked)
+  await diffApplier.applyDiffWithUnpacked(tempExtractDir, tempDiffDir, manifest);
+
+  // 4. Repack (ASAR + unpacked)
+  await asarManager.packWithUnpacked(tempExtractDir, newAsarPath);
+
+  // 5. Replace app.asar and app.asar.unpacked on restart
+}
+```
+
+### Backend Integration Requirements
+
+**Diff Package Generation (Backend)**:
+
+The backend DiffPackageGenerator must include native module changes in differential packages:
+
+```typescript
+// Backend: Generate diff package with unpacked support
+{
+  "manifest": {
+    "version": "1.0.3",
+    "changedFiles": ["out/dist/main/app/index.js", "package.json"],
+    "hasUnpackedChanges": true  // NEW: Indicates unpacked directory changes
+  },
+  "structure": {
+    "changed/": "Incremental ASAR file updates",
+    "unpacked/": "Complete native modules directory"  // NEW
+  }
+}
+```
+
+**Backend Detection Logic**:
+```typescript
+// Check if unpacked directory has changes
+const unpackedPath = `${buildDir}/node_modules`;
+const hasUnpackedChanges = await detectNativeModuleChanges(
+  previousBuild,
+  currentBuild,
+  unpackedPath
+);
+
+if (hasUnpackedChanges) {
+  // Include entire node_modules/@img directory in diff package
+  await copyUnpackedFiles(currentBuild, diffPackageDir);
+}
+```
+
+### Important Considerations
+
+#### 1. macOS Code Signing
+
+**Development Environment** (Current Setup):
+- Code signing is **disabled** (`osxSign: false` in build config)
+- Native module updates work without signing issues
+- Application runs unsigned (acceptable for development)
+
+**Production Environment** (Future Consideration):
+- ⚠️ **Code Signing Limitations**: If application is signed with Developer ID or App Store certificate:
+  - Updating `.dylib` files **invalidates** the application signature
+  - macOS Gatekeeper/taskgated **will reject** the modified application
+  - Application will **crash on startup** with `SIGKILL (Code Signature Invalid)`
+
+**Production Solutions**:
+1. **Disable Hot Update for Native Modules**: Use full installer for native changes
+2. **Re-sign After Update**: Implement automatic codesigning in hot update process (requires Developer certificate)
+3. **Distribute Unsigned**: Deploy unsigned builds (loses macOS Gatekeeper protection)
+
+#### 2. Performance Impact
+
+| Update Type | Diff Package Size | Update Time | Network Usage |
+|-------------|------------------|-------------|---------------|
+| **UI Only** (no native) | 5-50 KB | <5s | Minimal |
+| **Business Logic** (no native) | 100-500 KB | 5-10s | Low |
+| **With Native Modules** | **3-10 MB** | 15-30s | High |
+
+**Optimization Strategies**:
+- Only include changed native modules (filter by hash)
+- Compress unpacked directory before packaging
+- Implement progressive download for large binaries
+
+#### 3. Native Module Compatibility
+
+**ABI Compatibility Matrix**:
+| Scenario | Compatible | Risk |
+|----------|-----------|------|
+| Same Electron version | ✅ Yes | Low |
+| Electron minor upgrade (28.2 → 28.3) | ✅ Usually | Medium |
+| Electron major upgrade (28 → 29) | ❌ No | High |
+| Node.js version change | ❌ No | Critical |
+
+**Best Practices**:
+- ⚠️ **Never hot-update native modules across Electron major versions**
+- Test native module updates on all supported platforms
+- Implement fallback to full installer if native update fails
+
+#### 4. Error Recovery
+
+**Automatic Rollback**:
+```typescript
+try {
+  await asarManager.createFullBackup();  // Backup ASAR + unpacked
+  await applyDiffPackage();
+  await verifyNativeModules();  // Critical: Verify native modules load
+} catch (error) {
+  await asarManager.restoreFromFullBackup();  // Restore both
+  throw error;
+}
+```
+
+**Verification**:
+```typescript
+// Verify native modules after update
+async function verifyNativeModules() {
+  try {
+    const sharp = require('sharp');
+    await sharp(Buffer.from(...)).metadata();  // Test sharp works
+    return true;
+  } catch (error) {
+    throw new Error(`Native module verification failed: ${error.message}`);
+  }
+}
+```
+
+### Testing
+
+**Manual Testing Workflow**:
+```bash
+# 1. Build current version (e.g., 1.0.2)
+npm run pack:mac
+
+# 2. Modify native module dependency (e.g., upgrade sharp)
+npm install sharp@0.33.5
+
+# 3. Build new version (e.g., 1.0.3)
+npm version patch
+npm run pack:mac
+
+# 4. Backend generates diff package including unpacked changes
+# (Backend task - verify unpacked/ directory exists in diff package)
+
+# 5. Install 1.0.2, trigger hot update to 1.0.3
+# Verify:
+#   - Hot update succeeds
+#   - Native modules load without errors
+#   - Sharp functionality works (screenshot compression)
+```
+
+**Automated Testing**:
+```typescript
+describe('Native Module Hot Update', () => {
+  it('should update sharp native module successfully', async () => {
+    // Test implementation
+    const diffPackage = await generateDiffWithNativeModules();
+    expect(diffPackage).toHaveProperty('unpacked');
+
+    await hotUpdateService.applyUpdate(diffPackage);
+
+    const sharp = require('sharp');
+    const metadata = await sharp(testImage).metadata();
+    expect(metadata.format).toBe('jpeg');
+  });
+});
+```
+
+### Known Limitations
+
+1. **No Incremental Updates for Native Modules**: Unpacked files are replaced entirely (diff size increases)
+2. **Platform-Specific Binaries**: Different binaries for macOS ARM64, macOS x64, Windows x64 (backend must provide correct variant)
+3. **Restart Required**: Native module updates always require application restart (cannot hot-swap .dylib in memory)
+4. **Code Signing Incompatibility**: Production signed apps cannot hot-update native modules without re-signing
+
+### Future Enhancements
+
+- [ ] Implement per-module differential updates (reduce diff size)
+- [ ] Add automatic re-signing support for production builds
+- [ ] Implement native module version compatibility checking
+- [ ] Add native module verification before applying update
+- [ ] Support for partial unpacked directory updates (module-level granularity)
+
+---
+
+## Critical Issues & Solutions
+
+### Issue: "启动失败" (Startup Failed) - Native Dependencies Not Packaged
+
+**Severity**: CRITICAL
+**Versions Affected**: v1.0.137-142
+**Fixed In**: v1.0.143+
+
+#### Symptoms
+
+When running the packaged application (`pack:mac` or `pack:win`):
+- UI displays "启动失败" (Startup Failed) when clicking "启动" button
+- Application appears to start but monitoring features are disabled
+- Error in logs: `Could not load the "sharp" module using the darwin-arm64 runtime`
+- Error in logs: `Library not loaded: @rpath/libvips-cpp.8.17.2.dylib`
+- Error in logs: `Failed to load main application: Could not load EmployeeMonitorApp`
+
+#### Root Cause
+
+The `sharp` image processing module requires native dynamic libraries (`libvips-cpp.8.17.2.dylib` on macOS, `.dll` on Windows) that **cannot be loaded from within ASAR archives**.
+
+When `electron-packager` was configured with:
+```javascript
+asar: {
+  unpackDir: 'native'  // ❌ Only unpacks ./native directory
+}
+```
+
+The `sharp` module's native dependencies in `node_modules/` were compressed into `app.asar`, causing the macOS/Windows dynamic linker (dyld/LoadLibrary) to fail loading them at runtime.
+
+**Error Chain**:
+```
+1. App starts → Loads electron/main-minimal.js
+2. Attempts to load EmployeeMonitorApp class
+3. EmployeeMonitorApp imports 'sharp' for screenshot compression
+4. sharp tries to load libvips-cpp.8.17.2.dylib
+5. dyld searches for .dylib in app.asar (compressed)
+6. ❌ dyld cannot load libraries from compressed archives
+7. sharp module fails to initialize
+8. EmployeeMonitorApp load fails
+9. app_instance = null
+10. Application enters "simulation mode" (all monitoring disabled)
+11. Click "启动" → Returns {success: false}
+12. UI shows "启动失败"
+```
+
+#### Why Previous Fixes Didn't Work
+
+Versions v1.0.137-142 attempted to fix the issue by:
+- Improving state detection logic (OR/AND conditions)
+- Adding complete state lists (missing FSM states)
+- Implementing button locking mechanisms
+- Enhancing duplicate start detection
+
+**None of these worked** because:
+```javascript
+if (app_instance) {
+    // All the fixes were here...
+    // But app_instance was null, so this code never executed
+}
+```
+
+The real problem was that `app_instance` never initialized successfully due to the missing native dependencies.
+
+#### Solution
+
+**Step 1**: Update ASAR packaging configuration to unpack `sharp` and its native dependencies.
+
+Edit `scripts/build/pack-mac-universal.js`:
+```javascript
+asar: {
+  unpackDir: '{native,node_modules/sharp,node_modules/@img}'  // ✅ Unpack sharp + native deps
+}
+```
+
+**Step 2**: Fix type safety issue in state detection (v1.0.144).
+
+Edit `electron/main-minimal.js`:
+```javascript
+// Before (v1.0.142)
+if (monitoringState && activeStates.includes(monitoringState.toLowerCase())) {
+  // ❌ TypeError if monitoringState is not a string
+}
+
+// After (v1.0.144)
+const stateStr = monitoringState ? String(monitoringState).toLowerCase() : null;
+if (stateStr && activeStates.includes(stateStr)) {
+  // ✅ Safe type conversion
+}
+```
+
+#### Verification
+
+After applying the fix:
+```bash
+# 1. Rebuild the application
+pnpm run pack:mac
+
+# 2. Verify sharp is unpacked
+ls -la release/EmployeeSafety-darwin-arm64/EmployeeSafety.app/Contents/Resources/app.asar.unpacked/node_modules/sharp
+ls -la release/EmployeeSafety-darwin-arm64/EmployeeSafety.app/Contents/Resources/app.asar.unpacked/node_modules/@img/sharp-libvips-darwin-arm64/lib/
+
+# 3. Check logs for successful initialization
+# Should see: [LOG_MANAGER] Initialized successfully
+# Should NOT see: Failed to load main application
+```
+
+#### Prevention
+
+**For Future Native Dependencies**:
+
+When adding any npm package that includes native binaries (`.node`, `.dylib`, `.dll`, `.so`):
+
+1. **Check if it needs unpacking**: Native modules typically require unpacking from ASAR
+2. **Update packager config**: Add the module path to `unpackDir`
+3. **Test packaged build**: Always test the packaged application, not just development mode
+4. **Common modules requiring unpacking**:
+   - `sharp` (image processing)
+   - `sqlite3` (database)
+   - `node-gyp` compiled modules
+   - Any module with `prebuilds/` or `build/Release/` directories
+
+**Testing Checklist**:
+```bash
+# ✅ Test development mode (always works)
+npm run electron:dev
+
+# ✅ Test packaged application (may fail if native deps not unpacked)
+npm run pack:mac
+open release/EmployeeSafety-darwin-arm64/EmployeeSafety.app
+
+# ✅ Check for native module errors in logs
+grep -E "Could not load|ERR_DLOPEN_FAILED|Library not loaded" /tmp/app-console.log
+```
+
+#### Related Files
+
+- `scripts/build/pack-mac-universal.js` - ASAR packaging configuration
+- `electron/main-minimal.js` - Main process initialization and error handling
+- `package.json` - Dependencies and native module declarations
+
+#### References
+
+- [Electron ASAR Archive Documentation](https://www.electronjs.org/docs/latest/tutorial/asar-archives)
+- [sharp Installation - Electron](https://sharp.pixelplumbing.com/install#electron)
+- [electron-packager API - ASAR Options](https://electron.github.io/packager/main/interfaces/Options.html#asar)

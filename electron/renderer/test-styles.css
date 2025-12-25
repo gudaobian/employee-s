@@ -1,0 +1,23 @@
+/* 测试 CSS 智能重载 */
+
+.demo-area {
+  border-color: #28a745 !important;
+  background: #f0fff4 !important;
+}
+
+.demo-area h3 {
+  color: #28a745 !important;
+}
+
+.pulse {
+  animation: pulse-custom 2s infinite;
+}
+
+@keyframes pulse-custom {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}

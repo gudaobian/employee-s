@@ -1,0 +1,11 @@
+version: 1.0.135
+releaseDate: '2025-12-19T08:53:00.000Z'
+releaseNotes: |
+  修复版本 1.0.135
+  - 修复 FSM 状态判断逻辑（BIND_CHECK 和 REGISTER 状态）
+  - 修复 API 健康检查超时问题（5秒 → 30秒）
+  - 排除 .npm-cache 目录（解决 ASAR 提取失败）
+  - 排除 native/windows 目录（macOS 包不需要 Windows 代码）
+  - 优化包结构和大小
+path: EmployeeSafety-darwin-arm64-1.0.135.zip
+sha512: ''

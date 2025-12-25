@@ -12,15 +12,16 @@
  */
 
 import { autoUpdater, UpdateInfo as ElectronUpdateInfo, ProgressInfo } from 'electron-updater';
-import { app } from 'electron';
+import { app, dialog, BrowserWindow } from 'electron';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { machineIdSync } from 'node-machine-id';
-import { updateLogger } from '../utils/update-logger';
+// ⚠️ 延迟导入：避免在模块加载时触发 getInstance() 导致同步文件操作
+// import { updateLogger } from '../utils/update-logger';
+// import { appConfig } from '../config/app-config-manager';
 import { UpdateApiClient } from './update-api-client';
-import { appConfig } from '../config/app-config-manager';
 import {
   UpdateStatus,
   UpdateStatusReport,
@@ -28,12 +29,43 @@ import {
   UpdateInfo,
   UpdateDownloadProgress
 } from '../interfaces/update-status-interface';
+import { HotUpdateService } from './hot-update/HotUpdateService';
+import { CheckUpdateResponse } from '../types/hot-update.types';
+import {
+  meetsMinVersion,
+  formatVersionChange,
+  getVersionChangeTitle,
+  getVersionChangeDetail
+} from '../utils/version-helper';
 
 export interface AutoUpdateServiceOptions {
   updateServerUrl?: string; // 可选，如果不提供则使用 URLConfigManager
   channel?: 'stable' | 'beta' | 'dev';
   autoDownload?: boolean;
   autoInstallOnQuit?: boolean;
+}
+
+/**
+ * 延迟加载配置管理器和日志器，避免模块加载时的同步文件操作
+ * 这些 getter 会在首次访问时才加载模块，避免 require() 阶段的死锁
+ */
+let _appConfig: any = null;
+let _updateLogger: any = null;
+
+function getAppConfig() {
+  if (!_appConfig) {
+    const { appConfig } = require('../config/app-config-manager');
+    _appConfig = appConfig;
+  }
+  return _appConfig;
+}
+
+function getUpdateLogger() {
+  if (!_updateLogger) {
+    const { updateLogger } = require('../utils/update-logger');
+    _updateLogger = updateLogger;
+  }
+  return _updateLogger;
 }
 
 export class AutoUpdateService extends EventEmitter {
@@ -46,6 +78,7 @@ export class AutoUpdateService extends EventEmitter {
   private channel: string;
   private lastNotifiedVersion?: string; // 记录上次通知的版本，避免重复通知
   private deviceId: string; // Device ID for multi-region OSS support
+  private hotUpdateService: HotUpdateService | null = null; // 热更新服务
 
   constructor(options: AutoUpdateServiceOptions) {
     super();
@@ -53,12 +86,12 @@ export class AutoUpdateService extends EventEmitter {
     // Get device ID for multi-region OSS support
     try {
       this.deviceId = machineIdSync();
-      updateLogger.info('Device ID acquired', { deviceId: this.deviceId });
+      getUpdateLogger().info('Device ID acquired', { deviceId: this.deviceId });
     } catch (error: any) {
       // Fallback to hash of userData path if machineIdSync fails
       const fallbackId = crypto.createHash('md5').update(app.getPath('userData')).digest('hex');
       this.deviceId = fallbackId;
-      updateLogger.warn('Failed to get machine ID, using fallback', {
+      getUpdateLogger().warn('Failed to get machine ID, using fallback', {
         error: error.message,
         deviceId: this.deviceId
       });
@@ -67,7 +100,7 @@ export class AutoUpdateService extends EventEmitter {
     this.channel = options.channel || 'stable';
 
     // 优先使用传入的 updateServerUrl，否则使用 AppConfigManager
-    const updateServerUrl = options.updateServerUrl || appConfig.getUpdateServerUrl();
+    const updateServerUrl = options.updateServerUrl || getAppConfig().getUpdateServerUrl();
 
     this.apiClient = new UpdateApiClient(
       updateServerUrl,
@@ -78,13 +111,19 @@ export class AutoUpdateService extends EventEmitter {
     this.setupEventHandlers();
 
     // 监听配置变更，支持热更新
-    appConfig.on('config-updated', this.handleConfigUpdate.bind(this));
+    getAppConfig().on('config-updated', this.handleConfigUpdate.bind(this));
 
-    updateLogger.info('AutoUpdateService initialized', {
+    // ⚠️ 延迟初始化热更新服务，避免循环依赖
+    // HotUpdateService 会在首次 checkForUpdates() 时按需初始化
+    // 这样可以避免在模块加载阶段就创建实例导致的死锁
+    this.hotUpdateService = null;
+
+    getUpdateLogger().info('AutoUpdateService initialized', {
       version: app.getVersion(),
       channel: this.channel,
       updateServerUrl,
-      deviceId: this.deviceId
+      deviceId: this.deviceId,
+      hotUpdateEnabled: this.hotUpdateService !== null
     });
   }
 
@@ -92,13 +131,10 @@ export class AutoUpdateService extends EventEmitter {
    * Configure electron-updater
    */
   private configureAutoUpdater(options: AutoUpdateServiceOptions, updateServerUrl: string): void {
-    // Build feed URL with deviceId query parameter for multi-region OSS support
-    const feedURL = `${updateServerUrl}?deviceId=${this.deviceId}`;
-
-    // Set feed URL
+    // Set feed URL with deviceId as query parameter (required by backend)
     autoUpdater.setFeedURL({
       provider: 'generic',
-      url: feedURL,
+      url: `${updateServerUrl}?deviceId=${this.deviceId}`,
       channel: this.channel
     });
 
@@ -109,7 +145,7 @@ export class AutoUpdateService extends EventEmitter {
     autoUpdater.autoInstallOnAppQuit = options.autoInstallOnQuit !== false;
 
     // Set logger
-    autoUpdater.logger = updateLogger.getLogger();
+    autoUpdater.logger = getUpdateLogger().getLogger();
 
     // Allow downgrade (for beta/dev channels)
     autoUpdater.allowDowngrade = this.channel !== 'stable';
@@ -117,9 +153,8 @@ export class AutoUpdateService extends EventEmitter {
     // Don't force dev-server update in development
     autoUpdater.forceDevUpdateConfig = false;
 
-    updateLogger.info('AutoUpdater configured', {
-      feedURL,
-      deviceId: this.deviceId,
+    getUpdateLogger().info('AutoUpdater configured', {
+      feedURL: `${updateServerUrl}?deviceId=${this.deviceId}`,
       channel: this.channel,
       autoDownload: autoUpdater.autoDownload,
       autoInstallOnQuit: autoUpdater.autoInstallOnAppQuit,
@@ -129,12 +164,19 @@ export class AutoUpdateService extends EventEmitter {
 
   /**
    * Setup electron-updater event handlers
+   *
+   * ⚠️ DEPRECATED: 不再使用 electron-updater 进行全量更新
+   * - 热更新：使用 HotUpdateService（差异包）
+   * - 完整更新：提示用户手动下载 DMG
+   *
+   * 保留此方法以防未来需要恢复全量自动更新功能
    */
   private setupEventHandlers(): void {
+    // ⚠️ 以下事件监听器已废弃，不再触发（因为不调用 autoUpdater.checkForUpdates()）
     // Checking for update
     autoUpdater.on('checking-for-update', () => {
       const feedURL = `${this.apiClient.getBaseURL()}?deviceId=${this.deviceId}`;
-      updateLogger.info('[EVENT] Checking for updates...', {
+      getUpdateLogger().info('[EVENT] Checking for updates...', {
         feedURL,
         currentVersion: app.getVersion(),
         deviceId: this.deviceId,
@@ -148,7 +190,7 @@ export class AutoUpdateService extends EventEmitter {
     // Update available
     autoUpdater.on('update-available', (info: ElectronUpdateInfo) => {
       const downloadUrl = info.files?.[0]?.url || 'N/A';
-      updateLogger.info('[EVENT] Update available', {
+      getUpdateLogger().info('[EVENT] Update available', {
         version: info.version,
         releaseDate: info.releaseDate,
         size: info.files?.[0]?.size,
@@ -164,7 +206,7 @@ export class AutoUpdateService extends EventEmitter {
       if (isNewVersion) {
         // 记录这次通知的版本
         this.lastNotifiedVersion = info.version;
-        updateLogger.info('[EVENT] New version detected, will show notification', {
+        getUpdateLogger().info('[EVENT] New version detected, will show notification', {
           version: info.version,
           downloadUrl
         });
@@ -181,13 +223,13 @@ export class AutoUpdateService extends EventEmitter {
           }
         });
       } else {
-        updateLogger.debug('[EVENT] Same version as before, skipping notification', { version: info.version });
+        getUpdateLogger().debug('[EVENT] Same version as before, skipping notification', { version: info.version });
       }
     });
 
     // No update available
     autoUpdater.on('update-not-available', (info: ElectronUpdateInfo) => {
-      updateLogger.info('[EVENT] No update available', {
+      getUpdateLogger().info('[EVENT] No update available', {
         currentVersion: app.getVersion(),
         deviceId: this.deviceId,
         timestamp: new Date().toISOString()
@@ -199,7 +241,7 @@ export class AutoUpdateService extends EventEmitter {
     // Download progress
     autoUpdater.on('download-progress', (progress: ProgressInfo) => {
       const percentRounded = Math.round(progress.percent);
-      updateLogger.debug('[EVENT] Download progress', {
+      getUpdateLogger().debug('[EVENT] Download progress', {
         percent: percentRounded,
         transferred: this.formatBytes(progress.transferred),
         total: this.formatBytes(progress.total),
@@ -224,7 +266,7 @@ export class AutoUpdateService extends EventEmitter {
         ? Date.now() - this.downloadStartTime
         : undefined;
 
-      updateLogger.info('[EVENT] Update downloaded', {
+      getUpdateLogger().info('[EVENT] Update downloaded', {
         version: info.version,
         downloadDuration: downloadDuration ? `${downloadDuration}ms` : 'unknown',
         path: info.path,
@@ -248,7 +290,7 @@ export class AutoUpdateService extends EventEmitter {
 
     // Error
     autoUpdater.on('error', (error: Error) => {
-      updateLogger.error('[EVENT] Update error', {
+      getUpdateLogger().error('[EVENT] Update error', {
         error: error.message,
         stack: error.stack,
         deviceId: this.deviceId,
@@ -269,23 +311,23 @@ export class AutoUpdateService extends EventEmitter {
    */
   startPeriodicCheck(intervalMs: number = 6 * 60 * 60 * 1000): void {
     if (this.updateCheckInterval) {
-      updateLogger.warn('Periodic check already running, stopping previous interval');
+      getUpdateLogger().warn('Periodic check already running, stopping previous interval');
       this.stopPeriodicCheck();
     }
 
-    updateLogger.info(`Starting periodic update check`, {
+    getUpdateLogger().info(`Starting periodic update check`, {
       interval: this.formatDuration(intervalMs)
     });
 
     // Check immediately
     this.checkForUpdates().catch((error) => {
-      updateLogger.error('Initial update check failed', error);
+      getUpdateLogger().error('Initial update check failed', error);
     });
 
     // Then check periodically
     this.updateCheckInterval = setInterval(() => {
       this.checkForUpdates().catch((error) => {
-        updateLogger.error('Periodic update check failed', error);
+        getUpdateLogger().error('Periodic update check failed', error);
       });
     }, intervalMs);
   }
@@ -297,45 +339,118 @@ export class AutoUpdateService extends EventEmitter {
     if (this.updateCheckInterval) {
       clearInterval(this.updateCheckInterval);
       this.updateCheckInterval = undefined;
-      updateLogger.info('Stopped periodic update check');
+      getUpdateLogger().info('Stopped periodic update check');
     }
   }
 
   /**
-   * Manually check for updates
+   * 检查是否满足最低版本要求
+   */
+  private checkMinVersion(minVersion: string | null | undefined): boolean {
+    return meetsMinVersion(app.getVersion(), minVersion);
+  }
+
+  /**
+   * 延迟初始化热更新服务（避免循环依赖）
+   */
+  private ensureHotUpdateService(): void {
+    if (this.hotUpdateService || !app.isPackaged) {
+      return; // 已初始化或非打包环境
+    }
+
+    try {
+      const hotUpdateEnabled = getAppConfig().get('hotUpdateEnabled');
+      if (hotUpdateEnabled !== false) {
+        this.hotUpdateService = new HotUpdateService();
+        this.setupHotUpdateListeners();
+        getUpdateLogger().info('HotUpdateService lazy-initialized');
+      } else {
+        getUpdateLogger().info('HotUpdateService disabled by config');
+      }
+    } catch (error: any) {
+      getUpdateLogger().warn('Failed to lazy-initialize HotUpdateService:', error.message);
+    }
+  }
+
+  /**
+   * Manually check for updates (支持热更新优先)
    */
   async checkForUpdates(): Promise<void> {
     if (this.isChecking) {
-      updateLogger.debug('Update check already in progress');
+      getUpdateLogger().debug('Update check already in progress');
       return;
     }
 
     if (this.downloadInProgress) {
-      updateLogger.debug('Download in progress, skipping update check');
+      getUpdateLogger().debug('Download in progress, skipping update check');
       return;
     }
 
     try {
       this.isChecking = true;
-      const feedURL = `${this.apiClient.getBaseURL()}?deviceId=${this.deviceId}`;
-      updateLogger.info('[CHECK] Manual update check triggered', {
-        currentVersion: app.getVersion(),
-        feedURL,
-        deviceId: this.deviceId,
-        channel: this.channel,
-        timestamp: new Date().toISOString()
-      });
 
-      const result = await autoUpdater.checkForUpdates();
+      // 延迟初始化热更新服务（避免模块加载时的循环依赖）
+      this.ensureHotUpdateService();
 
-      if (result) {
-        updateLogger.info('[CHECK] Update check completed', {
-          updateInfo: result.updateInfo,
-          hasUpdate: result.updateInfo.version !== app.getVersion()
-        });
+      // 1. 优先尝试热更新
+      if (this.hotUpdateService) {
+        getUpdateLogger().info('[CHECK] Trying hot update first');
+
+        const updateInfo = await this.hotUpdateService.checkForUpdates();
+
+        // 兼容两种格式：优先使用 hotUpdate.manifest，其次使用直接的 manifest
+        const manifest = updateInfo?.hotUpdate?.manifest || updateInfo?.manifest;
+
+        if (updateInfo?.hasUpdate && updateInfo.updateType === 'hot' && manifest) {
+          // 发现热更新
+          getUpdateLogger().info(`[CHECK] Hot update available: ${updateInfo.version}`, {
+            versionChangeType: updateInfo.versionChangeType,
+            isForceUpdate: updateInfo.isForceUpdate,
+            currentVersion: updateInfo.currentVersion,
+            minVersion: updateInfo.minVersion,
+            manifestSource: updateInfo.hotUpdate?.manifest ? 'hotUpdate.manifest' : 'manifest'
+          });
+
+          // 检查最低版本要求
+          if (!this.checkMinVersion(updateInfo.minVersion)) {
+            getUpdateLogger().warn('[CHECK] Current version below minimum required, forcing update', {
+              currentVersion: app.getVersion(),
+              minVersion: updateInfo.minVersion
+            });
+            // 强制更新标识
+            updateInfo.isForceUpdate = true;
+          }
+
+          const success = await this.hotUpdateService.downloadAndApply(manifest);
+
+          if (success) {
+            // 热更新成功,提示用户重启（传递完整更新信息）
+            getUpdateLogger().info('[CHECK] Hot update successful, prompting restart');
+            this.promptUserToRestart(manifest.version, updateInfo);
+            return;
+          }
+
+          // 热更新失败，直接报错，不降级到手动下载
+          getUpdateLogger().error('[CHECK] Hot update failed, will not fallback to manual download');
+          return;
+        }
+
+        if (updateInfo?.updateType === 'full') {
+          // 后端判定需要完整更新（通常是Major版本），提示用户手动下载DMG
+          getUpdateLogger().info('[CHECK] Full update required (backend decision), prompting manual download', {
+            currentVersion: updateInfo.currentVersion,
+            newVersion: updateInfo.version,
+            reason: updateInfo.reason
+          });
+          this.showManualDownloadNotification(updateInfo);
+          return;
+        }
       }
+
+      // 如果热更新服务未初始化或没有发现更新，记录日志
+      getUpdateLogger().info('[CHECK] No hot update available, no further action needed');
     } catch (error: any) {
-      updateLogger.error('[CHECK] Failed to check for updates', {
+      getUpdateLogger().error('[CHECK] Failed to check for updates', {
         error: error.message,
         stack: error.stack,
         feedURL: `${this.apiClient.getBaseURL()}?deviceId=${this.deviceId}`
@@ -351,19 +466,19 @@ export class AutoUpdateService extends EventEmitter {
    */
   async downloadUpdate(): Promise<void> {
     if (this.downloadInProgress) {
-      updateLogger.warn('Download already in progress');
+      getUpdateLogger().warn('Download already in progress');
       return;
     }
 
     try {
       this.downloadInProgress = true;
       this.downloadStartTime = Date.now();
-      updateLogger.info('Starting manual update download');
+      getUpdateLogger().info('Starting manual update download');
 
       await autoUpdater.downloadUpdate();
     } catch (error: any) {
       this.downloadInProgress = false;
-      updateLogger.error('Download failed', error);
+      getUpdateLogger().error('Download failed', error);
       throw error;
     }
   }
@@ -373,7 +488,7 @@ export class AutoUpdateService extends EventEmitter {
    */
   async quitAndInstall(isSilent: boolean = false, isForceRunAfter: boolean = true): Promise<void> {
     try {
-      updateLogger.info('Preparing to quit and install update', {
+      getUpdateLogger().info('Preparing to quit and install update', {
         isSilent,
         isForceRunAfter
       });
@@ -389,7 +504,7 @@ export class AutoUpdateService extends EventEmitter {
         autoUpdater.quitAndInstall(isSilent, isForceRunAfter);
       }, 1000);
     } catch (error: any) {
-      updateLogger.error('Failed to quit and install', error);
+      getUpdateLogger().error('Failed to quit and install', error);
       throw error;
     }
   }
@@ -409,9 +524,9 @@ export class AutoUpdateService extends EventEmitter {
       const statePath = path.join(app.getPath('userData'), 'update-state.json');
       await fs.promises.writeFile(statePath, JSON.stringify(state, null, 2));
 
-      updateLogger.info('Application state saved', state);
+      getUpdateLogger().info('Application state saved', state);
     } catch (error: any) {
-      updateLogger.error('Failed to save application state', error);
+      getUpdateLogger().error('Failed to save application state', error);
     }
   }
 
@@ -440,7 +555,7 @@ export class AutoUpdateService extends EventEmitter {
           ? Date.now() - this.updateStartTime
           : undefined;
 
-        updateLogger.logUpdateSuccess(state.lastVersion, currentVersion, installDuration);
+        getUpdateLogger().logUpdateSuccess(state.lastVersion, currentVersion, installDuration);
 
         // Report success
         await this.reportUpdateStatus(UpdateStatus.INSTALLED, {
@@ -458,7 +573,7 @@ export class AutoUpdateService extends EventEmitter {
 
       return wasSuccessful;
     } catch (error: any) {
-      updateLogger.error('Failed to verify update', error);
+      getUpdateLogger().error('Failed to verify update', error);
       return false;
     }
   }
@@ -488,9 +603,9 @@ export class AutoUpdateService extends EventEmitter {
       };
 
       await this.apiClient.reportUpdateStatus(report);
-      updateLogger.debug('Update status reported', { status });
+      getUpdateLogger().debug('Update status reported', { status });
     } catch (error: any) {
-      updateLogger.error('Failed to report update status', error);
+      getUpdateLogger().error('Failed to report update status', error);
       // Don't throw - status reporting failures shouldn't break update flow
     }
   }
@@ -562,7 +677,7 @@ export class AutoUpdateService extends EventEmitter {
       url: feedURL,
       channel
     });
-    updateLogger.info('Update channel changed', { channel, feedURL, deviceId: this.deviceId });
+    getUpdateLogger().info('Update channel changed', { channel, feedURL });
   }
 
   /**
@@ -571,17 +686,17 @@ export class AutoUpdateService extends EventEmitter {
   private handleConfigUpdate(updates: any): void {
     try {
       if (updates.baseUrl) {
-        const newUpdateServerUrl = appConfig.getUpdateServerUrl();
+        const newUpdateServerUrl = getAppConfig().getUpdateServerUrl();
 
         if (!newUpdateServerUrl) {
-          updateLogger.warn('baseUrl changed but updateServerUrl is undefined, skipping update');
+          getUpdateLogger().warn('baseUrl changed but updateServerUrl is undefined, skipping update');
           return;
         }
 
         const oldUpdateServerUrl = this.apiClient.getBaseURL();
 
         if (oldUpdateServerUrl !== newUpdateServerUrl) {
-          updateLogger.info('Update server URL changed, reconfiguring AutoUpdateService', {
+          getUpdateLogger().info('Update server URL changed, reconfiguring AutoUpdateService', {
             oldUrl: oldUpdateServerUrl,
             newUrl: newUpdateServerUrl
           });
@@ -593,21 +708,182 @@ export class AutoUpdateService extends EventEmitter {
           );
 
           // 重新配置 autoUpdater
-          const feedURL = `${newUpdateServerUrl}?deviceId=${this.deviceId}`;
           autoUpdater.setFeedURL({
             provider: 'generic',
-            url: feedURL,
+            url: `${newUpdateServerUrl}?deviceId=${this.deviceId}`,
             channel: this.channel
           });
 
-          updateLogger.info('AutoUpdateService reconfigured with new URL', {
-            feedURL,
+          getUpdateLogger().info('AutoUpdateService reconfigured with new URL', {
+            feedURL: `${newUpdateServerUrl}?deviceId=${this.deviceId}`,
             channel: this.channel
           });
         }
       }
     } catch (error: any) {
-      updateLogger.error('Failed to handle config update in AutoUpdateService', error);
+      getUpdateLogger().error('Failed to handle config update in AutoUpdateService', error);
     }
   }
+
+  /**
+   * 设置热更新事件监听
+   */
+  private setupHotUpdateListeners(): void {
+    if (!this.hotUpdateService) return;
+
+    this.hotUpdateService.on('checking', () => {
+      getUpdateLogger().info('[HotUpdate] Checking for hot updates');
+    });
+
+    this.hotUpdateService.on('available', (updateInfo: CheckUpdateResponse) => {
+      getUpdateLogger().info('[HotUpdate] Hot update available', {
+        version: updateInfo.version,
+        updateType: updateInfo.updateType
+      });
+    });
+
+    this.hotUpdateService.on('not-available', () => {
+      getUpdateLogger().info('[HotUpdate] No hot update available');
+    });
+
+    this.hotUpdateService.on('download-progress', (progress) => {
+      getUpdateLogger().debug('[HotUpdate] Download progress', {
+        percent: progress.percent,
+        transferred: this.formatBytes(progress.transferred),
+        total: this.formatBytes(progress.total)
+      });
+    });
+
+    this.hotUpdateService.on('downloaded', (info) => {
+      getUpdateLogger().info('[HotUpdate] Downloaded', { version: info.version });
+    });
+
+    this.hotUpdateService.on('error', (error) => {
+      getUpdateLogger().error('[HotUpdate] Error', error);
+    });
+  }
+
+  /**
+   * 设置自动启动标志文件
+   * 在热更新完成后重启前调用，用于标记应用在重启后自动启动服务
+   */
+  private setAutoStartFlag(): void {
+    try {
+      const flagPath = path.join(app.getPath('userData'), 'auto-start-after-update.flag');
+      const flagData = {
+        timestamp: Date.now(),
+        version: app.getVersion()
+      };
+
+      fs.writeFileSync(flagPath, JSON.stringify(flagData), 'utf-8');
+      getUpdateLogger().info('[AUTO_START_FLAG] Flag file created', {
+        path: flagPath,
+        data: flagData
+      });
+    } catch (error: any) {
+      getUpdateLogger().error('[AUTO_START_FLAG] Failed to create flag file', {
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * 提示用户重启应用（增强版：支持版本类型和强制更新）
+   * ⚠️ 已修改为自动重启模式：热更新完成后自动重启，无需用户确认
+   */
+  private promptUserToRestart(version: string, updateInfo?: CheckUpdateResponse): void {
+    try {
+      const isForceUpdate = updateInfo?.isForceUpdate || false;
+      const versionChangeType = updateInfo?.versionChangeType || 'patch';
+      const currentVersion = updateInfo?.currentVersion || app.getVersion();
+
+      getUpdateLogger().info('[AUTO_RESTART] Hot update downloaded, preparing auto-restart', {
+        fromVersion: currentVersion,
+        toVersion: version,
+        versionChangeType,
+        isForceUpdate
+      });
+
+      // 1️⃣ 设置自动启动标志文件
+      this.setAutoStartFlag();
+
+      // 2️⃣ 延迟1秒后自动重启（确保标志文件写入完成）
+      setTimeout(() => {
+        getUpdateLogger().info('[AUTO_RESTART] Restarting application...');
+        app.relaunch();
+        app.quit();
+      }, 1000);
+
+    } catch (error: any) {
+      getUpdateLogger().error('[AUTO_RESTART] Failed to restart application', {
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * 显示手动下载通知（用于大版本更新或热更新失败）
+   */
+  private showManualDownloadNotification(updateInfo: CheckUpdateResponse & { downloadUrl?: string }): void {
+    try {
+      const mainWindow = BrowserWindow.getAllWindows()[0];
+
+      if (!mainWindow) {
+        getUpdateLogger().warn('[MANUAL_DOWNLOAD] No main window found');
+        return;
+      }
+
+      const currentVersion = updateInfo.currentVersion || app.getVersion();
+      const newVersion = updateInfo.version;
+      const downloadUrl = updateInfo.downloadUrl || updateInfo.manifest?.fallbackFullUrl;
+
+      const title = '🚀 重大版本更新';
+      const message = `发现新版本 ${newVersion}`;
+      const detail =
+        `当前版本: ${currentVersion}\n` +
+        `新版本: ${newVersion}\n\n` +
+        '检测到重大版本更新，需要手动下载安装。\n\n' +
+        '点击"下载更新"将打开浏览器下载页面。';
+
+      getUpdateLogger().info('[MANUAL_DOWNLOAD] Showing download notification', {
+        currentVersion,
+        newVersion,
+        downloadUrl
+      });
+
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title,
+        message,
+        detail,
+        buttons: ['下载更新', '稍后'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      }).then((result) => {
+        if (result.response === 0) {
+          // 用户选择下载
+          getUpdateLogger().info('[MANUAL_DOWNLOAD] User chose to download');
+
+          if (downloadUrl) {
+            // 打开浏览器下载
+            const { shell } = require('electron');
+            shell.openExternal(downloadUrl).then(() => {
+              getUpdateLogger().info('[MANUAL_DOWNLOAD] Opened download URL in browser', { url: downloadUrl });
+            }).catch((error: any) => {
+              getUpdateLogger().error('[MANUAL_DOWNLOAD] Failed to open download URL', error);
+            });
+          } else {
+            getUpdateLogger().error('[MANUAL_DOWNLOAD] No download URL available');
+            dialog.showErrorBox('错误', '无法获取下载链接，请联系管理员');
+          }
+        } else {
+          getUpdateLogger().info('[MANUAL_DOWNLOAD] User postponed download');
+        }
+      });
+    } catch (error: any) {
+      getUpdateLogger().error('[MANUAL_DOWNLOAD] Failed to show download notification', error);
+    }
+  }
+
 }

@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# EmployeeMonitor macOS 安装脚本生成器
+# EmployeeSafety macOS 安装脚本生成器
 # 为每个打包版本创建一键安装脚本
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RELEASE_DIR="$PROJECT_ROOT/release"
 
 echo "📦 创建 macOS 安装脚本..."
@@ -15,14 +15,14 @@ echo "📦 创建 macOS 安装脚本..."
 cat > "$RELEASE_DIR/安装-AppleSilicon.command" << 'EOF'
 #!/bin/bash
 
-# EmployeeMonitor 一键安装脚本 (Apple Silicon)
+# EmployeeSafety 一键安装脚本 (Apple Silicon)
 
-APP_NAME="EmployeeMonitor.app"
-SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)/EmployeeMonitor-darwin-arm64"
+APP_NAME="EmployeeSafety.app"
+SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)/EmployeeSafety-darwin-arm64"
 DEST_DIR="/Applications"
 
 echo "======================================"
-echo "  EmployeeMonitor 安装向导"
+echo "  EmployeeSafety 安装向导"
 echo "  适用于: Apple Silicon (M1/M2/M3)"
 echo "======================================"
 echo ""
@@ -62,7 +62,7 @@ echo ""
 echo "📱 下一步操作："
 echo ""
 echo "1. 首次打开应用："
-echo "   方法A: 在启动台或应用程序文件夹中找到 EmployeeMonitor"
+echo "   方法A: 在启动台或应用程序文件夹中找到 EmployeeSafety"
 echo "   方法B: 右键点击应用 → 选择'打开' → 确认打开"
 echo ""
 echo "2. 授予必要权限："
@@ -87,14 +87,14 @@ EOF
 cat > "$RELEASE_DIR/安装-Intel.command" << 'EOF'
 #!/bin/bash
 
-# EmployeeMonitor 一键安装脚本 (Intel)
+# EmployeeSafety 一键安装脚本 (Intel)
 
-APP_NAME="EmployeeMonitor.app"
-SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)/EmployeeMonitor-darwin-x64"
+APP_NAME="EmployeeSafety.app"
+SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)/EmployeeSafety-darwin-x64"
 DEST_DIR="/Applications"
 
 echo "======================================"
-echo "  EmployeeMonitor 安装向导"
+echo "  EmployeeSafety 安装向导"
 echo "  适用于: Intel 处理器"
 echo "======================================"
 echo ""
@@ -134,7 +134,7 @@ echo ""
 echo "📱 下一步操作："
 echo ""
 echo "1. 首次打开应用："
-echo "   方法A: 在启动台或应用程序文件夹中找到 EmployeeMonitor"
+echo "   方法A: 在启动台或应用程序文件夹中找到 EmployeeSafety"
 echo "   方法B: 右键点击应用 → 选择'打开' → 确认打开"
 echo ""
 echo "2. 授予必要权限："
